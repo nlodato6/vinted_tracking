@@ -8,6 +8,7 @@ from rich.table import Table
 from src.config import settings
 from src.scraper import interactive_login, verify_session, scrape_closet_listings, scrape_vinted_orders
 from src.sheets import GoogleSheetsClient, initialize_all_tabs, SheetsSyncEngine
+from src.notifications import notify_auth_failure, notify_auth_success
 
 app = typer.Typer(help="Vinted Automated Sales & Inventory Tracking CLI")
 console = Console()
@@ -47,6 +48,7 @@ def upload_session():
             )
         console.print("[bold green]✅ Successfully uploaded VINTED_STORAGE_STATE to GitHub![/bold green]")
         console.print("[dim]GitHub Actions can now run scheduled syncs in the cloud with your laptop closed.[/dim]\n")
+        notify_auth_success()
     except Exception as e:
         console.print(f"[bold red]❌ Error uploading to GitHub: {e}[/bold red]")
         raise typer.Exit(code=1)
@@ -177,6 +179,12 @@ def sync(
     """
     console.print(f"\n[bold cyan]🔄 Initiating manual sync: type='{sync_type}'...[/bold cyan]")
 
+    if sync_type in ("listings", "sales", "all") and not settings.full_storage_state_path.exists():
+        console.print("[bold red]❌ No saved session file found at .session/vinted_state.json.[/bold red]")
+        console.print("[yellow]Please run 'python -m src.cli login' to authenticate.[/yellow]")
+        notify_auth_failure("Missing session storage state file (.session/vinted_state.json)")
+        raise typer.Exit(code=1)
+
     async def _execute():
         client = GoogleSheetsClient()
         engine = SheetsSyncEngine(client)
@@ -198,6 +206,7 @@ def sync(
             lot_res = engine.sync_lots()
             console.print(f"[green]✔ Inventory Lots synced: {lot_res['total_lots']} lots tracked ({lot_res['completed_lots']} completed, {lot_res['active_lots']} active).[/green]")
 
+        notify_auth_success()
         console.print("\n[bold green]🎉 Sync finished successfully![/bold green]\n")
 
     try:

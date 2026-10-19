@@ -1,10 +1,13 @@
+from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 from src.server import app
 
 client = TestClient(app)
 
 
-def test_health_check():
+@patch("src.server.verify_session", new_callable=AsyncMock)
+def test_health_check(mock_verify):
+    mock_verify.return_value = True
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
@@ -17,13 +20,15 @@ def test_sync_trigger_invalid_type():
     assert response.status_code == 400
 
 
-def test_sync_trigger_valid():
+@patch("src.server.run_sync_task", new_callable=AsyncMock)
+def test_sync_trigger_valid(mock_sync):
     response = client.post("/sync", json={"sync_type": "listings"})
     assert response.status_code == 200
     assert response.json()["status"] == "queued"
 
 
-def test_email_webhook_sale_detection():
+@patch("src.server.run_sync_task", new_callable=AsyncMock)
+def test_email_webhook_sale_detection(mock_sync):
     payload = {
         "subject": "You've made a sale: Vintage Jacket",
         "body": "Congratulations on your sale! The buyer has paid.",

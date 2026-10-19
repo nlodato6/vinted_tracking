@@ -10,6 +10,9 @@ from src.scraper.browser import get_browser_context, human_delay
 console = Console()
 
 
+from src.notifications import notify_auth_failure, notify_auth_success
+
+
 async def interactive_login():
     """
     Launches an interactive (headed) browser session for the user to log in
@@ -40,6 +43,7 @@ async def interactive_login():
         await context.storage_state(path=str(target_path))
         console.print(f"[bold green]✅ Session successfully saved to {target_path}![/bold green]")
         console.print("[dim]Subsequent background runs will now execute headlessly using this authenticated session.[/dim]\n")
+        notify_auth_success()
 
     except Exception as e:
         console.print(f"[bold red]❌ Error during interactive login: {e}[/bold red]")
@@ -54,6 +58,7 @@ async def verify_session() -> bool:
     """
     if not settings.full_storage_state_path.exists():
         console.print("[yellow]⚠️ No saved session found. Please run 'python -m src.cli login' first.[/yellow]")
+        notify_auth_failure("No saved Vinted session state file found (.session/vinted_state.json)")
         return False
 
     context = await get_browser_context(headless=True, use_storage_state=True)
@@ -66,12 +71,15 @@ async def verify_session() -> bool:
         current_url = page.url
         if "login" in current_url or "auth" in current_url:
             console.print("[red]❌ Saved session has expired or is invalid.[/red]")
+            notify_auth_failure("Vinted session redirected to login page (session expired)")
             return False
 
         console.print("[green]✅ Authenticated Vinted session is active and valid.[/green]")
+        notify_auth_success()
         return True
     except Exception as e:
         console.print(f"[red]❌ Session verification failed: {e}[/red]")
+        notify_auth_failure(f"Session verification exception: {e}")
         return False
     finally:
         await context.close()

@@ -148,10 +148,26 @@ Runs a periodic reconciliation every `SYNC_INTERVAL_HOURS` (default: 6 hours).
 
 ---
 
+## 🚨 Automated Authentication Alerts & Recovery
+
+When your Vinted authentication session expires or requires verification:
+1. **Google Sheets Banner Alert**: Row 2 of `Analytics_Dashboard` turns into a coral red alert banner (`🔴 AUTHENTICATION REQUIRED`) with error context and re-login instructions.
+2. **GitHub Issue & Push Notification**: An issue titled `⚠️ Vinted Authentication Expired — Re-login Required` is automatically created on your repository (triggering email and mobile push notifications to you). If multiple runs fail, it adds update timestamps without duplicate issues.
+3. **One-Step Resolution**:
+   ```bash
+   # 1. Log in via browser
+   python -m src.cli login
+   # 2. Upload updated token to GitHub Secrets
+   python -m src.cli upload-session
+   ```
+   Once uploaded, the Google Sheet status banner automatically turns back to soft green (`🟢 SYSTEM STATUS: Active & Authenticated`) and the GitHub Issue is automatically commented and closed!
+
+---
+
 ## 🧪 Testing
 
 Run the test suite:
 ```bash
 pytest -v
 ```
-All 11 unit and integration tests validate cost allocation formulas, price parsing, Vinted ID extraction, and webhook alert triggers.
+All unit and integration tests validate cost allocation formulas, price parsing, Vinted ID extraction, webhook alert triggers, and authentication notification dispatchers.

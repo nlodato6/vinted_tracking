@@ -22,6 +22,9 @@ jobs:
     name: Sync Vinted to Google Sheets
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      issues: write
+      contents: read
 
     steps:
       - name: Checkout Code
@@ -70,6 +73,9 @@ jobs:
           EOF
 
       - name: Execute Vinted Sync Pipeline
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           SYNC_TARGET="${{ inputs.sync_type || 'all' }}"
           echo "Starting sync job with type: $SYNC_TARGET"

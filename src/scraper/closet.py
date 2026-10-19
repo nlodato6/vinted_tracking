@@ -8,6 +8,7 @@ from playwright.async_api import BrowserContext, Page
 from src.config import settings
 from src.models import ItemListing
 from src.scraper.browser import get_browser_context, human_delay
+from src.notifications import notify_auth_failure
 
 console = Console()
 
@@ -118,6 +119,11 @@ async def scrape_closet_listings(username: Optional[str] = None) -> List[ItemLis
         console.print(f"[dim]Navigating to {target_url}...[/dim]")
         await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
         await human_delay(2.0, 3.5)
+
+        if "login" in page.url or "auth" in page.url:
+            console.print("[bold red]❌ Authentication required. Please run 'python -m src.cli login' to refresh session.[/bold red]")
+            notify_auth_failure("Redirected to login while accessing closet listings")
+            return []
 
         # Scroll to load dynamically rendered items (infinite scroll)
         for _ in range(3):

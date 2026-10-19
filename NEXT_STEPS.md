@@ -114,17 +114,33 @@ Since your Vinted notifications go to `tlodato24@gmail.com`, you can trigger ins
 
 ---
 
+## 🚨 Automated Authentication Alerts & Self-Healing
+
+If Vinted prompts for verification or your session expires:
+1. **Google Sheets Banner**: Row 2 of `Analytics_Dashboard` prominently switches to a coral red alert banner (`🔴 AUTHENTICATION REQUIRED`) with error details and clear recovery instructions.
+2. **GitHub Issue & Push Notification**: GitHub automatically opens an issue (`⚠️ Vinted Authentication Expired — Re-login Required`) on your repository, triggering email and mobile notifications.
+3. **One-Command Recovery**:
+   ```bash
+   python -m src.cli login
+   python -m src.cli upload-session
+   ```
+   Uploading your refreshed token automatically resets the Google Sheet banner to mint green (`🟢 SYSTEM STATUS: Active & Authenticated`) and closes the GitHub Issue!
+
+---
+
 ## 🛠️ CLI Quick Reference Cheat Sheet
 
 | Command | What It Does |
 | :--- | :--- |
 | `python -m src.cli status` | Displays Google Sheets connection, session status, and config |
 | `python -m src.cli login` | Opens browser for 1-time Vinted login session capture |
+| `python -m src.cli upload-session` | Uploads session to GitHub Secrets and resets auth status |
 | `python -m src.cli check-session` | Checks if your saved Vinted login token is still valid |
 | `python -m src.cli sync --type listings` | Refreshes asking prices, favorites, and new listings |
 | `python -m src.cli sync --type sales` | Scrapes sold orders and calculates net payouts |
-| `python -m src.cli sync --type all` | Full sync of both listings and sales |
+| `python -m src.cli sync --type lots` | Recalculates unit costs, processed counts, and completion statuses |
+| `python -m src.cli sync --type all` | Full sync of listings, sales, and lots |
 | `python -m src.cli log-sale --sku SKU-1001 --price 45` | Logs external sale (e.g. FB Marketplace) and moves item to `Sold_Items` |
 | `python -m src.cli serve --port 8000` | Starts the webhook listener server |
 | `python -m src.cli scheduler` | Starts background automatic periodic sync daemon |
-| `pytest -v` | Runs all 23 verification unit tests |
+| `pytest -v` | Runs all 34 verification unit tests |

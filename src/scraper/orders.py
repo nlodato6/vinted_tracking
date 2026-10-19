@@ -9,6 +9,7 @@ from src.config import settings
 from src.models import SalesOrder
 from src.scraper.browser import get_browser_context, human_delay
 from src.scraper.closet import parse_price
+from src.notifications import notify_auth_failure
 
 console = Console()
 
@@ -33,8 +34,9 @@ async def scrape_vinted_orders() -> List[SalesOrder]:
         await human_delay(2.0, 3.0)
 
         # If redirected to login, alert session expiration
-        if "login" in page.url:
+        if "login" in page.url or "auth" in page.url:
             console.print("[bold red]❌ Authentication required. Please run 'python -m src.cli login' to refresh session.[/bold red]")
+            notify_auth_failure("Redirected to login while accessing orders")
             return []
 
         # Find order cards
