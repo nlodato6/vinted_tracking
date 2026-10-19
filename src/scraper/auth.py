@@ -55,18 +55,40 @@ def parse_and_save_cookies(raw_text: str, target_domain: str = "vinted.com") -> 
     for c in cookies:
         if not isinstance(c, dict) or "name" not in c or "value" not in c:
             continue
-        domain = c.get("domain", f".{target_domain}")
-        if not domain.startswith("."):
+
+        # Playwright strictly requires SameSite to be "Strict", "Lax", or "None"
+        raw_same_site = str(c.get("sameSite") or "").lower()
+        if raw_same_site in ["strict"]:
+            same_site = "Strict"
+        elif raw_same_site in ["none", "no_restriction"]:
+            same_site = "None"
+        else:
+            same_site = "Lax"
+
+        # Expiration handling for both standard "expires" and Cookie-Editor "expirationDate"
+        exp_val = c.get("expires", c.get("expirationDate", -1))
+        try:
+            expires = float(exp_val) if exp_val is not None else -1.0
+        except (ValueError, TypeError):
+            expires = -1.0
+
+        domain = str(c.get("domain") or f".{target_domain}")
+        if not domain.startswith(".") and not domain.startswith("www.") and "localhost" not in domain:
             domain = f".{domain}"
+
+        secure = bool(c.get("secure", False))
+        if same_site == "None":
+            secure = True
+
         normalized_cookies.append({
             "name": str(c["name"]),
             "value": str(c["value"]),
             "domain": domain,
             "path": str(c.get("path", "/")),
-            "expires": float(c.get("expires", -1)),
+            "expires": expires,
             "httpOnly": bool(c.get("httpOnly", False)),
-            "secure": bool(c.get("secure", True)),
-            "sameSite": str(c.get("sameSite", "Lax")).capitalize(),
+            "secure": secure,
+            "sameSite": same_site,
         })
 
     storage_state = {
@@ -152,14 +174,11 @@ async def verify_session() -> bool:
             notify_auth_failure("Vinted session redirected to login/signup (session expired)")
             return False
 
-        # Check for presence of login/signup prompt vs authenticated profile
-        content = await page.content()
-        is_guest = any(
-            marker in content.lower()
-            for marker in ["signup/select_type", "sign up | log in", "sign in with google", "member/signup"]
-        )
+        # Check for authenticated indicators (e.g. Inbox, User Profile Menu)
+        inbox_elem = await page.query_selector("a[href='/inbox'], a[href*='/inbox']")
+        user_menu = await page.query_selector("[data-testid*='user-menu'], [data-testid*='profile'], a[href*='/member/']")
 
-        if is_guest:
+        if not inbox_elem and not user_menu:
             console.print("[red]❌ Session file does not contain active login credentials.[/red]")
             notify_auth_failure("Session cookies present but user is not logged in")
             return False

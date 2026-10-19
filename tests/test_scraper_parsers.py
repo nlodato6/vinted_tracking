@@ -93,3 +93,45 @@ def test_parse_and_save_cookies_header_string(tmp_path, monkeypatch):
     names = {c["name"] for c in saved_data["cookies"]}
     assert names == {"v_sid", "access_token_web", "anon_id"}
 
+
+def test_parse_and_save_cookies_cookie_editor_format(tmp_path, monkeypatch):
+    import json
+    from src.scraper.auth import parse_and_save_cookies
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "session_dir", str(tmp_path))
+
+    cookie_editor_payload = json.dumps([
+        {
+            "name": "__cf_bm",
+            "value": "cf_val_123",
+            "domain": ".vinted.com",
+            "expirationDate": 1792453209.22,
+            "sameSite": "no_restriction",
+            "secure": True,
+            "httpOnly": True,
+        },
+        {
+            "name": "v_uid",
+            "value": "12345",
+            "domain": "www.vinted.com",
+            "sameSite": None,
+            "secure": False,
+        }
+    ])
+
+    saved_path = parse_and_save_cookies(cookie_editor_payload)
+    saved_data = json.loads(saved_path.read_text())
+    cookies = saved_data["cookies"]
+    assert len(cookies) == 2
+    # Verify no_restriction mapped to None
+    cf_cookie = next(c for c in cookies if c["name"] == "__cf_bm")
+    assert cf_cookie["sameSite"] == "None"
+    assert cf_cookie["expires"] == 1792453209.22
+    assert cf_cookie["secure"] is True
+
+    # Verify None sameSite mapped to Lax
+    uid_cookie = next(c for c in cookies if c["name"] == "v_uid")
+    assert uid_cookie["sameSite"] == "Lax"
+
+
