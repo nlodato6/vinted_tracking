@@ -1,0 +1,76 @@
+name: Vinted Automated Cloud Sync
+
+on:
+  schedule:
+    # Runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    # Allows manual trigger anytime from GitHub web UI or mobile app
+    inputs:
+      sync_type:
+        description: 'Type of sync to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - listings
+          - sales
+
+jobs:
+  sync:
+    name: Sync Vinted to Google Sheets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright & Browser Dependencies
+        run: |
+          playwright install --with-deps chromium
+
+      - name: Configure Credentials & Environment
+        env:
+          GOOGLE_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          VINTED_SESSION: ${{ secrets.VINTED_STORAGE_STATE }}
+          SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          V_USER: ${{ secrets.VINTED_USERNAME }}
+          V_DOMAIN: ${{ secrets.VINTED_DOMAIN }}
+        run: |
+          # Write service account credentials.json
+          echo "$GOOGLE_KEY" > credentials.json
+
+          # Write session state if present
+          mkdir -p .session
+          if [ -n "$VINTED_SESSION" ]; then
+            echo "$VINTED_SESSION" > .session/vinted_state.json
+          fi
+
+          # Create .env
+          cat << EOF > .env
+          GOOGLE_SERVICE_ACCOUNT_FILE=credentials.json
+          GOOGLE_SHEET_ID=${SHEET_ID}
+          VINTED_DOMAIN=${V_DOMAIN:-vinted.com}
+          VINTED_USERNAME=${V_USER}
+          HEADLESS=true
+          SESSION_DIR=.session
+          EOF
+
+      - name: Execute Vinted Sync Pipeline
+        run: |
+          SYNC_TARGET="${{ inputs.sync_type || 'all' }}"
+          echo "Starting sync job with type: $SYNC_TARGET"
+          python -m src.cli sync --type "$SYNC_TARGET"

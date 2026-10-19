@@ -28,6 +28,31 @@ def check_session():
 
 
 @app.command()
+def upload_session():
+    """Upload local Vinted session tokens to GitHub Secrets for cloud automation."""
+    import subprocess
+    session_path = settings.full_storage_state_path
+    if not session_path.exists():
+        console.print("[bold red]❌ No local session file found at .session/vinted_state.json.[/bold red]")
+        console.print("[yellow]Please run 'python -m src.cli login' first to authenticate.[/yellow]")
+        raise typer.Exit(code=1)
+
+    console.print("\n[bold cyan]☁️ Uploading Vinted session to GitHub Secrets...[/bold cyan]")
+    try:
+        with open(session_path, "rb") as f:
+            subprocess.run(
+                ["gh", "secret", "set", "VINTED_STORAGE_STATE", "--repo", "nlodato6/vinted_tracking"],
+                stdin=f,
+                check=True,
+            )
+        console.print("[bold green]✅ Successfully uploaded VINTED_STORAGE_STATE to GitHub![/bold green]")
+        console.print("[dim]GitHub Actions can now run scheduled syncs in the cloud with your laptop closed.[/dim]\n")
+    except Exception as e:
+        console.print(f"[bold red]❌ Error uploading to GitHub: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def init_sheet():
     """Provision Google Spreadsheet with all 5 tabs, formulas, and KPI dashboard."""
     console.print("\n[bold cyan]📊 Connecting to Google Sheets...[/bold cyan]")
