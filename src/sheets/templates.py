@@ -161,7 +161,7 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
         ["Net Payout Revenue", "=IFERROR(SUM(Sales_Log!K2:K), 0)", "Actual balance received", "Total Supplies Invested", "=IFERROR(SUM(Shipping_Supplies!F2:F), 0)", "Packaging & supplies spend", "", ""],
         ["Cost of Goods Sold (COGS)", "=IFERROR(SUM(Sales_Log!L2:L), 0)", "Allocated lot cost of sold items", "Active Listed Inventory Value", '=IFERROR(SUMIF(Item_Listings!M:M, "Listed", Item_Listings!H:H), 0)', "Current asking price sum", "", ""],
         ["Packaging Expenses Allocated", "=IFERROR(SUM(Sales_Log!M2:M), 0)", "Supplies deducted per sale", "Active Articles in Stock", '=IFERROR(COUNTIF(Item_Listings!M:M, "Listed"), 0)', "Garments currently for sale", "", ""],
-        ["Total Net Profit Realized", "=IFERROR(SUM(Sales_Log!N2:N), 0)", "Net Payout - COGS - Packaging", "Total Articles Sold", '=IFERROR(COUNTA(Sales_Log!A2:A)-1, 0)', "Garments successfully sold", "", ""],
+        ["Total Net Profit Realized", "=IFERROR(SUM(Sales_Log!N2:N), 0)", "Net Payout - COGS - Packaging", "Total Articles Sold", '=IFERROR(COUNTA(Sales_Log!A2:A), 0)', "Garments successfully sold", "", ""],
         ["Overall Net Margin %", '=IF(B5>0, B9/B5, 0)', "Net Profit ÷ Gross Sales", "Avg Supply Cost / Package", '=IFERROR(Shipping_Supplies!H2, 0.75)', "Dynamic per-package cost", "", ""],
         ["", "", "", "", "", "", "", ""],
 

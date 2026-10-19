@@ -53,6 +53,25 @@ def upload_session():
 
 
 @app.command()
+def clear_sample_data():
+    """Remove the initial placeholder demo rows so your spreadsheet starts 100% clean."""
+    console.print("\n[bold cyan]🧹 Clearing demo placeholder rows from Google Sheets...[/bold cyan]")
+    try:
+        client = GoogleSheetsClient()
+        sh = client.get_spreadsheet()
+        for tab_name in ["Inventory_Lots", "Item_Listings", "Sales_Log"]:
+            ws = sh.worksheet(tab_name)
+            rows = ws.get_all_values()
+            if len(rows) > 1:
+                ws.delete_rows(2, len(rows))
+                console.print(f"[dim]Cleaned demo rows from {tab_name}[/dim]")
+        console.print("[bold green]✅ All demo rows removed! Spreadsheet is now fresh and ready for your real inventory.[/bold green]\n")
+    except Exception as e:
+        console.print(f"[bold red]❌ Error clearing sample rows: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def init_sheet():
     """Provision Google Spreadsheet with all 5 tabs, formulas, and KPI dashboard."""
     console.print("\n[bold cyan]📊 Connecting to Google Sheets...[/bold cyan]")
