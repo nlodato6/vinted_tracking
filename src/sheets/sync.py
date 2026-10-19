@@ -692,6 +692,33 @@ class SheetsSyncEngine:
 
         synced_count = 0
         max_sku_num = self.get_max_sku_num()
+        batch_new_rows = []
+        batch_cell_updates = []
+        cur_sold_count = len(sold_rows)
+
+        # Pre-index existing Sold_Items by SKU and Title to avoid repeated lookups
+        sold_by_sku: Dict[str, int] = {}
+        sold_by_title: Dict[str, int] = {}
+        for r_i, sr in enumerate(sold_rows[1:], start=2):
+            if len(sr) > sku_idx and sr[sku_idx].strip():
+                sold_by_sku[sr[sku_idx].strip().upper()] = r_i
+            if len(sr) > title_idx and sr[title_idx].strip():
+                sold_by_title[sr[title_idx].strip().lower()] = r_i
+
+        # Pre-index active listings ONCE to avoid repeated get_all_values() in move_listing_to_sold
+        ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+        listings_rows = ws_listings.get_all_values()
+        active_sku_to_row: Dict[str, int] = {}
+        active_title_to_row: Dict[str, int] = {}
+        if len(listings_rows) > 1:
+            l_headers = listings_rows[0]
+            l_sku_idx = l_headers.index("Item_SKU") if "Item_SKU" in l_headers else 0
+            l_title_idx = l_headers.index("Title") if "Title" in l_headers else 2
+            for r_idx, lr in enumerate(listings_rows[1:], start=2):
+                if len(lr) > l_sku_idx and lr[l_sku_idx].strip():
+                    active_sku_to_row[lr[l_sku_idx].strip().upper()] = r_idx
+                if len(lr) > l_title_idx and lr[l_title_idx].strip():
+                    active_title_to_row[lr[l_title_idx].strip().lower()] = r_idx
 
         for order in scraped_orders:
             if order.order_id.strip() in existing_order_ids:
@@ -699,47 +726,49 @@ class SheetsSyncEngine:
 
             sale_date_str = order.sale_date.strftime("%Y-%m-%d") if order.sale_date else datetime.now().strftime("%Y-%m-%d")
             clean_title = order.item_title.strip()
+            clean_low = clean_title.lower()
 
-            # 1. Attempt to move matching active listing to Sold_Items
-            moved_item = self.move_listing_to_sold(
-                sku=order.item_sku,
-                title=clean_title,
-                status="Sold",
-                sold_price=order.sold_price,
-                sale_date=sale_date_str,
-                platform=order.platform or "Vinted",
-                order_id=order.order_id,
+            # 1. Attempt to move matching active listing to Sold_Items ONLY if present in active listings
+            has_active_match = (
+                (order.item_sku and order.item_sku.strip().upper() in active_sku_to_row)
+                or (clean_low in active_title_to_row)
             )
 
-            if moved_item:
+            if has_active_match:
+                moved_item = self.move_listing_to_sold(
+                    sku=order.item_sku,
+                    title=clean_title,
+                    status="Sold",
+                    sold_price=order.sold_price,
+                    sale_date=sale_date_str,
+                    platform=order.platform or "Vinted",
+                    order_id=order.order_id,
+                )
+                if moved_item:
+                    synced_count += 1
+                    existing_order_ids.add(order.order_id.strip())
+                    continue
+
+            # 2. Check if already in Sold_Items, queue cell update
+            matched_r_i = None
+            if order.item_sku and order.item_sku.strip().upper() in sold_by_sku:
+                matched_r_i = sold_by_sku[order.item_sku.strip().upper()]
+            elif clean_low in sold_by_title:
+                matched_r_i = sold_by_title[clean_low]
+
+            if matched_r_i:
+                col_sp = chr(ord('A') + sp_idx)
+                col_ord = chr(ord('A') + order_id_idx)
+                batch_cell_updates.append({"range": f"{col_sp}{matched_r_i}", "values": [[order.sold_price]]})
+                batch_cell_updates.append({"range": f"{col_ord}{matched_r_i}", "values": [[order.order_id]]})
                 synced_count += 1
                 existing_order_ids.add(order.order_id.strip())
                 continue
 
-            # 2. Check if already in Sold_Items, update Order_ID and Sold_Price
-            matched = False
-            cur_sold_rows = ws_sold.get_all_values()
-            clean_low = clean_title.lower()
-            for r_i, sr in enumerate(cur_sold_rows[1:], start=2):
-                sr_sku = sr[sku_idx].strip().upper() if len(sr) > sku_idx else ""
-                sr_title = sr[title_idx].strip().lower() if len(sr) > title_idx else ""
-                if (order.item_sku and sr_sku == order.item_sku.strip().upper()) or (clean_low and sr_title == clean_low):
-                    col_sp = chr(ord('A') + sp_idx)
-                    col_ord = chr(ord('A') + order_id_idx)
-                    ws_sold.update_acell(f"{col_sp}{r_i}", order.sold_price)
-                    ws_sold.update_acell(f"{col_ord}{r_i}", order.order_id)
-                    matched = True
-                    synced_count += 1
-                    existing_order_ids.add(order.order_id.strip())
-                    break
-
-            if matched:
-                continue
-
-            # 3. If neither active listing nor existing sold item found, create directly in Sold_Items
+            # 3. If neither active listing nor existing sold item found, queue for batch append
             max_sku_num += 1
             new_sku = order.item_sku or f"SKU-{max_sku_num}"
-            next_row = len(ws_sold.get_all_values()) + 1
+            next_row = cur_sold_count + len(batch_new_rows) + 1
 
             new_sold_data = [
                 new_sku,                                                      # A: Item_SKU
@@ -768,7 +797,14 @@ class SheetsSyncEngine:
                 "Sold",                                                       # X: Status
                 sale_date_str,                                                # Y: Date_Listed
             ]
-            ws_sold.append_row(new_sold_data, value_input_option="USER_ENTERED")
+            batch_new_rows.append(new_sold_data)
+            synced_count += 1
+            existing_order_ids.add(order.order_id.strip())
+
+        if batch_cell_updates:
+            ws_sold.batch_update(batch_cell_updates, value_input_option="USER_ENTERED")
+        if batch_new_rows:
+            ws_sold.append_rows(batch_new_rows, value_input_option="USER_ENTERED")
             synced_count += 1
             existing_order_ids.add(order.order_id.strip())
 
