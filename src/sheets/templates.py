@@ -124,6 +124,7 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
     if len(ws_sales.col_values(1)) <= 1:
         sample_sale = [
             "ORD-982104",
+            "Vinted",
             "SKU-1001",
             "Vintage Carhartt Canvas Jacket",
             "Carhartt",
@@ -133,68 +134,76 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
             55.00,
             0.00,
             55.00,
-            '=IFERROR(VLOOKUP(B2, Item_Listings!A:F, 6, FALSE), 0)',
-            '=Shipping_Supplies!$H$2',
-            '=J2-K2-L2',
-            '=IF(H2>0, M2/H2, 0)',
+            '=IFERROR(VLOOKUP(C2, Item_Listings!A:F, 6, FALSE), 0)',
+            '=IF(B2="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)',
+            '=K2-L2-M2',
+            '=IF(I2>0, N2/I2, 0)',
             "Completed",
         ]
         ws_sales.append_row(sample_sale, value_input_option="USER_ENTERED")
 
     # 5. Analytics_Dashboard
     if TAB_ANALYTICS_DASHBOARD not in existing_worksheets:
-        ws_dash = sh.add_worksheet(title=TAB_ANALYTICS_DASHBOARD, rows=55, cols=10)
+        ws_dash = sh.add_worksheet(title=TAB_ANALYTICS_DASHBOARD, rows=65, cols=10)
     else:
         ws_dash = existing_worksheets[TAB_ANALYTICS_DASHBOARD]
 
-    # Populate Dashboard Layout with Financials, Favorites Analytics, and Category Performance
+    # Populate Dashboard Layout with Financials, Favorites Analytics, Categories & Platforms
     dashboard_layout = [
         # Row 1-2: Title
-        ["📊 VINTED FINANCIAL, FAVORITES & CLOTHING PERFORMANCE DASHBOARD", "", "", "", "", "", "", ""],
+        ["📊 OMNICHANNEL RESELLING DASHBOARD (VINTED & FB MARKETPLACE)", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", ""],
 
         # Section 1: Financial Performance (Rows 3-10)
         ["💵 FINANCIAL PERFORMANCE", "", "", "📦 INVENTORY & EXPENSES", "", "", "", ""],
         ["Metric", "Value", "Notes", "Metric", "Value", "Notes", "", ""],
-        ["Gross Sales Revenue", "=IFERROR(SUM(Sales_Log!H2:H), 0)", "Gross buyer spend", "Total Inventory Invested", "=IFERROR(SUM(Inventory_Lots!D2:D), 0)", "Total spent on hauls", "", ""],
-        ["Net Payout Revenue", "=IFERROR(SUM(Sales_Log!J2:J), 0)", "Actual balance received", "Total Supplies Invested", "=IFERROR(SUM(Shipping_Supplies!F2:F), 0)", "Packaging & supplies spend", "", ""],
-        ["Cost of Goods Sold (COGS)", "=IFERROR(SUM(Sales_Log!K2:K), 0)", "Allocated lot cost of sold items", "Active Listed Inventory Value", '=IFERROR(SUMIF(Item_Listings!M:M, "Listed", Item_Listings!H:H), 0)', "Current asking price sum", "", ""],
-        ["Packaging Expenses Allocated", "=IFERROR(SUM(Sales_Log!L2:L), 0)", "Supplies deducted per sale", "Active Articles in Stock", '=IFERROR(COUNTIF(Item_Listings!M:M, "Listed"), 0)', "Garments currently for sale", "", ""],
-        ["Total Net Profit Realized", "=IFERROR(SUM(Sales_Log!M2:M), 0)", "Net Payout - COGS - Packaging", "Total Articles Sold", '=IFERROR(COUNTA(Sales_Log!A2:A)-1, 0)', "Garments successfully sold", "", ""],
+        ["Gross Sales Revenue", "=IFERROR(SUM(Sales_Log!I2:I), 0)", "Gross buyer spend across all channels", "Total Inventory Invested", "=IFERROR(SUM(Inventory_Lots!D2:D), 0)", "Total spent on hauls", "", ""],
+        ["Net Payout Revenue", "=IFERROR(SUM(Sales_Log!K2:K), 0)", "Actual balance received", "Total Supplies Invested", "=IFERROR(SUM(Shipping_Supplies!F2:F), 0)", "Packaging & supplies spend", "", ""],
+        ["Cost of Goods Sold (COGS)", "=IFERROR(SUM(Sales_Log!L2:L), 0)", "Allocated lot cost of sold items", "Active Listed Inventory Value", '=IFERROR(SUMIF(Item_Listings!M:M, "Listed", Item_Listings!H:H), 0)', "Current asking price sum", "", ""],
+        ["Packaging Expenses Allocated", "=IFERROR(SUM(Sales_Log!M2:M), 0)", "Supplies deducted per sale", "Active Articles in Stock", '=IFERROR(COUNTIF(Item_Listings!M:M, "Listed"), 0)', "Garments currently for sale", "", ""],
+        ["Total Net Profit Realized", "=IFERROR(SUM(Sales_Log!N2:N), 0)", "Net Payout - COGS - Packaging", "Total Articles Sold", '=IFERROR(COUNTA(Sales_Log!A2:A)-1, 0)', "Garments successfully sold", "", ""],
         ["Overall Net Margin %", '=IF(B5>0, B9/B5, 0)', "Net Profit ÷ Gross Sales", "Avg Supply Cost / Package", '=IFERROR(Shipping_Supplies!H2, 0.75)', "Dynamic per-package cost", "", ""],
         ["", "", "", "", "", "", "", ""],
 
         # Section 2: Favorites & Conversion Analytics (Rows 12-18)
         ["❤️ FAVORITES & BUYER INTENT CONVERSION", "", "", "", "", "", "", ""],
         ["Metric", "Value", "Benchmark / Interpretation", "", "", "", "", ""],
-        ["Avg Favorites on Sold Items", "=IFERROR(AVERAGE(Sales_Log!F2:F), 0)", "Average likes an item accumulates before selling", "", "", "", "", ""],
+        ["Avg Favorites on Sold Items", "=IFERROR(AVERAGE(Sales_Log!G2:G), 0)", "Average likes an item accumulates before selling", "", "", "", "", ""],
         ["Avg Favorites on Active Items", '=IFERROR(AVERAGEIF(Item_Listings!M:M, "Listed", Item_Listings!I:I), 0)', "Average likes across current closet inventory", "", "", "", "", ""],
         ["High-Interest Active Garments (≥5 Favs)", '=IFERROR(COUNTIFS(Item_Listings!M:M, "Listed", Item_Listings!I:I, ">=5"), 0)', "Hot items ready to sell; send discount offers!", "", "", "", "", ""],
-        ["Favorited Item Conversion Rate %", '=IFERROR(COUNTIF(Sales_Log!F2:F, ">=1") / (COUNTIF(Sales_Log!F2:F, ">=1") + COUNTIFS(Item_Listings!M:M, "Listed", Item_Listings!I:I, ">=1")), 0)', "Proportion of favorited items that resulted in a sale", "", "", "", ""],
+        ["Favorited Item Conversion Rate %", '=IFERROR(COUNTIF(Sales_Log!G2:G, ">=1") / (COUNTIF(Sales_Log!G2:G, ">=1") + COUNTIFS(Item_Listings!M:M, "Listed", Item_Listings!I:I, ">=1")), 0)', "Proportion of favorited items that resulted in a sale", "", "", "", ""],
         ["", "", "", "", "", "", "", ""],
 
         # Section 3: Clothing Category Performance Leaderboard (Rows 20-30)
         ["👔 CLOTHING CATEGORY PERFORMANCE: WHAT SELLS BEST & FOR THE MOST MONEY", "", "", "", "", "", "", ""],
         ["Category", "Total Listed", "Units Sold", "Sell-Through %", "Avg Sale Price ($)", "Total Revenue ($)", "Avg Net Profit ($)", "Avg Favorites"],
-        ["Outerwear", '=COUNTIF(Item_Listings!E:E, A22)', '=COUNTIF(Sales_Log!E:E, A22)', '=IF(B22>0, C22/B22, 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A22, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A22, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A22, Sales_Log!M:M), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A22, Sales_Log!F:F), 0)'],
-        ["Sweaters & Hoodies", '=COUNTIF(Item_Listings!E:E, A23)', '=COUNTIF(Sales_Log!E:E, A23)', '=IF(B23>0, C23/B23, 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A23, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A23, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A23, Sales_Log!M:M), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A23, Sales_Log!F:F), 0)'],
-        ["Tops & Shirts", '=COUNTIF(Item_Listings!E:E, A24)', '=COUNTIF(Sales_Log!E:E, A24)', '=IF(B24>0, C24/B24, 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A24, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A24, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A24, Sales_Log!M:M), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A24, Sales_Log!F:F), 0)'],
-        ["Pants & Jeans", '=COUNTIF(Item_Listings!E:E, A25)', '=COUNTIF(Sales_Log!E:E, A25)', '=IF(B25>0, C25/B25, 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A25, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A25, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A25, Sales_Log!M:M), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A25, Sales_Log!F:F), 0)'],
-        ["Footwear", '=COUNTIF(Item_Listings!E:E, A26)', '=COUNTIF(Sales_Log!E:E, A26)', '=IF(B26>0, C26/B26, 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A26, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A26, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A26, Sales_Log!M:M), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A26, Sales_Log!F:F), 0)'],
-        ["Accessories", '=COUNTIF(Item_Listings!E:E, A27)', '=COUNTIF(Sales_Log!E:E, A27)', '=IF(B27>0, C27/B27, 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A27, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A27, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A27, Sales_Log!M:M), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A27, Sales_Log!F:F), 0)'],
-        ["Dresses & Skirts", '=COUNTIF(Item_Listings!E:E, A28)', '=COUNTIF(Sales_Log!E:E, A28)', '=IF(B28>0, C28/B28, 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A28, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A28, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A28, Sales_Log!M:M), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A28, Sales_Log!F:F), 0)'],
-        ["Other Apparel", '=COUNTIF(Item_Listings!E:E, A29)', '=COUNTIF(Sales_Log!E:E, A29)', '=IF(B29>0, C29/B29, 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A29, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A29, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A29, Sales_Log!M:M), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A29, Sales_Log!F:F), 0)'],
+        ["Outerwear", '=COUNTIF(Item_Listings!E:E, A22)', '=COUNTIF(Sales_Log!F:F, A22)', '=IF(B22>0, C22/B22, 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A22, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!F:F, A22, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A22, Sales_Log!N:N), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A22, Sales_Log!G:G), 0)'],
+        ["Sweaters & Hoodies", '=COUNTIF(Item_Listings!E:E, A23)', '=COUNTIF(Sales_Log!F:F, A23)', '=IF(B23>0, C23/B23, 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A23, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!F:F, A23, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A23, Sales_Log!N:N), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A23, Sales_Log!G:G), 0)'],
+        ["Tops & Shirts", '=COUNTIF(Item_Listings!E:E, A24)', '=COUNTIF(Sales_Log!F:F, A24)', '=IF(B24>0, C24/B24, 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A24, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!F:F, A24, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A24, Sales_Log!N:N), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A24, Sales_Log!G:G), 0)'],
+        ["Pants & Jeans", '=COUNTIF(Item_Listings!E:E, A25)', '=COUNTIF(Sales_Log!F:F, A25)', '=IF(B25>0, C25/B25, 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A25, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!F:F, A25, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A25, Sales_Log!N:N), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A25, Sales_Log!G:G), 0)'],
+        ["Footwear", '=COUNTIF(Item_Listings!E:E, A26)', '=COUNTIF(Sales_Log!F:F, A26)', '=IF(B26>0, C26/B26, 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A26, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!F:F, A26, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A26, Sales_Log!N:N), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A26, Sales_Log!G:G), 0)'],
+        ["Accessories", '=COUNTIF(Item_Listings!E:E, A27)', '=COUNTIF(Sales_Log!F:F, A27)', '=IF(B27>0, C27/B27, 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A27, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!F:F, A27, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A27, Sales_Log!N:N), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A27, Sales_Log!G:G), 0)'],
+        ["Dresses & Skirts", '=COUNTIF(Item_Listings!E:E, A28)', '=COUNTIF(Sales_Log!F:F, A28)', '=IF(B28>0, C28/B28, 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A28, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!F:F, A28, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A28, Sales_Log!N:N), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A28, Sales_Log!G:G), 0)'],
+        ["Other Apparel", '=COUNTIF(Item_Listings!E:E, A29)', '=COUNTIF(Sales_Log!F:F, A29)', '=IF(B29>0, C29/B29, 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A29, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!F:F, A29, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A29, Sales_Log!N:N), 0)', '=IFERROR(AVERAGEIF(Sales_Log!F:F, A29, Sales_Log!G:G), 0)'],
         ["", "", "", "", "", "", "", ""],
 
-        # Section 4: Brand Performance Leaderboard (Rows 32-42)
+        # Section 4: Brand Performance Leaderboard (Rows 32-41)
         ["🏷️ TOP BRAND LEADERBOARD (BY REVENUE & MARGIN)", "", "", "", "", "", "", ""],
         ["Brand", "Units Sold", "Avg Sale Price ($)", "Total Revenue ($)", "Avg Net Profit ($)", "", "", ""],
-        ["Carhartt", '=COUNTIF(Sales_Log!D:D, A34)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A34, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!D:D, A34, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A34, Sales_Log!M:M), 0)', "", "", ""],
-        ["Nike", '=COUNTIF(Sales_Log!D:D, A35)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A35, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!D:D, A35, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A35, Sales_Log!M:M), 0)', "", "", ""],
-        ["Levi's", '=COUNTIF(Sales_Log!D:D, A36)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A36, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!D:D, A36, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A36, Sales_Log!M:M), 0)', "", "", ""],
-        ["The North Face", '=COUNTIF(Sales_Log!D:D, A37)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A37, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!D:D, A37, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A37, Sales_Log!M:M), 0)', "", "", ""],
-        ["Patagonia", '=COUNTIF(Sales_Log!D:D, A38)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A38, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!D:D, A38, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A38, Sales_Log!M:M), 0)', "", "", ""],
-        ["Vintage", '=COUNTIF(Sales_Log!D:D, A39)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A39, Sales_Log!H:H), 0)', '=IFERROR(SUMIF(Sales_Log!D:D, A39, Sales_Log!H:H), 0)', '=IFERROR(AVERAGEIF(Sales_Log!D:D, A39, Sales_Log!M:M), 0)', "", "", ""],
+        ["Carhartt", '=COUNTIF(Sales_Log!E:E, A34)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A34, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A34, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A34, Sales_Log!N:N), 0)', "", "", ""],
+        ["Nike", '=COUNTIF(Sales_Log!E:E, A35)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A35, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A35, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A35, Sales_Log!N:N), 0)', "", "", ""],
+        ["Levi's", '=COUNTIF(Sales_Log!E:E, A36)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A36, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A36, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A36, Sales_Log!N:N), 0)', "", "", ""],
+        ["The North Face", '=COUNTIF(Sales_Log!E:E, A37)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A37, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A37, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A37, Sales_Log!N:N), 0)', "", "", ""],
+        ["Patagonia", '=COUNTIF(Sales_Log!E:E, A38)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A38, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A38, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A38, Sales_Log!N:N), 0)', "", "", ""],
+        ["Vintage", '=COUNTIF(Sales_Log!E:E, A39)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A39, Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!E:E, A39, Sales_Log!I:I), 0)', '=IFERROR(AVERAGEIF(Sales_Log!E:E, A39, Sales_Log!N:N), 0)', "", "", ""],
+        ["", "", "", "", "", "", "", ""],
+
+        # Section 5: Platform Breakdown (Rows 41-47)
+        ["🌐 SALES BREAKDOWN BY PLATFORM (VINTED VS FB MARKETPLACE)", "", "", "", "", "", "", ""],
+        ["Platform Channel", "Units Sold", "Gross Revenue ($)", "Total Net Profit ($)", "Avg Profit / Item", "", "", ""],
+        ["Vinted", '=COUNTIF(Sales_Log!B:B, "Vinted")', '=IFERROR(SUMIF(Sales_Log!B:B, "Vinted", Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!B:B, "Vinted", Sales_Log!N:N), 0)', '=IF(B43>0, D43/B43, 0)', "", "", ""],
+        ["FB Marketplace", '=COUNTIF(Sales_Log!B:B, "FB Marketplace*")', '=IFERROR(SUMIF(Sales_Log!B:B, "FB Marketplace*", Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!B:B, "FB Marketplace*", Sales_Log!N:N), 0)', '=IF(B44>0, D44/B44, 0)', "", "", ""],
+        ["Other Channels", '=COUNTIF(Sales_Log!B:B, "Other*")', '=IFERROR(SUMIF(Sales_Log!B:B, "Other*", Sales_Log!I:I), 0)', '=IFERROR(SUMIF(Sales_Log!B:B, "Other*", Sales_Log!N:N), 0)', '=IF(B45>0, D45/B45, 0)', "", "", ""],
     ]
     ws_dash.update("A1", dashboard_layout, value_input_option="USER_ENTERED")
 
@@ -209,7 +218,7 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
     )
 
     # Section Headers
-    section_ranges = ["A3:F4", "A12:C13", "A20:H21", "A32:E33"]
+    section_ranges = ["A3:F4", "A12:C13", "A20:H21", "A32:E33", "A41:E42"]
     for s_range in section_ranges:
         ws_dash.format(
             s_range,
@@ -221,9 +230,9 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
         )
 
     # Format numeric/currency columns
-    # Currency formatting for sales revenue, profit, avg price
     ws_dash.format("E22:G29", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
     ws_dash.format("C34:E39", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
+    ws_dash.format("C43:E45", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
     ws_dash.format("D22:D29", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
     ws_dash.format("B10", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
     ws_dash.format("B17", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})

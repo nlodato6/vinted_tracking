@@ -4,7 +4,8 @@ from pydantic import BaseModel, Field, computed_field
 
 
 class SalesOrder(BaseModel):
-    order_id: str = Field(..., description="Vinted order ID or transaction reference")
+    order_id: str = Field(..., description="Order ID or transaction reference")
+    platform: str = Field("Vinted", description="Sales platform: Vinted, FB Marketplace, Depop, etc.")
     item_sku: str = Field("", description="Internal SKU reference from ItemListing")
     item_title: str = Field(..., description="Title of sold article")
     brand: str = Field("", description="Brand name e.g. Carhartt, Nike")

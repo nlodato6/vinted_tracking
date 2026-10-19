@@ -83,8 +83,9 @@ async def receive_vinted_email(
     Inbound webhook endpoint for Vinted email alerts (e.g. from SendGrid Inbound Parse,
     Mailgun, Cloudflare Email Routing, or Zapier/Make).
     """
-    if settings.webhook_secret and x_webhook_secret != settings.webhook_secret:
-        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    if settings.webhook_secret and settings.webhook_secret != "your_optional_webhook_secret_here":
+        if x_webhook_secret != settings.webhook_secret:
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
     # Read payload (either JSON or Form Data)
     content_type = request.headers.get("content-type", "")

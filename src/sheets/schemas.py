@@ -46,6 +46,7 @@ LISTINGS_HEADERS = [
 
 SALES_HEADERS = [
     "Order_ID",
+    "Platform",
     "Item_SKU",
     "Item_Title",
     "Brand",
@@ -59,7 +60,7 @@ SALES_HEADERS = [
     "Packaging_Cost",
     "Net_Profit",
     "Margin_%",
-    "Vinted_Status",
+    "Order_Status",
 ]
 
 SUPPLIES_HEADERS = [

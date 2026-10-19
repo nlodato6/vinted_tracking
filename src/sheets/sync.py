@@ -203,19 +203,20 @@ class SheetsSyncEngine:
 
             new_sale_data = [
                 order.order_id,
+                order.platform or "Vinted",
                 matched_sku,
                 order.item_title,
-                matched_brand or f'=IFERROR(VLOOKUP(B{next_row_num}, Item_Listings!A:E, 4, FALSE), "")',
-                matched_category or f'=IFERROR(VLOOKUP(B{next_row_num}, Item_Listings!A:E, 5, FALSE), "")',
-                matched_fav or f'=IFERROR(VLOOKUP(B{next_row_num}, Item_Listings!A:I, 9, FALSE), 0)',
+                matched_brand or f'=IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 4, FALSE), "")',
+                matched_category or f'=IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 5, FALSE), "")',
+                matched_fav or f'=IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:I, 9, FALSE), 0)',
                 order.sale_date.strftime("%Y-%m-%d") if order.sale_date else datetime.now().strftime("%Y-%m-%d"),
                 order.sold_price,
                 order.seller_fees,
                 order.net_payout,
-                f"=IFERROR(VLOOKUP(B{next_row_num}, Item_Listings!A:F, 6, FALSE), 0)",
-                "=Shipping_Supplies!$H$2",
-                f"=J{next_row_num}-K{next_row_num}-L{next_row_num}",
-                f"=IF(H{next_row_num}>0, M{next_row_num}/H{next_row_num}, 0)",
+                f"=IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:F, 6, FALSE), 0)",
+                f'=IF(B{next_row_num}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)',
+                f"=K{next_row_num}-L{next_row_num}-M{next_row_num}",
+                f"=IF(I{next_row_num}>0, N{next_row_num}/I{next_row_num}, 0)",
                 order.vinted_status or "Completed",
             ]
             new_sales_rows.append(new_sale_data)

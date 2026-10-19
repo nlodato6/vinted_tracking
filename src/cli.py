@@ -67,6 +67,77 @@ def init_sheet():
 
 
 @app.command()
+def log_sale(
+    sku: str = typer.Option(..., "--sku", "-s", help="Item SKU (e.g. SKU-1001)"),
+    price: float = typer.Option(..., "--price", "-p", help="Gross sold price"),
+    platform: str = typer.Option("FB Marketplace (Local)", "--platform", help="Platform: 'FB Marketplace (Local)', 'FB Marketplace (Shipped)', 'Depop', 'Other'"),
+    fees: float = typer.Option(0.0, "--fees", help="Platform fees (0 for cash/local)"),
+    date_sold: str = typer.Option("", "--date", help="Sale date YYYY-MM-DD (defaults to today)"),
+):
+    """
+    Log an external sale (e.g. Facebook Marketplace) and mark the item as sold.
+    Automatically links unit cost and calculates net profit.
+    """
+    from datetime import date, datetime
+    console.print(f"\n[bold cyan]📝 Logging sale on {platform}...[/bold cyan]")
+    try:
+        client = GoogleSheetsClient()
+        sh = client.get_spreadsheet()
+        ws_listings = sh.worksheet("Item_Listings")
+        ws_sales = sh.worksheet("Sales_Log")
+
+        all_listings = ws_listings.get_all_values()
+        sku_clean = sku.strip().upper()
+        target_row = None
+        item_title = ""
+
+        if len(all_listings) > 1:
+            for r_idx, r in enumerate(all_listings[1:], start=2):
+                if r and r[0].strip().upper() == sku_clean:
+                    target_row = r_idx
+                    item_title = r[2] if len(r) > 2 else sku_clean
+                    break
+
+        if not target_row:
+            console.print(f"[bold red]❌ SKU '{sku}' not found in Item_Listings.[/bold red]")
+            raise typer.Exit(code=1)
+
+        # Update Item_Listings status to Sold (Platform)
+        ws_listings.update(f"M{target_row}", [[f"Sold ({platform})"]])
+
+        # Append to Sales_Log
+        sales_rows = ws_sales.get_all_values()
+        next_row_num = len(sales_rows) + 1
+        sale_dt = date_sold or date.today().strftime("%Y-%m-%d")
+        order_ref = f"FB-{datetime.now().strftime('%Y%m%d%H%M')}"
+        net_payout = round(price - fees, 2)
+
+        new_row = [
+            order_ref,
+            platform,
+            sku_clean,
+            item_title,
+            f'=IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 4, FALSE), "")',
+            f'=IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 5, FALSE), "")',
+            f'=IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:I, 9, FALSE), 0)',
+            sale_dt,
+            price,
+            fees,
+            net_payout,
+            f"=IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:F, 6, FALSE), 0)",
+            f'=IF(B{next_row_num}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)',
+            f"=K{next_row_num}-L{next_row_num}-M{next_row_num}",
+            f"=IF(I{next_row_num}>0, N{next_row_num}/I{next_row_num}, 0)",
+            "Completed",
+        ]
+        ws_sales.append_row(new_row, value_input_option="USER_ENTERED")
+        console.print(f"[bold green]✅ Logged '{item_title}' ({sku_clean}) as sold on {platform} for ${price:.2f}![/bold green]\n")
+    except Exception as e:
+        console.print(f"[bold red]❌ Error logging sale: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def sync(
     sync_type: str = typer.Option("all", "--type", "-t", help="Sync type: 'listings', 'sales', or 'all'"),
 ):
