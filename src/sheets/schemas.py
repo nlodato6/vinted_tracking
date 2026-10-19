@@ -2,6 +2,7 @@
 
 TAB_INVENTORY_LOTS = "Inventory_Lots"
 TAB_ITEM_LISTINGS = "Item_Listings"
+TAB_SOLD_ITEMS = "Sold_Items"
 TAB_SALES_LOG = "Sales_Log"
 TAB_SHIPPING_SUPPLIES = "Shipping_Supplies"
 TAB_ANALYTICS_DASHBOARD = "Analytics_Dashboard"
@@ -9,6 +10,7 @@ TAB_ANALYTICS_DASHBOARD = "Analytics_Dashboard"
 SHEET_TABS = [
     TAB_INVENTORY_LOTS,
     TAB_ITEM_LISTINGS,
+    TAB_SOLD_ITEMS,
     TAB_SALES_LOG,
     TAB_SHIPPING_SUPPLIES,
     TAB_ANALYTICS_DASHBOARD,
@@ -43,6 +45,8 @@ LISTINGS_HEADERS = [
     "Date_Listed",
     "Last_Synced",
 ]
+
+SOLD_ITEMS_HEADERS = list(LISTINGS_HEADERS)
 
 SALES_HEADERS = [
     "Order_ID",

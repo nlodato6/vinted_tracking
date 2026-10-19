@@ -2,7 +2,7 @@
 
 > **Current Status**:
 > * ✅ Google Cloud Service Account authenticated (`vinged-bot@...`)
-> * ✅ Google Spreadsheet provisioned with all 5 tabs and formulas: [Open Sheet](https://docs.google.com/spreadsheets/d/1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg/edit)
+> * ✅ Google Spreadsheet provisioned with all 6 tabs and formulas: [Open Sheet](https://docs.google.com/spreadsheets/d/1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg/edit)
 > * ✅ GitHub repository created and backed up: [nlodato6/vinted_tracking](https://github.com/nlodato6/vinted_tracking)
 > * ⏳ **Remaining**: Vinted session login, initial data population, and automation setup.
 
@@ -43,8 +43,9 @@ Once authenticated, pull your live closet inventory and order history into Googl
 python -m src.cli sync --type all
 ```
 
-* Active garments will be added to the **`Item_Listings`** tab with live asking prices, heart/favorite counts, view counts, and category classifications.
-* Sold orders will be logged into the **`Sales_Log`** tab with gross sale prices, platform fees, and net payouts.
+* **`Item_Listings` Tab**: Holds **active listings only** with live asking prices, heart/favorite counts, view counts, and category classifications.
+* **`Sold_Items` Tab**: When an item sells, it is automatically moved here from `Item_Listings` with all the same fields intact, keeping your active listings uncluttered.
+* **`Sales_Log` Tab**: Records all transactions (gross price, fees, net payout, COGS, packaging cost, and net profit margins).
 
 ---
 
@@ -121,6 +122,7 @@ Since your Vinted notifications go to `tlodato24@gmail.com`, you can trigger ins
 | `python -m src.cli sync --type listings` | Refreshes asking prices, favorites, and new listings |
 | `python -m src.cli sync --type sales` | Scrapes sold orders and calculates net payouts |
 | `python -m src.cli sync --type all` | Full sync of both listings and sales |
+| `python -m src.cli log-sale --sku SKU-1001 --price 45` | Logs external sale (e.g. FB Marketplace) and moves item to `Sold_Items` |
 | `python -m src.cli serve --port 8000` | Starts the webhook listener server |
 | `python -m src.cli scheduler` | Starts background automatic periodic sync daemon |
-| `pytest -v` | Runs all 15 verification unit tests |
+| `pytest -v` | Runs all 23 verification unit tests |
