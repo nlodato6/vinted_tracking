@@ -11,7 +11,6 @@ SHEET_TABS = [
     TAB_INVENTORY_LOTS,
     TAB_ITEM_LISTINGS,
     TAB_SOLD_ITEMS,
-    TAB_SALES_LOG,
     TAB_SHIPPING_SUPPLIES,
     TAB_ANALYTICS_DASHBOARD,
 ]
@@ -40,7 +39,6 @@ LISTINGS_HEADERS = [
     "Price_Lowered",
     "Price_Drop",
     "Price_History",
-    "Sold_Price",
     "Favorites",
     "Views",
     "Vinted_ID",
@@ -50,28 +48,36 @@ LISTINGS_HEADERS = [
     "Last_Synced",
 ]
 
-SOLD_ITEMS_HEADERS = list(LISTINGS_HEADERS)
-
-SALES_HEADERS = [
-    "Order_ID",
-    "Platform",
+SOLD_ITEMS_HEADERS = [
     "Item_SKU",
-    "Item_Title",
+    "Lot_ID",
+    "Title",
     "Brand",
     "Category",
-    "Favorites",
-    "Sale_Date",
+    "Unit_Cost",
     "Posted_Price",
+    "Current_Price",
+    "Price_Lowered",
+    "Price_Drop",
+    "Price_History",
     "Sold_Price",
     "Price_Discount",
-    "Seller_Fees",
-    "Net_Payout",
-    "Item_Cost",
+    "Sale_Type",
+    "Sale_Date",
+    "Platform",
     "Packaging_Cost",
     "Net_Profit",
     "Margin_%",
-    "Order_Status",
+    "Favorites",
+    "Views",
+    "Order_ID",
+    "Vinted_URL",
+    "Status",
+    "Date_Listed",
 ]
+
+# Kept for backward compatibility if referenced
+SALES_HEADERS = list(SOLD_ITEMS_HEADERS)
 
 SUPPLIES_HEADERS = [
     "Supply_ID",

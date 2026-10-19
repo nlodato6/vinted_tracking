@@ -61,7 +61,7 @@ def clear_sample_data():
     try:
         client = GoogleSheetsClient()
         sh = client.get_spreadsheet()
-        for tab_name in ["Inventory_Lots", "Item_Listings", "Sold_Items", "Sales_Log"]:
+        for tab_name in ["Inventory_Lots", "Item_Listings", "Sold_Items"]:
             try:
                 ws = sh.worksheet(tab_name)
                 rows = ws.get_all_values()
@@ -100,7 +100,7 @@ def log_sale(
 ):
     """
     Log an external sale (e.g. Facebook Marketplace), move the item to Sold_Items,
-    and record the transaction in Sales_Log.
+    and record all profit metrics without redundant duplicate sheets.
     """
     from datetime import date, datetime
     console.print(f"\n[bold cyan]📝 Logging sale on {platform}...[/bold cyan]")
@@ -108,16 +108,25 @@ def log_sale(
         client = GoogleSheetsClient()
         engine = SheetsSyncEngine(client)
         sh = client.get_spreadsheet()
-        ws_sales = sh.worksheet("Sales_Log")
         ws_sold = sh.worksheet("Sold_Items")
 
         sku_clean = sku.strip().upper()
+        sale_dt = date_sold or date.today().strftime("%Y-%m-%d")
+        order_ref = f"ORD-{datetime.now().strftime('%Y%m%d%H%M')}"
 
-        # Move item from active Item_Listings to Sold_Items
-        moved = engine.move_listing_to_sold(sku=sku_clean, status=f"Sold ({platform})", sold_price=price)
+        # Move item from active Item_Listings to Sold_Items with full sale details
+        moved = engine.move_listing_to_sold(
+            sku=sku_clean,
+            status=f"Sold ({platform})",
+            sold_price=price,
+            sale_date=sale_dt,
+            platform=platform,
+            order_id=order_ref,
+        )
         item_title = sku_clean
         if moved:
             item_title = moved.get("Title") or sku_clean
+            console.print(f"[bold green]✅ Moved '{item_title}' ({sku_clean}) to Sold_Items at ${price:.2f}![/bold green]")
         else:
             # Check if it was already moved or exists in Sold_Items
             sold_rows = ws_sold.get_all_values()
@@ -127,49 +136,26 @@ def log_sale(
                 s_sku_idx = s_headers.index("Item_SKU") if "Item_SKU" in s_headers else 0
                 s_title_idx = s_headers.index("Title") if "Title" in s_headers else 2
                 s_sold_price_idx = s_headers.index("Sold_Price") if "Sold_Price" in s_headers else 11
+                s_plat_idx = s_headers.index("Platform") if "Platform" in s_headers else 15
+                s_date_idx = s_headers.index("Sale_Date") if "Sale_Date" in s_headers else 14
                 for r_i, sr in enumerate(sold_rows[1:], start=2):
                     if len(sr) > s_sku_idx and sr[s_sku_idx].strip().upper() == sku_clean:
                         item_title = sr[s_title_idx] if len(sr) > s_title_idx else sku_clean
                         found_in_sold = True
-                        if s_sold_price_idx is not None:
-                            col_sp = chr(ord('A') + s_sold_price_idx)
-                            ws_sold.update_acell(f"{col_sp}{r_i}", price)
+                        col_sp = chr(ord('A') + s_sold_price_idx)
+                        col_plat = chr(ord('A') + s_plat_idx)
+                        col_dt = chr(ord('A') + s_date_idx)
+                        ws_sold.update_acell(f"{col_sp}{r_i}", price)
+                        ws_sold.update_acell(f"{col_plat}{r_i}", platform)
+                        ws_sold.update_acell(f"{col_dt}{r_i}", sale_dt)
+                        console.print(f"[bold green]✅ Updated existing Sold_Items record for '{item_title}' ({sku_clean}) to ${price:.2f}![/bold green]")
                         break
             if not found_in_sold:
                 console.print(f"[bold red]❌ SKU '{sku}' not found in Item_Listings or Sold_Items.[/bold red]")
                 raise typer.Exit(code=1)
-            else:
-                console.print(f"[yellow]Notice: SKU '{sku}' was already in Sold_Items.[/yellow]")
 
-        # Append to Sales_Log
-        sales_rows = ws_sales.get_all_values()
-        next_row_num = len(sales_rows) + 1
-        sale_dt = date_sold or date.today().strftime("%Y-%m-%d")
-        order_ref = f"FB-{datetime.now().strftime('%Y%m%d%H%M')}"
-        net_payout = round(price - fees, 2)
-
-        new_row = [
-            order_ref,
-            platform,
-            sku_clean,
-            item_title,
-            f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:E, 4, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 4, FALSE), ""))',
-            f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:E, 5, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 5, FALSE), ""))',
-            f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:M, 13, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:M, 13, FALSE), 0))',
-            sale_dt,
-            f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:G, 7, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:G, 7, FALSE), 0))',
-            price,
-            f'=IF(AND(ISNUMBER(I{next_row_num}), ISNUMBER(J{next_row_num}), I{next_row_num}>0), I{next_row_num}-J{next_row_num}, 0)',
-            fees,
-            net_payout,
-            f"=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:F, 6, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:F, 6, FALSE), 0))",
-            f'=IF(B{next_row_num}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)',
-            f"=M{next_row_num}-N{next_row_num}-O{next_row_num}",
-            f"=IF(J{next_row_num}>0, P{next_row_num}/J{next_row_num}, 0)",
-            "Completed",
-        ]
-        ws_sales.append_row(new_row, value_input_option="USER_ENTERED")
-        console.print(f"[bold green]✅ Logged '{item_title}' ({sku_clean}) as sold on {platform} for ${price:.2f} and moved to Sold_Items![/bold green]\n")
+        engine.sync_lots()
+        console.print(f"[dim]Platform: {platform} | Sold Price: ${price:.2f} | Sale Date: {sale_dt}[/dim]\n")
     except Exception as e:
         console.print(f"[bold red]❌ Error logging sale: {e}[/bold red]")
         raise typer.Exit(code=1)

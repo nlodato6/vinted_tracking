@@ -113,7 +113,6 @@ def mock_sheets_env():
                 "YES",
                 "5.00",
                 "10/18: $75.00 → $70.00",
-                "",
                 "15",
                 "120",
                 "vinted_111",
@@ -134,7 +133,6 @@ def mock_sheets_env():
                 "YES",
                 "5.00",
                 "10/18: $45.00 → $40.00",
-                "",
                 "8",
                 "65",
                 "vinted_222",
@@ -288,7 +286,6 @@ def test_sync_orders_moves_listing_and_logs_sale(mock_sheets_env):
     engine, sh = mock_sheets_env
     ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
     ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
-    ws_sales = sh.worksheet(TAB_SALES_LOG)
 
     order = SalesOrder(
         order_id="ORD-7788",
@@ -310,21 +307,46 @@ def test_sync_orders_moves_listing_and_logs_sale(mock_sheets_env):
     assert not any(r[0] == "SKU-1001" for r in ws_listings.rows[1:])
     assert any(r[0] == "SKU-1001" for r in ws_sold.rows[1:])
 
-    # Sales_Log should have the order
-    assert len(ws_sales.rows) == 2
-    sales_entry = ws_sales.rows[1]
-    assert sales_entry[0] == "ORD-7788"
-    assert sales_entry[2] == "SKU-1001"
-    # Concrete brand extracted from moved item
-    assert sales_entry[4] == "Carhartt"
-    # Posted_Price formula references Sold_Items!A:G
-    assert "Sold_Items!A:G" in sales_entry[8]
+    # Sold_Items should contain the full transaction details
+    assert len(ws_sold.rows) == 2
+    sold_entry = ws_sold.rows[1]
+    assert sold_entry[0] == "SKU-1001"
+    assert sold_entry[2] == "Vintage Carhartt Jacket"
+    assert sold_entry[3] == "Carhartt"
     # Sold_Price
-    assert sales_entry[9] == 70.00
+    assert sold_entry[11] == 70.00
     # Price_Discount formula
-    assert "I2-J2" in sales_entry[10]
-    # Formula for Item_Cost references Sold_Items first
-    assert "Sold_Items!A:F" in sales_entry[13]
+    assert "G2-L2" in sold_entry[12]
+    # Sale_Type formula
+    assert "Original Price" in sold_entry[13]
+    # Platform
+    assert sold_entry[15] == "Vinted"
+    # Net_Profit formula deducting Unit_Cost and Packaging_Cost with zero seller fees
+    assert "L2-F2-Q2" in sold_entry[17]
+    # Order_ID
+    assert sold_entry[21] == "ORD-7788"
+
+
+def test_sale_type_formula_and_offer_handling(mock_sheets_env):
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # SKU-1002 starts with Posted_Price=45.00, Current_Price=40.00
+    # Simulate an accepted buyer offer at $36.00 (below both posted and listed price)
+    moved = engine.move_listing_to_sold(
+        sku="SKU-1002",
+        status="Sold (Vinted)",
+        sold_price=36.00,
+        platform="Vinted",
+        order_id="ORD-OFFER-1",
+    )
+    assert moved is not None
+    assert moved["Sold_Price"] == 36.00
+    # Sale_Type formula handles Accepted Offer, Lowered Price, and Original Price
+    assert "Accepted Offer" in moved["Sale_Type"]
+    assert "Lowered Price" in moved["Sale_Type"]
+    assert "Original Price" in moved["Sale_Type"]
 
 
 def test_price_drop_detection_and_history_logging(mock_sheets_env):

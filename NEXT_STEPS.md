@@ -44,8 +44,8 @@ python -m src.cli sync --type all
 ```
 
 * **`Item_Listings` Tab**: Holds **active listings only** with initial **`Posted_Price`**, live **`Current_Price`**, automated **`Price_Lowered`** (YES/NO) and **`Price_Drop`** ($ amount), timestamped **`Price_History`** log, heart/favorite counts, and views.
-* **`Sold_Items` Tab**: When an item sells, it is automatically moved here from `Item_Listings` with all fields intact, plus the final **`Sold_Price`** populated.
-* **`Sales_Log` Tab**: Records all transactions across Vinted and FB Marketplace (original **`Posted_Price`**, final **`Sold_Price`**, **`Price_Discount`**, gross payout, fees, COGS, packaging cost, and net profit margins).
+* **`Sold_Items` Tab**: When an item sells (on Vinted or FB Marketplace), it is automatically archived here with all listing fields intact, plus final **`Sold_Price`**, **`Price_Discount`**, **`Sale_Type`** (`Original Price`, `Lowered Price`, `Accepted Offer`), **`Sale_Date`**, **`Platform`**, **`Packaging_Cost`**, **`Net_Profit`** ($0 Vinted seller fee deducted!), and **`Margin_%`**.
+* **`Analytics_Dashboard` Tab**: Real-time business intelligence with financial KPIs, Price Reduction & Offer breakdown, garment category markdown leaderboards, top 5 price-cut items, and favorite conversion rates.
 
 ---
 
@@ -65,7 +65,7 @@ Whenever you buy clothing in bulk (thrift stores, wholesale, garage sales, bins)
 ### 2. In the `Shipping_Supplies` Tab:
 Whenever you buy packaging materials:
 * Enter poly mailers, packing tape, thermal labels, and boxes with quantity and total cost.
-* Cell **`H2`** automatically calculates your **average packaging cost per shipment** (e.g. `$0.75`), which is automatically deducted from every sale in `Sales_Log` to calculate true net profit.
+* Cell **`H2`** automatically calculates your **average packaging cost per shipment** (e.g. `$0.75`), which is automatically deducted from every sale in `Sold_Items` to calculate true net profit.
 
 ---
 
@@ -143,4 +143,4 @@ If Vinted prompts for verification or your session expires:
 | `python -m src.cli log-sale --sku SKU-1001 --price 45` | Logs external sale (e.g. FB Marketplace) and moves item to `Sold_Items` |
 | `python -m src.cli serve --port 8000` | Starts the webhook listener server |
 | `python -m src.cli scheduler` | Starts background automatic periodic sync daemon |
-| `pytest -v` | Runs all 34 verification unit tests |
+| `pytest -v` | Runs all 36 verification unit tests |
