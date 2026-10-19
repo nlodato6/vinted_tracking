@@ -110,6 +110,10 @@ def mock_sheets_env():
                 "=IFERROR(VLOOKUP(B2, Inventory_Lots!A:F, 6, FALSE), 0)",
                 "75.00",
                 "70.00",
+                "YES",
+                "5.00",
+                "10/18: $75.00 → $70.00",
+                "",
                 "15",
                 "120",
                 "vinted_111",
@@ -127,6 +131,10 @@ def mock_sheets_env():
                 "=IFERROR(VLOOKUP(B3, Inventory_Lots!A:F, 6, FALSE), 0)",
                 "45.00",
                 "40.00",
+                "YES",
+                "5.00",
+                "10/18: $45.00 → $40.00",
+                "",
                 "8",
                 "65",
                 "vinted_222",
@@ -192,7 +200,7 @@ def test_move_listing_to_sold(mock_sheets_env):
     assert len(ws_listings.rows) == 3  # Header + 2 items
     assert len(ws_sold.rows) == 1  # Header only
 
-    moved = engine.move_listing_to_sold(sku="SKU-1001", status="Sold (Vinted)")
+    moved = engine.move_listing_to_sold(sku="SKU-1001", status="Sold (Vinted)", sold_price=68.00)
     assert moved is not None
     assert moved["Item_SKU"] == "SKU-1001"
     assert moved["Title"] == "Vintage Carhartt Jacket"
@@ -205,7 +213,10 @@ def test_move_listing_to_sold(mock_sheets_env):
     # Sold_Items should have the moved row
     assert len(ws_sold.rows) == 2
     assert ws_sold.rows[1][0] == "SKU-1001"
-    assert ws_sold.rows[1][12] == "Sold (Vinted)"
+    status_idx = SOLD_ITEMS_HEADERS.index("Status")
+    sold_price_idx = SOLD_ITEMS_HEADERS.index("Sold_Price")
+    assert ws_sold.rows[1][status_idx] == "Sold (Vinted)"
+    assert ws_sold.rows[1][sold_price_idx] == 68.00
 
 
 def test_reconcile_sold_listings(mock_sheets_env):
@@ -213,8 +224,9 @@ def test_reconcile_sold_listings(mock_sheets_env):
     ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
     ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
 
+    status_idx = LISTINGS_HEADERS.index("Status")
     # Manually change SKU-1002 status in Item_Listings to 'Sold'
-    ws_listings.rows[2][12] = "Sold"
+    ws_listings.rows[2][status_idx] = "Sold"
 
     reconciled = engine.reconcile_sold_listings()
     assert reconciled == 1
@@ -305,8 +317,51 @@ def test_sync_orders_moves_listing_and_logs_sale(mock_sheets_env):
     assert sales_entry[2] == "SKU-1001"
     # Concrete brand extracted from moved item
     assert sales_entry[4] == "Carhartt"
+    # Posted_Price formula references Sold_Items!A:G
+    assert "Sold_Items!A:G" in sales_entry[8]
+    # Sold_Price
+    assert sales_entry[9] == 70.00
+    # Price_Discount formula
+    assert "I2-J2" in sales_entry[10]
     # Formula for Item_Cost references Sold_Items first
-    assert "Sold_Items!A:F" in sales_entry[11]
+    assert "Sold_Items!A:F" in sales_entry[13]
+
+
+def test_price_drop_detection_and_history_logging(mock_sheets_env):
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+
+    # SKU-1002 (Nike Swoosh Hoodie) starts with Posted_Price=45.00, Current_Price=40.00
+    # Now simulate Vinted scraper detecting a price reduction to $35.00
+    scraped_items = [
+        ItemListing(
+            item_sku="SKU-1002",
+            title="Nike Swoosh Hoodie",
+            brand="Nike",
+            category="Sweaters & Hoodies",
+            posted_price=45.00,
+            current_price=35.00,
+            favorites=12,
+            views=90,
+            vinted_id="vinted_222",
+            status="Listed",
+            date_listed=date(2026, 10, 19),
+        )
+    ]
+
+    res = engine.sync_listings(scraped_items)
+    assert res["updated"] == 1
+
+    # Check that Current_Price updated to 35.00
+    nike_row = ws_listings.rows[2]
+    curr_price_idx = LISTINGS_HEADERS.index("Current_Price")
+    hist_idx = LISTINGS_HEADERS.index("Price_History")
+    posted_idx = LISTINGS_HEADERS.index("Posted_Price")
+
+    assert nike_row[curr_price_idx] == 35.00
+    assert nike_row[posted_idx] == "45.00"
+    # Price_History should contain the new drop entry
+    assert "$40.00 → $35.00" in nike_row[hist_idx]
 
 
 def test_sync_lots_updates_formulas_and_status(mock_sheets_env):
@@ -336,10 +391,19 @@ def test_sync_lots_marks_completed_when_all_sold(mock_sheets_env):
     ws_lots.rows[1][4] = "1"
 
     # Add 1 sold item belonging to LOT-001 in Sold_Items
-    ws_sold.append_row([
-        "SKU-1001", "LOT-001", "Vintage Jacket", "Carhartt", "Outerwear",
-        "5.00", "70.00", "70.00", "15", "120", "v_111", "url", "Sold", "2026-10-15", "now"
-    ])
+    row_data = [""] * len(SOLD_ITEMS_HEADERS)
+    row_data[0] = "SKU-1001"
+    row_data[1] = "LOT-001"
+    row_data[2] = "Vintage Jacket"
+    row_data[3] = "Carhartt"
+    row_data[4] = "Outerwear"
+    row_data[5] = "5.00"
+    row_data[6] = "75.00"
+    row_data[7] = "70.00"
+    row_data[11] = "70.00"  # Sold_Price
+    row_data[16] = "Sold"
+
+    ws_sold.append_row(row_data)
 
     res = engine.sync_lots()
     assert res["completed_lots"] == 1

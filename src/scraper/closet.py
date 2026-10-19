@@ -173,13 +173,22 @@ async def scrape_closet_listings(username: Optional[str] = None) -> List[ItemLis
                     slug_match = re.search(r"/items/\d+-([\w-]+)", full_url)
                     title = slug_match.group(1).replace("-", " ").title() if slug_match else f"Vinted Item {v_id}"
 
-                # Extract price
+                # Extract price (both original struck-through price if discounted, and current asking price)
+                original_price = 0.0
+                orig_elem = await card.query_selector("del, s, [class*='strike'], [class*='old'], [data-testid*='original-price']")
+                if orig_elem:
+                    orig_text = await orig_elem.inner_text()
+                    original_price = parse_price(orig_text)
+
                 price_elem = (
                     await card.query_selector("[data-testid*='price']")
                     or await card.query_selector("p[class*='price'], span[class*='price']")
                 )
                 price_text = await price_elem.inner_text() if price_elem else "$0.00"
                 current_price = parse_price(price_text)
+
+                if not original_price:
+                    original_price = current_price
 
                 card_raw_text = await card.inner_text()
 
@@ -207,8 +216,9 @@ async def scrape_closet_listings(username: Optional[str] = None) -> List[ItemLis
                     title=title.strip(),
                     brand=brand,
                     category=category,
+                    posted_price=original_price,
+                    target_price=original_price,
                     current_price=current_price,
-                    target_price=current_price,
                     favorites=favorites_count,
                     views=views_count,
                     vinted_id=v_id,

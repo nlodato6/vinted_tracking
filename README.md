@@ -17,6 +17,11 @@ A fully automated sync pipeline connecting **Vinted (`vinted.com`)** directly to
   * Scrapes live closet asking prices, views, favorites, and listing statuses.
   * Scrapes completed orders, final sold prices, seller fee deductions, and net payouts.
   * Uses stealth configurations and persistent session tokens (`.session/vinted_state.json`) to bypass Cloudflare/bot checks without repetitive logins.
+* **🏷️ Price Reduction & Sold Price Tracking**:
+  * **Posted Price**: Preserves the original asking price when first listed.
+  * **Price Drop Detection**: Detects price cuts automatically, flags `Price_Lowered` as `YES`, and calculates the exact `Price_Drop` amount.
+  * **Price History Audit Log**: Timestamps each reduction (`MM/DD: $50.00 → $45.00`) directly in the spreadsheet row.
+  * **Sold Price & Discount Tracking**: Records the exact final sale price across Vinted and Facebook Marketplace sales, along with discount from the original posted price.
 * **❤️ Favorites & Buyer Intent Analytics**:
   * Automatically tracks the favorite count (heart icon) and view count on every listing card.
   * Measures buyer conversion: Average favorites on sold garments vs. active unsold inventory.
@@ -38,9 +43,10 @@ A fully automated sync pipeline connecting **Vinted (`vinted.com`)** directly to
 
 | Tab Name | Purpose | Key Formulas / Calculations |
 | :--- | :--- | :--- |
-| **`Inventory_Lots`** | Hauls & bulk buys | `Unit_Cost`: `=IF(E2>0, D2/E2, 0)`<br>`Items_Processed`: `=COUNTIF(Item_Listings!B:B, A2)` |
-| **`Item_Listings`** | Active & historic closet items | `Unit_Cost`: `=IFERROR(VLOOKUP(B2, Inventory_Lots!A:F, 6, FALSE), 0)`<br>`Favorites`: Live scraped heart count<br>`Category`: Inferred or custom apparel category |
-| **`Sales_Log`** | Realized sales & payouts | `Brand`: `=IFERROR(VLOOKUP(B2, Item_Listings!A:E, 4, FALSE), "")`<br>`Category`: `=IFERROR(VLOOKUP(B2, Item_Listings!A:E, 5, FALSE), "")`<br>`Favorites`: `=IFERROR(VLOOKUP(B2, Item_Listings!A:I, 9, FALSE), 0)`<br>`Item_Cost`: `=IFERROR(VLOOKUP(B2, Item_Listings!A:F, 6, FALSE), 0)`<br>`Packaging_Cost`: `=Shipping_Supplies!$H$2`<br>`Net_Profit`: `=J2 - K2 - L2`<br>`Margin_%`: `=IF(H2>0, M2/H2, 0)` |
+| **`Inventory_Lots`** | Hauls & bulk buys | `Unit_Cost`: `=IF(E2>0, D2/E2, 0)`<br>`Items_Processed`: `=COUNTIF(Item_Listings!B:B, A2) + COUNTIF(Sold_Items!B:B, A2)`<br>`Status`: Dynamic formula marking `Completed` when all articles in lot are sold |
+| **`Item_Listings`** | Active closet items | `Unit_Cost`: `=IFERROR(VLOOKUP(B2, Inventory_Lots!A:F, 6, FALSE), 0)`<br>`Posted_Price`: Initial asking price<br>`Current_Price`: Live asking price<br>`Price_Lowered`: `=IF(AND(ISNUMBER(G2), ISNUMBER(H2), G2>H2), "YES", "NO")`<br>`Price_Drop`: `=IF(AND(ISNUMBER(G2), ISNUMBER(H2), G2>H2), G2-H2, 0)`<br>`Price_History`: Audit log of price cuts with dates<br>`Favorites`: Live scraped heart count |
+| **`Sold_Items`** | Sold closet items archive | Same 19 columns as `Item_Listings`, plus `Sold_Price` (Col L) populated upon sale |
+| **`Sales_Log`** | Realized sales & payouts | `Brand`: `=IFERROR(VLOOKUP(C2, Sold_Items!A:D, 4, FALSE), "")`<br>`Category`: `=IFERROR(VLOOKUP(C2, Sold_Items!A:E, 5, FALSE), "")`<br>`Posted_Price`: `=IFERROR(VLOOKUP(C2, Sold_Items!A:G, 7, FALSE), "")`<br>`Sold_Price`: Scraped or logged final sale price<br>`Price_Discount`: `=IF(AND(ISNUMBER(I2), ISNUMBER(J2), I2>0), I2-J2, 0)`<br>`Item_Cost`: `=IFERROR(VLOOKUP(C2, Sold_Items!A:F, 6, FALSE), 0)`<br>`Packaging_Cost`: `=Shipping_Supplies!$H$2`<br>`Net_Profit`: `=M2 - N2 - O2`<br>`Margin_%`: `=IF(J2>0, P2/J2, 0)` |
 | **`Shipping_Supplies`** | Tape, mailers, labels, boxes | `Unit_Cost`: `=IF(E2>0, F2/E2, 0)`<br>`Avg_Supply_Cost`: `=IF(SUM(E2:E)>0, SUM(F2:F)/SUM(E2:E), 0.75)` |
 | **`Analytics_Dashboard`** | Financial KPIs, Favorites & Categories | **Financials**: Gross Revenue, Net Profit, COGS, Unsold Capital<br>**Favorites**: Avg Favs on Sold vs Active, High-Interest Items<br>**Categories**: Sell-Through %, Avg Sale Price, Total Revenue & Profit by Garment Type<br>**Brands**: Revenue & Profit by Brand |
 

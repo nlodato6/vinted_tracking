@@ -43,9 +43,9 @@ Once authenticated, pull your live closet inventory and order history into Googl
 python -m src.cli sync --type all
 ```
 
-* **`Item_Listings` Tab**: Holds **active listings only** with live asking prices, heart/favorite counts, view counts, and category classifications.
-* **`Sold_Items` Tab**: When an item sells, it is automatically moved here from `Item_Listings` with all the same fields intact, keeping your active listings uncluttered.
-* **`Sales_Log` Tab**: Records all transactions (gross price, fees, net payout, COGS, packaging cost, and net profit margins).
+* **`Item_Listings` Tab**: Holds **active listings only** with initial **`Posted_Price`**, live **`Current_Price`**, automated **`Price_Lowered`** (YES/NO) and **`Price_Drop`** ($ amount), timestamped **`Price_History`** log, heart/favorite counts, and views.
+* **`Sold_Items` Tab**: When an item sells, it is automatically moved here from `Item_Listings` with all fields intact, plus the final **`Sold_Price`** populated.
+* **`Sales_Log` Tab**: Records all transactions across Vinted and FB Marketplace (original **`Posted_Price`**, final **`Sold_Price`**, **`Price_Discount`**, gross payout, fees, COGS, packaging cost, and net profit margins).
 
 ---
 

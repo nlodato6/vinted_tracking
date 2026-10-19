@@ -114,7 +114,7 @@ def log_sale(
         sku_clean = sku.strip().upper()
 
         # Move item from active Item_Listings to Sold_Items
-        moved = engine.move_listing_to_sold(sku=sku_clean, status=f"Sold ({platform})")
+        moved = engine.move_listing_to_sold(sku=sku_clean, status=f"Sold ({platform})", sold_price=price)
         item_title = sku_clean
         if moved:
             item_title = moved.get("Title") or sku_clean
@@ -126,10 +126,14 @@ def log_sale(
                 s_headers = sold_rows[0]
                 s_sku_idx = s_headers.index("Item_SKU") if "Item_SKU" in s_headers else 0
                 s_title_idx = s_headers.index("Title") if "Title" in s_headers else 2
-                for sr in sold_rows[1:]:
+                s_sold_price_idx = s_headers.index("Sold_Price") if "Sold_Price" in s_headers else 11
+                for r_i, sr in enumerate(sold_rows[1:], start=2):
                     if len(sr) > s_sku_idx and sr[s_sku_idx].strip().upper() == sku_clean:
                         item_title = sr[s_title_idx] if len(sr) > s_title_idx else sku_clean
                         found_in_sold = True
+                        if s_sold_price_idx is not None:
+                            col_sp = chr(ord('A') + s_sold_price_idx)
+                            ws_sold.update_acell(f"{col_sp}{r_i}", price)
                         break
             if not found_in_sold:
                 console.print(f"[bold red]❌ SKU '{sku}' not found in Item_Listings or Sold_Items.[/bold red]")
@@ -151,15 +155,17 @@ def log_sale(
             item_title,
             f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:E, 4, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 4, FALSE), ""))',
             f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:E, 5, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 5, FALSE), ""))',
-            f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:I, 9, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:I, 9, FALSE), 0))',
+            f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:M, 13, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:M, 13, FALSE), 0))',
             sale_dt,
+            f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:G, 7, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:G, 7, FALSE), 0))',
             price,
+            f'=IF(AND(ISNUMBER(I{next_row_num}), ISNUMBER(J{next_row_num}), I{next_row_num}>0), I{next_row_num}-J{next_row_num}, 0)',
             fees,
             net_payout,
             f"=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:F, 6, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:F, 6, FALSE), 0))",
             f'=IF(B{next_row_num}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)',
-            f"=K{next_row_num}-L{next_row_num}-M{next_row_num}",
-            f"=IF(I{next_row_num}>0, N{next_row_num}/I{next_row_num}, 0)",
+            f"=M{next_row_num}-N{next_row_num}-O{next_row_num}",
+            f"=IF(J{next_row_num}>0, P{next_row_num}/J{next_row_num}, 0)",
             "Completed",
         ]
         ws_sales.append_row(new_row, value_input_option="USER_ENTERED")

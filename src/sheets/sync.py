@@ -11,7 +11,21 @@ from src.sheets.schemas import (
     TAB_INVENTORY_LOTS,
     SOLD_ITEMS_HEADERS,
 )
+import re
 from src.models import ItemListing, SalesOrder
+
+
+def parse_price(price_val: Any) -> float:
+    """Extracts numeric price float from strings like '$45.00', '45,00 €', or numeric values."""
+    if price_val is None:
+        return 0.0
+    if isinstance(price_val, (int, float)):
+        return float(price_val)
+    cleaned = re.sub(r"[^\d.,]", "", str(price_val)).replace(",", ".")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
 
 
 def normalize_date_str(s: str) -> str:
@@ -101,11 +115,11 @@ class SheetsSyncEngine:
                     cur_date = r[date_col_idx].strip() if len(r) > date_col_idx else ""
                     norm_dt = normalize_date_str(cur_date)
 
-                    if not cur_lot and norm_dt in date_to_lot_id:
+                    if not cur_lot and norm_dt and norm_dt in date_to_lot_id:
                         col_letter = chr(ord('A') + lot_id_idx)
                         updates.append({
                             "range": f"{col_letter}{row_idx}",
-                            "values": [[date_to_lot_id[norm_dt]]],
+                            "values": [[date_to_lot_id[norm_dt]]]
                         })
 
                 if updates:
@@ -262,10 +276,11 @@ class SheetsSyncEngine:
         vinted_id: Optional[str] = None,
         title: Optional[str] = None,
         status: str = "Sold",
+        sold_price: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Finds an active listing in Item_Listings by SKU, Vinted ID, or Title,
-        moves it to Sold_Items with updated status and timestamp,
+        moves it to Sold_Items with updated status, sold price, and timestamp,
         and removes it from Item_Listings.
         Returns the moved item data as a dictionary, or None if not found.
         """
@@ -280,10 +295,15 @@ class SheetsSyncEngine:
         headers = listings_rows[0]
         sku_idx = headers.index("Item_SKU") if "Item_SKU" in headers else 0
         title_idx = headers.index("Title") if "Title" in headers else 2
-        id_idx = headers.index("Vinted_ID") if "Vinted_ID" in headers else 10
-        status_idx = headers.index("Status") if "Status" in headers else 12
-        synced_idx = headers.index("Last_Synced") if "Last_Synced" in headers else 14
+        id_idx = headers.index("Vinted_ID") if "Vinted_ID" in headers else (headers.index("Vinted_ID") if "Vinted_ID" in headers else 14)
+        status_idx = headers.index("Status") if "Status" in headers else (headers.index("Status") if "Status" in headers else 16)
+        synced_idx = headers.index("Last_Synced") if "Last_Synced" in headers else (len(headers) - 1)
         cost_idx = headers.index("Unit_Cost") if "Unit_Cost" in headers else 5
+        posted_idx = headers.index("Posted_Price") if "Posted_Price" in headers else (headers.index("Target_Price") if "Target_Price" in headers else 6)
+        curr_idx = headers.index("Current_Price") if "Current_Price" in headers else 7
+        lowered_idx = headers.index("Price_Lowered") if "Price_Lowered" in headers else None
+        drop_idx = headers.index("Price_Drop") if "Price_Drop" in headers else None
+        sold_price_idx = headers.index("Sold_Price") if "Sold_Price" in headers else None
 
         clean_sku = sku.strip().upper() if sku else ""
         clean_id = vinted_id.strip() if vinted_id else ""
@@ -318,9 +338,22 @@ class SheetsSyncEngine:
         target_row_data[synced_idx] = now_str
 
         # Update Unit_Cost formula reference if pointing to lot row
+        col_lot = chr(ord('A') + (headers.index("Lot_ID") if "Lot_ID" in headers else 1))
         cur_cost_val = str(target_row_data[cost_idx])
         if cur_cost_val.startswith("=") and "Inventory_Lots" in cur_cost_val:
-            target_row_data[cost_idx] = f'=IFERROR(VLOOKUP(B{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)'
+            target_row_data[cost_idx] = f'=IFERROR(VLOOKUP({col_lot}{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)'
+
+        # Set Sold_Price if provided
+        if sold_price_idx is not None and sold_price is not None:
+            target_row_data[sold_price_idx] = sold_price
+
+        # Update Price_Lowered and Price_Drop formulas pointing to next_sold_row
+        col_g = chr(ord('A') + posted_idx)
+        col_h = chr(ord('A') + curr_idx)
+        if lowered_idx is not None:
+            target_row_data[lowered_idx] = f'=IF(OR({col_g}{next_sold_row}="", {col_h}{next_sold_row}=""), "", IF(AND(ISNUMBER({col_g}{next_sold_row}), ISNUMBER({col_h}{next_sold_row}), {col_h}{next_sold_row}<{col_g}{next_sold_row}), "YES", "NO"))'
+        if drop_idx is not None:
+            target_row_data[drop_idx] = f'=IF(OR({col_g}{next_sold_row}="", {col_h}{next_sold_row}=""), "", IF(AND(ISNUMBER({col_g}{next_sold_row}), ISNUMBER({col_h}{next_sold_row}), {col_h}{next_sold_row}<{col_g}{next_sold_row}), {col_g}{next_sold_row}-{col_h}{next_sold_row}, 0))'
 
         ws_sold.append_row(target_row_data, value_input_option="USER_ENTERED")
         ws_listings.delete_rows(target_row_idx)
@@ -347,11 +380,16 @@ class SheetsSyncEngine:
 
         sold_rows = ws_sold.get_all_values()
         headers = listings_rows[0]
-        status_idx = headers.index("Status") if "Status" in headers else 12
         sku_idx = headers.index("Item_SKU") if "Item_SKU" in headers else 0
-        id_idx = headers.index("Vinted_ID") if "Vinted_ID" in headers else 10
+        id_idx = headers.index("Vinted_ID") if "Vinted_ID" in headers else (headers.index("Vinted_ID") if "Vinted_ID" in headers else 14)
+        status_idx = headers.index("Status") if "Status" in headers else (headers.index("Status") if "Status" in headers else 16)
+        synced_idx = headers.index("Last_Synced") if "Last_Synced" in headers else (len(headers) - 1)
         cost_idx = headers.index("Unit_Cost") if "Unit_Cost" in headers else 5
-        synced_idx = headers.index("Last_Synced") if "Last_Synced" in headers else 14
+        posted_idx = headers.index("Posted_Price") if "Posted_Price" in headers else (headers.index("Target_Price") if "Target_Price" in headers else 6)
+        curr_idx = headers.index("Current_Price") if "Current_Price" in headers else 7
+        lowered_idx = headers.index("Price_Lowered") if "Price_Lowered" in headers else None
+        drop_idx = headers.index("Price_Drop") if "Price_Drop" in headers else None
+        sold_price_idx = headers.index("Sold_Price") if "Sold_Price" in headers else None
 
         existing_sold_skus = set()
         existing_sold_ids = set()
@@ -377,9 +415,22 @@ class SheetsSyncEngine:
                     while len(new_r) < len(headers):
                         new_r.append("")
                     next_sold_row = len(sold_rows) + len(rows_to_append) + 1
+
+                    col_lot = chr(ord('A') + (headers.index("Lot_ID") if "Lot_ID" in headers else 1))
                     cur_cost = str(new_r[cost_idx])
                     if cur_cost.startswith("=") and "Inventory_Lots" in cur_cost:
-                        new_r[cost_idx] = f'=IFERROR(VLOOKUP(B{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)'
+                        new_r[cost_idx] = f'=IFERROR(VLOOKUP({col_lot}{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)'
+
+                    col_g = chr(ord('A') + posted_idx)
+                    col_h = chr(ord('A') + curr_idx)
+                    if lowered_idx is not None:
+                        new_r[lowered_idx] = f'=IF(OR({col_g}{next_sold_row}="", {col_h}{next_sold_row}=""), "", IF(AND(ISNUMBER({col_g}{next_sold_row}), ISNUMBER({col_h}{next_sold_row}), {col_h}{next_sold_row}<{col_g}{next_sold_row}), "YES", "NO"))'
+                    if drop_idx is not None:
+                        new_r[drop_idx] = f'=IF(OR({col_g}{next_sold_row}="", {col_h}{next_sold_row}=""), "", IF(AND(ISNUMBER({col_g}{next_sold_row}), ISNUMBER({col_h}{next_sold_row}), {col_h}{next_sold_row}<{col_g}{next_sold_row}), {col_g}{next_sold_row}-{col_h}{next_sold_row}, 0))'
+
+                    if sold_price_idx is not None and (not new_r[sold_price_idx] or new_r[sold_price_idx] == "-"):
+                        new_r[sold_price_idx] = new_r[curr_idx]
+
                     new_r[synced_idx] = now_str
                     rows_to_append.append(new_r)
                     if cur_sku:
@@ -399,7 +450,7 @@ class SheetsSyncEngine:
 
     def sync_listings(self, scraped_items: List[ItemListing]) -> Dict[str, int]:
         """
-        Updates live prices and statuses of active listings in Item_Listings.
+        Updates live prices, price drop tracking, and statuses of active listings in Item_Listings.
         When an item sells or has sold status, it moves/appends to Sold_Items.
         Automatically assigns Lot_ID when Date_Listed matches Inventory_Lots purchase date.
         """
@@ -418,13 +469,22 @@ class SheetsSyncEngine:
         sku_col_idx = l_headers.index("Item_SKU") if "Item_SKU" in l_headers else 0
         lot_id_col_idx = l_headers.index("Lot_ID") if "Lot_ID" in l_headers else 1
         title_col_idx = l_headers.index("Title") if "Title" in l_headers else 2
+        brand_col_idx = l_headers.index("Brand") if "Brand" in l_headers else 3
+        cat_col_idx = l_headers.index("Category") if "Category" in l_headers else 4
+        cost_col_idx = l_headers.index("Unit_Cost") if "Unit_Cost" in l_headers else 5
+        posted_col_idx = l_headers.index("Posted_Price") if "Posted_Price" in l_headers else (l_headers.index("Target_Price") if "Target_Price" in l_headers else 6)
         price_col_idx = l_headers.index("Current_Price") if "Current_Price" in l_headers else 7
-        fav_col_idx = l_headers.index("Favorites") if "Favorites" in l_headers else 8
-        views_col_idx = l_headers.index("Views") if "Views" in l_headers else 9
-        id_col_idx = l_headers.index("Vinted_ID") if "Vinted_ID" in l_headers else 10
-        status_col_idx = l_headers.index("Status") if "Status" in l_headers else 12
-        date_col_idx = l_headers.index("Date_Listed") if "Date_Listed" in l_headers else 13
-        synced_col_idx = l_headers.index("Last_Synced") if "Last_Synced" in l_headers else 14
+        lowered_col_idx = l_headers.index("Price_Lowered") if "Price_Lowered" in l_headers else 8
+        drop_col_idx = l_headers.index("Price_Drop") if "Price_Drop" in l_headers else 9
+        hist_col_idx = l_headers.index("Price_History") if "Price_History" in l_headers else 10
+        sold_price_col_idx = l_headers.index("Sold_Price") if "Sold_Price" in l_headers else 11
+        fav_col_idx = l_headers.index("Favorites") if "Favorites" in l_headers else 12
+        views_col_idx = l_headers.index("Views") if "Views" in l_headers else 13
+        id_col_idx = l_headers.index("Vinted_ID") if "Vinted_ID" in l_headers else 14
+        url_col_idx = l_headers.index("Vinted_URL") if "Vinted_URL" in l_headers else 15
+        status_col_idx = l_headers.index("Status") if "Status" in l_headers else 16
+        date_col_idx = l_headers.index("Date_Listed") if "Date_Listed" in l_headers else 17
+        synced_col_idx = l_headers.index("Last_Synced") if "Last_Synced" in l_headers else 18
 
         # Map active listings
         listings_by_vinted_id: Dict[str, int] = {}
@@ -453,6 +513,9 @@ class SheetsSyncEngine:
         moved_to_sold_count = 0
         updated_count = 0
 
+        col_g = chr(ord('A') + posted_col_idx)
+        col_h = chr(ord('A') + price_col_idx)
+
         for item in scraped_items:
             v_id = item.vinted_id.strip() if item.vinted_id else ""
             clean_title = item.title.strip().lower()
@@ -462,22 +525,31 @@ class SheetsSyncEngine:
             in_active_row = listings_by_vinted_id.get(v_id) or listings_by_title.get(clean_title)
             in_sold_row = sold_by_vinted_id.get(v_id) or sold_by_title.get(clean_title)
 
+            posted_val = item.posted_price if (item.posted_price and item.posted_price > 0) else item.current_price
+            curr_val = item.current_price
+
             if is_sold:
                 if in_active_row:
                     # Move active listing to Sold_Items
-                    res = self.move_listing_to_sold(vinted_id=v_id, title=clean_title, status="Sold")
+                    res = self.move_listing_to_sold(
+                        vinted_id=v_id,
+                        title=clean_title,
+                        status="Sold",
+                        sold_price=item.sold_price if item.sold_price is not None else curr_val,
+                    )
                     if res:
                         moved_to_sold_count += 1
-                        # Remove from active maps to avoid re-processing
                         listings_by_vinted_id.pop(v_id, None)
                         listings_by_title.pop(clean_title, None)
                 elif in_sold_row:
-                    # Update stats on existing sold row
                     col_price = chr(ord('A') + price_col_idx)
                     col_fav = chr(ord('A') + fav_col_idx)
                     col_views = chr(ord('A') + views_col_idx)
                     col_synced = chr(ord('A') + synced_col_idx)
-                    sold_updates.append({"range": f"{col_price}{in_sold_row}", "values": [[item.current_price]]})
+                    sold_updates.append({"range": f"{col_price}{in_sold_row}", "values": [[curr_val]]})
+                    if sold_price_col_idx is not None and item.sold_price is not None:
+                        col_sp = chr(ord('A') + sold_price_col_idx)
+                        sold_updates.append({"range": f"{col_sp}{in_sold_row}", "values": [[item.sold_price]]})
                     sold_updates.append({"range": f"{col_fav}{in_sold_row}", "values": [[item.favorites]]})
                     sold_updates.append({"range": f"{col_views}{in_sold_row}", "values": [[item.views]]})
                     sold_updates.append({"range": f"{col_synced}{in_sold_row}", "values": [[now_str]]})
@@ -488,15 +560,25 @@ class SheetsSyncEngine:
                     new_sku = f"SKU-{max_sku_num}"
                     next_sold_row_idx = len(sold_rows) + len(new_sold_rows) + 1
                     assigned_lot = item.lot_id or date_to_lot_id.get(item_date_str, "")
+                    col_lot = chr(ord('A') + lot_id_col_idx)
+
+                    hist_str = ""
+                    if posted_val > curr_val > 0:
+                        hist_str = f"{datetime.now().strftime('%m/%d')}: ${posted_val:.2f} → ${curr_val:.2f}"
+
                     sold_row_data = [
                         new_sku,
                         assigned_lot,
                         item.title,
                         item.brand or "",
                         item.category or "",
-                        f"=IFERROR(VLOOKUP(B{next_sold_row_idx}, Inventory_Lots!A:F, 6, FALSE), 0)",
-                        item.target_price or item.current_price,
-                        item.current_price,
+                        f"=IFERROR(VLOOKUP({col_lot}{next_sold_row_idx}, Inventory_Lots!A:F, 6, FALSE), 0)",
+                        posted_val,
+                        curr_val,
+                        f'=IF(OR({col_g}{next_sold_row_idx}="", {col_h}{next_sold_row_idx}=""), "", IF(AND(ISNUMBER({col_g}{next_sold_row_idx}), ISNUMBER({col_h}{next_sold_row_idx}), {col_h}{next_sold_row_idx}<{col_g}{next_sold_row_idx}), "YES", "NO"))',
+                        f'=IF(OR({col_g}{next_sold_row_idx}="", {col_h}{next_sold_row_idx}=""), "", IF(AND(ISNUMBER({col_g}{next_sold_row_idx}), ISNUMBER({col_h}{next_sold_row_idx}), {col_h}{next_sold_row_idx}<{col_g}{next_sold_row_idx}), {col_g}{next_sold_row_idx}-{col_h}{next_sold_row_idx}, 0))',
+                        hist_str,
+                        item.sold_price if item.sold_price is not None else curr_val,
                         item.favorites,
                         item.views,
                         item.vinted_id,
@@ -509,14 +591,36 @@ class SheetsSyncEngine:
             else:
                 # Active listing (e.g. Listed or Reserved)
                 if in_active_row:
+                    existing_data = listings_rows[in_active_row - 1]
+                    old_curr_str = existing_data[price_col_idx] if len(existing_data) > price_col_idx else ""
+                    old_curr_val = parse_price(old_curr_str)
+                    old_hist = existing_data[hist_col_idx] if len(existing_data) > hist_col_idx else ""
+
+                    # Detect price reduction and record in Price_History
+                    if old_curr_val > 0 and curr_val > 0 and curr_val < old_curr_val:
+                        today_md = datetime.now().strftime("%m/%d")
+                        drop_entry = f"{today_md}: ${old_curr_val:.2f} → ${curr_val:.2f}"
+                        updated_hist = f"{old_hist} | {drop_entry}" if old_hist.strip() else drop_entry
+                        col_hist = chr(ord('A') + hist_col_idx)
+                        listing_updates.append({"range": f"{col_hist}{in_active_row}", "values": [[updated_hist]]})
+
                     col_price = chr(ord('A') + price_col_idx)
                     col_fav = chr(ord('A') + fav_col_idx)
                     col_views = chr(ord('A') + views_col_idx)
                     col_status = chr(ord('A') + status_col_idx)
                     col_synced = chr(ord('A') + synced_col_idx)
 
+                    # Ensure formulas for Price_Lowered and Price_Drop are set
+                    cur_lowered_val = existing_data[lowered_col_idx] if len(existing_data) > lowered_col_idx else ""
+                    cur_drop_val = existing_data[drop_col_idx] if len(existing_data) > drop_col_idx else ""
+                    if not cur_lowered_val.startswith("="):
+                        col_low = chr(ord('A') + lowered_col_idx)
+                        listing_updates.append({"range": f"{col_low}{in_active_row}", "values": [[f'=IF(OR({col_g}{in_active_row}="", {col_h}{in_active_row}=""), "", IF(AND(ISNUMBER({col_g}{in_active_row}), ISNUMBER({col_h}{in_active_row}), {col_h}{in_active_row}<{col_g}{in_active_row}), "YES", "NO"))']]})
+                    if not cur_drop_val.startswith("="):
+                        col_drp = chr(ord('A') + drop_col_idx)
+                        listing_updates.append({"range": f"{col_drp}{in_active_row}", "values": [[f'=IF(OR({col_g}{in_active_row}="", {col_h}{in_active_row}=""), "", IF(AND(ISNUMBER({col_g}{in_active_row}), ISNUMBER({col_h}{in_active_row}), {col_h}{in_active_row}<{col_g}{in_active_row}), {col_g}{in_active_row}-{col_h}{in_active_row}, 0))']]})
+
                     # Check for unassigned lot match
-                    existing_data = listings_rows[in_active_row - 1]
                     cur_lot = existing_data[lot_id_col_idx].strip() if len(existing_data) > lot_id_col_idx else ""
                     cur_date = existing_data[date_col_idx].strip() if len(existing_data) > date_col_idx else ""
                     row_dt = normalize_date_str(cur_date) or item_date_str
@@ -524,7 +628,7 @@ class SheetsSyncEngine:
                         col_lot = chr(ord('A') + lot_id_col_idx)
                         listing_updates.append({"range": f"{col_lot}{in_active_row}", "values": [[date_to_lot_id[row_dt]]]})
 
-                    listing_updates.append({"range": f"{col_price}{in_active_row}", "values": [[item.current_price]]})
+                    listing_updates.append({"range": f"{col_price}{in_active_row}", "values": [[curr_val]]})
                     listing_updates.append({"range": f"{col_fav}{in_active_row}", "values": [[item.favorites]]})
                     listing_updates.append({"range": f"{col_views}{in_active_row}", "values": [[item.views]]})
                     if item.status:
@@ -537,15 +641,25 @@ class SheetsSyncEngine:
                     new_sku = f"SKU-{max_sku_num}"
                     new_active_idx = len(listings_rows) + len(new_active_rows) + 1
                     assigned_lot = item.lot_id or date_to_lot_id.get(item_date_str, "")
+                    col_lot = chr(ord('A') + lot_id_col_idx)
+
+                    hist_str = ""
+                    if posted_val > curr_val > 0:
+                        hist_str = f"{datetime.now().strftime('%m/%d')}: ${posted_val:.2f} → ${curr_val:.2f}"
+
                     active_row_data = [
                         new_sku,
                         assigned_lot,
                         item.title,
                         item.brand or "",
                         item.category or "",
-                        f"=IFERROR(VLOOKUP(B{new_active_idx}, Inventory_Lots!A:F, 6, FALSE), 0)",
-                        item.target_price or item.current_price,
-                        item.current_price,
+                        f"=IFERROR(VLOOKUP({col_lot}{new_active_idx}, Inventory_Lots!A:F, 6, FALSE), 0)",
+                        posted_val,
+                        curr_val,
+                        f'=IF(OR({col_g}{new_active_idx}="", {col_h}{new_active_idx}=""), "", IF(AND(ISNUMBER({col_g}{new_active_idx}), ISNUMBER({col_h}{new_active_idx}), {col_h}{new_active_idx}<{col_g}{new_active_idx}), "YES", "NO"))',
+                        f'=IF(OR({col_g}{new_active_idx}="", {col_h}{new_active_idx}=""), "", IF(AND(ISNUMBER({col_g}{new_active_idx}), ISNUMBER({col_h}{new_active_idx}), {col_h}{new_active_idx}<{col_g}{new_active_idx}), {col_g}{new_active_idx}-{col_h}{new_active_idx}, 0))',
+                        hist_str,
+                        "",
                         item.favorites,
                         item.views,
                         item.vinted_id,
@@ -585,6 +699,7 @@ class SheetsSyncEngine:
     def sync_orders(self, scraped_orders: List[SalesOrder]) -> Dict[str, int]:
         """
         Inserts new sold orders into Sales_Log and moves matching Item_Listings to Sold_Items.
+        Records Posted_Price, Sold_Price, and Price_Discount in Sales_Log.
         """
         sh = self.client.get_spreadsheet()
         ws_sales = sh.worksheet(TAB_SALES_LOG)
@@ -604,11 +719,12 @@ class SheetsSyncEngine:
                 continue
 
             clean_title = order.item_title.strip()
-            # 1. Attempt to move matching active listing to Sold_Items
+            # 1. Attempt to move matching active listing to Sold_Items with sold_price
             moved_item = self.move_listing_to_sold(
                 sku=order.item_sku,
                 title=clean_title,
                 status="Sold",
+                sold_price=order.sold_price,
             )
 
             matched_sku = ""
@@ -622,7 +738,7 @@ class SheetsSyncEngine:
                 matched_category = moved_item.get("Category", "")
                 matched_fav = moved_item.get("Favorites", "")
             else:
-                # 2. Check if already in Sold_Items
+                # 2. Check if already in Sold_Items, and update Sold_Price
                 sold_rows = ws_sold.get_all_values()
                 if len(sold_rows) > 1:
                     s_headers = sold_rows[0]
@@ -630,10 +746,11 @@ class SheetsSyncEngine:
                     s_title_idx = s_headers.index("Title") if "Title" in s_headers else 2
                     s_brand_idx = s_headers.index("Brand") if "Brand" in s_headers else 3
                     s_cat_idx = s_headers.index("Category") if "Category" in s_headers else 4
-                    s_fav_idx = s_headers.index("Favorites") if "Favorites" in s_headers else 8
+                    s_fav_idx = s_headers.index("Favorites") if "Favorites" in s_headers else 12
+                    s_sold_price_idx = s_headers.index("Sold_Price") if "Sold_Price" in s_headers else 11
 
                     clean_low = clean_title.lower()
-                    for sr in sold_rows[1:]:
+                    for r_i, sr in enumerate(sold_rows[1:], start=2):
                         sr_sku = sr[s_sku_idx].strip().upper() if len(sr) > s_sku_idx else ""
                         sr_title = sr[s_title_idx].strip().lower() if len(sr) > s_title_idx else ""
                         if (order.item_sku and sr_sku == order.item_sku.strip().upper()) or (clean_low and sr_title == clean_low):
@@ -641,6 +758,9 @@ class SheetsSyncEngine:
                             matched_brand = sr[s_brand_idx] if len(sr) > s_brand_idx else ""
                             matched_category = sr[s_cat_idx] if len(sr) > s_cat_idx else ""
                             matched_fav = sr[s_fav_idx] if len(sr) > s_fav_idx else 0
+                            if s_sold_price_idx is not None and order.sold_price:
+                                col_sp = chr(ord('A') + s_sold_price_idx)
+                                ws_sold.update_acell(f"{col_sp}{r_i}", order.sold_price)
                             break
 
             if not matched_sku:
@@ -655,22 +775,24 @@ class SheetsSyncEngine:
             next_row_num = len(sales_rows) + len(new_sales_rows) + 1
 
             new_sale_data = [
-                order.order_id,
-                order.platform or "Vinted",
-                matched_sku,
-                order.item_title,
-                matched_brand or f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:E, 4, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 4, FALSE), ""))',
-                matched_category or f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:E, 5, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 5, FALSE), ""))',
-                matched_fav if matched_fav != "" else f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:I, 9, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:I, 9, FALSE), 0))',
-                order.sale_date.strftime("%Y-%m-%d") if order.sale_date else datetime.now().strftime("%Y-%m-%d"),
-                order.sold_price,
-                order.seller_fees,
-                order.net_payout,
-                f"=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:F, 6, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:F, 6, FALSE), 0))",
-                f'=IF(B{next_row_num}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)',
-                f"=K{next_row_num}-L{next_row_num}-M{next_row_num}",
-                f"=IF(I{next_row_num}>0, N{next_row_num}/I{next_row_num}, 0)",
-                order.vinted_status or "Completed",
+                order.order_id,                                                   # A: Order_ID
+                order.platform or "Vinted",                                       # B: Platform
+                matched_sku,                                                      # C: Item_SKU
+                order.item_title,                                                 # D: Item_Title
+                matched_brand or f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:E, 4, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 4, FALSE), ""))', # E: Brand
+                matched_category or f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:E, 5, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:E, 5, FALSE), ""))', # F: Category
+                matched_fav if matched_fav != "" else f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:M, 13, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:M, 13, FALSE), 0))', # G: Favorites
+                order.sale_date.strftime("%Y-%m-%d") if order.sale_date else datetime.now().strftime("%Y-%m-%d"), # H: Sale_Date
+                f'=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:G, 7, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:G, 7, FALSE), 0))', # I: Posted_Price
+                order.sold_price,                                                 # J: Sold_Price
+                f'=IF(AND(ISNUMBER(I{next_row_num}), ISNUMBER(J{next_row_num}), I{next_row_num}>0), I{next_row_num}-J{next_row_num}, 0)', # K: Price_Discount
+                order.seller_fees,                                                # L: Seller_Fees
+                order.net_payout,                                                 # M: Net_Payout
+                f"=IFERROR(VLOOKUP(C{next_row_num}, Sold_Items!A:F, 6, FALSE), IFERROR(VLOOKUP(C{next_row_num}, Item_Listings!A:F, 6, FALSE), 0))", # N: Item_Cost
+                f'=IF(B{next_row_num}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)', # O: Packaging_Cost
+                f"=M{next_row_num}-N{next_row_num}-O{next_row_num}",             # P: Net_Profit
+                f"=IF(J{next_row_num}>0, P{next_row_num}/J{next_row_num}, 0)",  # Q: Margin_%
+                order.vinted_status or "Completed",                               # R: Order_Status
             ]
             new_sales_rows.append(new_sale_data)
 

@@ -10,8 +10,6 @@ from src.scraper.browser import get_browser_context, human_delay
 console = Console()
 
 
-from src.notifications import notify_auth_failure, notify_auth_success
-
 
 async def interactive_login():
     """
@@ -56,6 +54,8 @@ async def verify_session() -> bool:
     """
     Checks if saved storage state exists and is still valid on Vinted.
     """
+    from src.notifications import notify_auth_failure, notify_auth_success
+
     if not settings.full_storage_state_path.exists():
         console.print("[yellow]⚠️ No saved session found. Please run 'python -m src.cli login' first.[/yellow]")
         notify_auth_failure("No saved Vinted session state file found (.session/vinted_state.json)")
