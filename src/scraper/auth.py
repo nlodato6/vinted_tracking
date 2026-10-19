@@ -11,12 +11,88 @@ console = Console()
 
 
 
+def parse_and_save_cookies(raw_text: str, target_domain: str = "vinted.com") -> Path:
+    """
+    Parses cookies from JSON (Cookie-Editor / Playwright format) or
+    raw Cookie header string and writes standard Playwright storage_state JSON.
+    """
+    import json
+
+    raw_text = raw_text.strip()
+    cookies = []
+
+    # 1. Try parsing JSON (Cookie-Editor export or Playwright storage state)
+    try:
+        data = json.loads(raw_text)
+        if isinstance(data, dict) and "cookies" in data:
+            cookies = data["cookies"]
+        elif isinstance(data, list):
+            cookies = data
+    except json.JSONDecodeError:
+        # 2. Try parsing raw header format: "key1=val1; key2=val2"
+        pairs = [p.strip() for p in raw_text.split(";") if "=" in p]
+        for pair in pairs:
+            name, _, value = pair.partition("=")
+            name = name.strip()
+            value = value.strip()
+            if name:
+                cookies.append({
+                    "name": name,
+                    "value": value,
+                    "domain": f".{target_domain}",
+                    "path": "/",
+                    "expires": -1,
+                    "httpOnly": False,
+                    "secure": True,
+                    "sameSite": "Lax",
+                })
+
+    if not cookies:
+        raise ValueError("Could not parse any valid cookies from input.")
+
+    # Normalize cookie objects for Playwright
+    normalized_cookies = []
+    for c in cookies:
+        if not isinstance(c, dict) or "name" not in c or "value" not in c:
+            continue
+        domain = c.get("domain", f".{target_domain}")
+        if not domain.startswith("."):
+            domain = f".{domain}"
+        normalized_cookies.append({
+            "name": str(c["name"]),
+            "value": str(c["value"]),
+            "domain": domain,
+            "path": str(c.get("path", "/")),
+            "expires": float(c.get("expires", -1)),
+            "httpOnly": bool(c.get("httpOnly", False)),
+            "secure": bool(c.get("secure", True)),
+            "sameSite": str(c.get("sameSite", "Lax")).capitalize(),
+        })
+
+    storage_state = {
+        "cookies": normalized_cookies,
+        "origins": [
+            {
+                "origin": f"https://www.{target_domain}",
+                "localStorage": [],
+            }
+        ],
+    }
+
+    target_path = settings.full_storage_state_path
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(target_path, "w", encoding="utf-8") as f:
+        json.dump(storage_state, f, indent=2)
+
+    return target_path
+
+
 async def interactive_login():
     """
-    Launches an interactive (headed) browser session for the user to log in
-    to Vinted. Once logged in, cookies and tokens are persisted to disk.
+    Launches an interactive browser session using real Google Chrome with stealth.
+    Once logged in, cookies and tokens are persisted to disk.
     """
-    console.print("\n[bold cyan]🚀 Launching interactive browser for Vinted login...[/bold cyan]")
+    console.print("\n[bold cyan]🚀 Launching Google Chrome for Vinted login...[/bold cyan]")
     console.print(f"[dim]Navigating to {settings.vinted_base_url}[/dim]")
 
     context = await get_browser_context(headless=False, use_storage_state=False)
@@ -26,10 +102,12 @@ async def interactive_login():
         await page.goto(settings.vinted_base_url, wait_until="domcontentloaded")
         await human_delay(1.5, 2.5)
 
-        console.print("\n[bold yellow]👉 INSTRUCTIONS:[/bold yellow]")
-        console.print("1. In the opened browser window, log in to your Vinted account.")
-        console.print("2. Complete any 2FA or CAPTCHA security challenges if prompted.")
-        console.print("3. Ensure your profile avatar / account is visible.")
+        console.print("\n[bold yellow]👉 INSTRUCTIONS & LOGIN TIPS:[/bold yellow]")
+        console.print("1. In the opened Google Chrome window, log in to your Vinted account.")
+        console.print("   [dim]• If prompted, complete any CAPTCHA or 2FA challenge.[/dim]")
+        console.print("   [dim]• If you use Google login, Google may restrict automated browsers ('This browser or app may not be secure').[/dim]")
+        console.print("     [dim]If that happens, use Email & Password, Apple ID, or import cookies directly via 'python -m src.cli import-cookie'.[/dim]")
+        console.print("2. Ensure your profile avatar / account is visible.")
         console.print("\n[bold green]Once you are fully logged in, press [ENTER] in this terminal to save your session...[/bold green]")
 
         # Wait for user input in terminal
@@ -57,7 +135,7 @@ async def verify_session() -> bool:
     from src.notifications import notify_auth_failure, notify_auth_success
 
     if not settings.full_storage_state_path.exists():
-        console.print("[yellow]⚠️ No saved session found. Please run 'python -m src.cli login' first.[/yellow]")
+        console.print("[yellow]⚠️ No saved session found. Please run 'python -m src.cli login' or 'import-cookie' first.[/yellow]")
         notify_auth_failure("No saved Vinted session state file found (.session/vinted_state.json)")
         return False
 
@@ -65,13 +143,25 @@ async def verify_session() -> bool:
     page: Page = await context.new_page()
 
     try:
-        await page.goto(f"{settings.vinted_base_url}/member/items", wait_until="domcontentloaded")
-        await human_delay(1.5, 2.0)
+        await page.goto(f"{settings.vinted_base_url}", wait_until="domcontentloaded")
+        await human_delay(1.5, 2.5)
 
         current_url = page.url
-        if "login" in current_url or "auth" in current_url:
+        if "login" in current_url or "auth" in current_url or "signup" in current_url:
             console.print("[red]❌ Saved session has expired or is invalid.[/red]")
-            notify_auth_failure("Vinted session redirected to login page (session expired)")
+            notify_auth_failure("Vinted session redirected to login/signup (session expired)")
+            return False
+
+        # Check for presence of login/signup prompt vs authenticated profile
+        content = await page.content()
+        is_guest = any(
+            marker in content.lower()
+            for marker in ["signup/select_type", "sign up | log in", "sign in with google", "member/signup"]
+        )
+
+        if is_guest:
+            console.print("[red]❌ Session file does not contain active login credentials.[/red]")
+            notify_auth_failure("Session cookies present but user is not logged in")
             return False
 
         console.print("[green]✅ Authenticated Vinted session is active and valid.[/green]")

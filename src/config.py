@@ -56,8 +56,9 @@ class Settings(BaseSettings):
 
     @property
     def full_storage_state_path(self) -> Path:
-        self.session_dir.mkdir(parents=True, exist_ok=True)
-        return self.session_dir / self.storage_state_file
+        p = Path(self.session_dir)
+        p.mkdir(parents=True, exist_ok=True)
+        return p / self.storage_state_file
 
     @property
     def vinted_base_url(self) -> str:

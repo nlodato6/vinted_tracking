@@ -6,7 +6,7 @@ from rich.console import Console
 from rich.table import Table
 
 from src.config import settings
-from src.scraper import interactive_login, verify_session, scrape_closet_listings, scrape_vinted_orders
+from src.scraper import interactive_login, verify_session, parse_and_save_cookies, scrape_closet_listings, scrape_vinted_orders
 from src.sheets import GoogleSheetsClient, initialize_all_tabs, SheetsSyncEngine
 from src.notifications import notify_auth_failure, notify_auth_success
 
@@ -18,6 +18,43 @@ console = Console()
 def login():
     """Launch interactive browser to log in to Vinted and save authentication session."""
     asyncio.run(interactive_login())
+
+
+@app.command()
+def import_cookie(
+    file: typer.Option(None, "--file", "-f", help="Path to exported cookie JSON file from browser"),
+):
+    """Import active Vinted session cookies directly from your regular browser."""
+    console.print("\n[bold cyan]🍪 Vinted Session Cookie Importer[/bold cyan]")
+    
+    if file:
+        file_path = typer.Path(file)
+        import Path as _P
+        from pathlib import Path
+        p = Path(file)
+        if not p.exists():
+            console.print(f"[bold red]❌ File not found: {file}[/bold red]")
+            raise typer.Exit(code=1)
+        raw_text = p.read_text(encoding="utf-8")
+    else:
+        console.print("[dim]Tip: You can export cookies from your regular browser (Chrome/Safari) using:[/dim]")
+        console.print("[dim]  Option A: A free extension like 'Cookie-Editor' (Click Export -> Export as JSON).[/dim]")
+        console.print("[dim]  Option B: Chrome DevTools Console on vinted.com -> type: copy(document.cookie)[/dim]")
+        console.print("\n[yellow]Paste your cookie JSON or cookie header string below, then press [ENTER]:[/yellow]")
+        raw_text = input().strip()
+
+    if not raw_text:
+        console.print("[bold red]❌ No cookie data provided.[/bold red]")
+        raise typer.Exit(code=1)
+
+    try:
+        saved_path = parse_and_save_cookies(raw_text)
+        console.print(f"[bold green]✅ Session successfully imported and saved to {saved_path}![/bold green]")
+        notify_auth_success()
+        console.print("[dim]You can verify it anytime by running: python -m src.cli check-session[/dim]\n")
+    except Exception as e:
+        console.print(f"[bold red]❌ Failed to import cookies: {e}[/bold red]")
+        raise typer.Exit(code=1)
 
 
 @app.command()

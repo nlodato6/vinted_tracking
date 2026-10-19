@@ -102,14 +102,26 @@ This automatically builds and formats all 5 tabs, header rows, color themes, for
 
 ### 5. Authenticate with Vinted (1-Time Setup)
 
+#### Option A: Direct Interactive Browser Login (Google Chrome Stealth)
 Launch the interactive login session:
 ```bash
 python -m src.cli login
 ```
-* A Chromium browser window will open to `vinted.com`.
-* Log in with your account credentials and solve any 2FA or CAPTCHA check.
-* Once your profile is visible, return to the terminal and press **[ENTER]**.
-* Your session tokens are safely saved to `.session/vinted_state.json` and reused headlessly for all future automated runs.
+* A Google Chrome browser window will open with anti-automation flags stripped and stealth evasions enabled.
+* Log in with your account credentials (**Email & Password** or **Apple ID**).
+* *Note: If using "Continue with Google", Google restricts automated test browsers with "This browser or app may not be secure". In that case, use Option B below.*
+* Once your profile avatar is visible, return to the terminal and press **[ENTER]**.
+* Your session tokens are safely saved to `.session/vinted_state.json`.
+
+#### Option B: Instant Cookie Import (100% Anti-Bot Proof)
+If you are already logged in to Vinted on your regular browser (Chrome, Brave, Safari):
+1. **Via Cookie-Editor extension** (Recommended): Open `vinted.com` $\rightarrow$ click Cookie-Editor $\rightarrow$ click **Export (Export as JSON)**.
+2. **Via Chrome DevTools Console**: Open DevTools on `vinted.com` $\rightarrow$ Console $\rightarrow$ type: `copy(document.cookie)`
+3. Run:
+```bash
+python -m src.cli import-cookie
+```
+Paste your copied cookies and press **[ENTER]**. It will automatically format and save `.session/vinted_state.json` without triggering any login challenges!
 
 You can verify your session anytime with:
 ```bash

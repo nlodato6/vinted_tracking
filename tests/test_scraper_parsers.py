@@ -54,3 +54,42 @@ def test_normalize_date_str():
     assert normalize_date_str("2026/10/19") == "2026-10-19"
     assert normalize_date_str("10-19-2026") == "2026-10-19"
     assert normalize_date_str("") == ""
+
+
+def test_parse_and_save_cookies_json(tmp_path, monkeypatch):
+    import json
+    from src.scraper.auth import parse_and_save_cookies
+    from src.config import settings
+
+    test_file = tmp_path / "vinted_state.json"
+    monkeypatch.setattr(settings, "session_dir", str(tmp_path))
+
+    json_payload = json.dumps([
+        {"name": "v_sid", "value": "test_session_123", "domain": "vinted.com"},
+        {"name": "access_token_web", "value": "test_token_456", "domain": ".vinted.com"}
+    ])
+
+    saved_path = parse_and_save_cookies(json_payload)
+    assert saved_path.exists()
+    saved_data = json.loads(saved_path.read_text())
+    assert "cookies" in saved_data
+    assert len(saved_data["cookies"]) == 2
+    assert saved_data["cookies"][0]["name"] == "v_sid"
+    assert saved_data["cookies"][0]["domain"] == ".vinted.com"
+
+
+def test_parse_and_save_cookies_header_string(tmp_path, monkeypatch):
+    import json
+    from src.scraper.auth import parse_and_save_cookies
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "session_dir", str(tmp_path))
+
+    header_payload = "v_sid=abc123; access_token_web=xyz789; anon_id=anon_456"
+    saved_path = parse_and_save_cookies(header_payload)
+    assert saved_path.exists()
+    saved_data = json.loads(saved_path.read_text())
+    assert len(saved_data["cookies"]) == 3
+    names = {c["name"] for c in saved_data["cookies"]}
+    assert names == {"v_sid", "access_token_web", "anon_id"}
+

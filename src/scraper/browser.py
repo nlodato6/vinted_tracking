@@ -33,18 +33,28 @@ Object.defineProperty(navigator, 'languages', {
 
 async def get_browser_context(headless: Optional[bool] = None, use_storage_state: bool = True) -> BrowserContext:
     """Creates a configured browser context with stealth injections and persistent session state."""
+    from playwright_stealth import Stealth
+
     is_headless = headless if headless is not None else settings.headless
     pw = await async_playwright().start()
 
-    browser = await pw.chromium.launch(
-        headless=is_headless,
-        args=[
+    launch_kwargs = {
+        "headless": is_headless,
+        "args": [
             "--disable-blink-features=AutomationControlled",
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--disable-infobars",
+            "--disable-features=IsolateOrigins,site-per-process",
         ],
-    )
+        "ignore_default_args": ["--enable-automation"],
+    }
+
+    # Attempt to launch system Google Chrome first (bypasses bot checks and DataDome far more reliably)
+    try:
+        browser = await pw.chromium.launch(channel="chrome", **launch_kwargs)
+    except Exception:
+        browser = await pw.chromium.launch(**launch_kwargs)
 
     state_path = settings.full_storage_state_path if (use_storage_state and settings.full_storage_state_path.exists()) else None
 
@@ -57,7 +67,9 @@ async def get_browser_context(headless: Optional[bool] = None, use_storage_state
         timezone_id="America/Chicago",
     )
 
-    await context.add_init_script(STEALTH_JS)
+    # Apply comprehensive playwright-stealth evasions (webdriver, chrome runtime, plugins, media codecs, etc.)
+    stealth = Stealth()
+    await stealth.apply_stealth_async(context)
     return context
 
 

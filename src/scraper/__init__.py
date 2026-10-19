@@ -1,5 +1,5 @@
 from .browser import get_browser_context, human_delay
-from .auth import interactive_login, verify_session
+from .auth import interactive_login, verify_session, parse_and_save_cookies
 from .closet import scrape_closet_listings
 from .orders import scrape_vinted_orders
 
@@ -8,6 +8,7 @@ __all__ = [
     "human_delay",
     "interactive_login",
     "verify_session",
+    "parse_and_save_cookies",
     "scrape_closet_listings",
     "scrape_vinted_orders",
 ]

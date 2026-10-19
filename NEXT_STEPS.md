@@ -10,21 +10,31 @@
 
 ## 🚀 Step 1: Perform 1-Time Vinted Authentication
 
-To scrape your live closet listings (`/member/items`), active prices, favorites, and sold orders (`/my-orders`), Playwright needs an authenticated session token:
+To scrape your live closet listings, active prices, favorites, and sold orders, Playwright needs an authenticated session token. Choose whichever method is easiest for you:
 
-1. Open your terminal in the project directory:
+### Option A: Direct Interactive Browser Login (Google Chrome Stealth)
+```bash
+python -m src.cli login
+```
+* A Google Chrome browser window will open with anti-automation flags stripped and stealth evasions enabled.
+* Log in with your account credentials (**Email & Password** or **Apple ID**).
+* *Note: If you use "Continue with Google", Google specifically blocks automated browsers ("This browser or app may not be secure"). In that case, use Option B below.*
+* Once your profile is visible, return to the terminal and press **[ENTER]**.
+
+### Option B: Instant Cookie Import (100% Anti-Bot Proof & Bypasses All Challenges)
+If you are already logged in to Vinted on your regular browser (Chrome, Brave, Safari, etc.):
+1. **Via Cookie-Editor Extension** (Fastest):
+   * Install the free [Cookie-Editor extension](https://cookie-editor.com/).
+   * Go to `vinted.com` $\rightarrow$ click Cookie-Editor $\rightarrow$ click **Export** $\rightarrow$ **Export as JSON**.
+2. **Via Chrome DevTools Console**:
+   * Open `vinted.com` in your regular browser.
+   * Press `Cmd + Option + I` (or Right Click $\rightarrow$ Inspect) $\rightarrow$ click **Console**.
+   * Type: `copy(document.cookie)` and press Enter.
+3. Run:
    ```bash
-   cd /Users/nicol/Desktop/vinted_tracking
-   source venv/bin/activate
+   python -m src.cli import-cookie
    ```
-2. Run the interactive login command:
-   ```bash
-   python -m src.cli login
-   ```
-3. A browser window will open to `vinted.com`.
-4. Log in to your account (`tlodato24`) and solve any 2FA code or security check.
-5. Once you are logged in and see your profile icon, return to the terminal and press **[ENTER]**.
-6. The session cookies will be saved to `.session/vinted_state.json`.
+   Paste the copied cookie text and press **[ENTER]**. It will immediately create `.session/vinted_state.json` without any bot challenges!
 
 > [!TIP]
 > You can verify the session is active anytime by running:
@@ -133,7 +143,8 @@ If Vinted prompts for verification or your session expires:
 | Command | What It Does |
 | :--- | :--- |
 | `python -m src.cli status` | Displays Google Sheets connection, session status, and config |
-| `python -m src.cli login` | Opens browser for 1-time Vinted login session capture |
+| `python -m src.cli login` | Opens Google Chrome with stealth for 1-time login session capture |
+| `python -m src.cli import-cookie` | Imports active cookies from regular browser (bypasses bot blocks) |
 | `python -m src.cli upload-session` | Uploads session to GitHub Secrets and resets auth status |
 | `python -m src.cli check-session` | Checks if your saved Vinted login token is still valid |
 | `python -m src.cli sync --type listings` | Refreshes asking prices, favorites, and new listings |
@@ -143,4 +154,4 @@ If Vinted prompts for verification or your session expires:
 | `python -m src.cli log-sale --sku SKU-1001 --price 45` | Logs external sale (e.g. FB Marketplace) and moves item to `Sold_Items` |
 | `python -m src.cli serve --port 8000` | Starts the webhook listener server |
 | `python -m src.cli scheduler` | Starts background automatic periodic sync daemon |
-| `pytest -v` | Runs all 36 verification unit tests |
+| `pytest -v` | Runs all 38 verification unit tests |
