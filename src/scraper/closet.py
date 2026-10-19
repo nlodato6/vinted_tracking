@@ -155,21 +155,33 @@ async def scrape_closet_listings(username: Optional[str] = None) -> List[ItemLis
                     continue
                 seen_ids.add(v_id)
 
-                # Extract title
-                title_elem = (
-                    await card.query_selector("[data-testid*='title']")
-                    or await card.query_selector("h3, h4, p[class*='title']")
-                    or await card.query_selector("img[alt]")
-                )
+                # Extract title and brand from Vinted's rich overlay title or img alt:
+                # e.g. "Face Print Pants, brand: Shein, condition: Good, size: S / US 4-6, $2.00"
+                overlay_title = (await link_elem.get_attribute("title")) or ""
+                img_elem = await card.query_selector("img[alt]")
+                img_alt = (await img_elem.get_attribute("alt")) if img_elem else ""
+                raw_meta = overlay_title or img_alt
+
                 title = ""
-                if title_elem:
-                    tag_name = await (await title_elem.get_property("tagName")).json_value()
-                    if tag_name.lower() == "img":
-                        title = await title_elem.get_attribute("alt") or ""
-                    else:
-                        title = await title_elem.inner_text()
+                extracted_brand = ""
+                if raw_meta and ", brand:" in raw_meta:
+                    parts = raw_meta.split(", brand:")
+                    title = parts[0].strip()
+                    extracted_brand = parts[1].split(",")[0].strip()
+                elif raw_meta and "," in raw_meta:
+                    title = raw_meta.split(",")[0].strip()
+                elif raw_meta:
+                    title = raw_meta.strip()
 
                 if not title:
+                    title_elem = (
+                        await card.query_selector("[data-testid*='title']")
+                        or await card.query_selector("h3, h4, p[class*='title']")
+                    )
+                    if title_elem:
+                        title = (await title_elem.inner_text()).strip()
+
+                if not title or "views" in title.lower():
                     slug_match = re.search(r"/items/\d+-([\w-]+)", full_url)
                     title = slug_match.group(1).replace("-", " ").title() if slug_match else f"Vinted Item {v_id}"
 
@@ -184,13 +196,17 @@ async def scrape_closet_listings(username: Optional[str] = None) -> List[ItemLis
                     await card.query_selector("[data-testid*='price']")
                     or await card.query_selector("p[class*='price'], span[class*='price']")
                 )
-                price_text = await price_elem.inner_text() if price_elem else "$0.00"
+                price_text = await price_elem.inner_text() if price_elem else ""
                 current_price = parse_price(price_text)
+
+                card_raw_text = await card.inner_text()
+                if not current_price:
+                    price_match = re.search(r"\$\s*(\d+(?:\.\d{2})?)", card_raw_text)
+                    if price_match:
+                        current_price = parse_price(price_match.group(0))
 
                 if not original_price:
                     original_price = current_price
-
-                card_raw_text = await card.inner_text()
 
                 # Extract favorites
                 favorites_count = await extract_favorites(card)
@@ -208,7 +224,7 @@ async def scrape_closet_listings(username: Optional[str] = None) -> List[ItemLis
                     status = "Reserved"
 
                 # Infer brand and category
-                brand = infer_brand(title, card_raw_text)
+                brand = extracted_brand or infer_brand(title, card_raw_text)
                 category = infer_clothing_category(title)
 
                 item = ItemListing(

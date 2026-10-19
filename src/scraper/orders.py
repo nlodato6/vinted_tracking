@@ -26,8 +26,8 @@ async def scrape_vinted_orders() -> List[SalesOrder]:
     orders: List[SalesOrder] = []
 
     try:
-        # Navigate to orders or transaction history
-        target_url = f"{settings.vinted_base_url}/my-orders"
+        # Navigate to orders or transaction history (Vinted uses /my_orders with underscore)
+        target_url = f"{settings.vinted_base_url}/my_orders"
         console.print(f"[dim]Navigating to {target_url}...[/dim]")
 
         response = await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
@@ -39,9 +39,9 @@ async def scrape_vinted_orders() -> List[SalesOrder]:
             notify_auth_failure("Redirected to login while accessing orders")
             return []
 
-        # Find order cards
+        # Find order cards using Vinted's actual data-testid and inbox links
         order_elements = await page.query_selector_all(
-            "[data-testid*='order-item'], div[class*='OrderCard'], div[class*='transaction-item'], tr[class*='order']"
+            "[data-testid*='my-orders-item'], [data-testid*='order-item'], a[href*='/inbox/'], a[href*='/transaction/']"
         )
 
         console.print(f"[green]Found {len(order_elements)} order records.[/green]")
@@ -49,30 +49,31 @@ async def scrape_vinted_orders() -> List[SalesOrder]:
         for idx, elem in enumerate(order_elements):
             try:
                 card_text = await elem.inner_text()
+                lines = [l.strip() for l in card_text.split("\n") if l.strip()]
 
-                # Extract title
-                title_elem = (
-                    await elem.query_selector("[data-testid*='title']")
-                    or await elem.query_selector("h3, h4, span[class*='title'], a[href*='/items/']")
-                )
-                title = (await title_elem.inner_text()).strip() if title_elem else f"Sold Item {idx + 1}"
+                # First line is usually the garment / item title
+                title = lines[0] if lines else f"Sold Item {idx + 1}"
 
-                # Extract price
+                # Extract price ($X.XX)
                 price_matches = re.findall(r"\$\s*\d+(?:\.\d{2})?", card_text)
                 sold_price = parse_price(price_matches[0]) if price_matches else 0.0
 
-                # Extract Order ID
-                order_id_match = re.search(r"(?:order|transaction|id)\s*#?\s*([A-Za-z0-9-]+)", card_text, re.IGNORECASE)
-                order_id = order_id_match.group(1) if order_id_match else f"ORD-{int(datetime.now().timestamp())}-{idx}"
+                # Extract Order ID from inbox/transaction link
+                href = (await elem.get_attribute("href")) or ""
+                if "/" in href:
+                    order_id = href.rstrip("/").split("/")[-1]
+                else:
+                    order_id = f"ORD-{int(datetime.now().timestamp())}-{idx}"
 
                 # Status
+                card_lower = card_text.lower()
                 status = "Completed"
-                if "in transit" in card_text.lower():
-                    status = "In Transit"
-                elif "delivered" in card_text.lower():
-                    status = "Delivered"
+                if "shipping label" in card_lower or "in progress" in card_lower:
+                    status = "In Progress"
+                elif "canceled" in card_lower or "cancelled" in card_lower:
+                    status = "Canceled"
 
-                # Seller fee (on Vinted US, buyer typically pays protection fee; seller payout is usually equal to item price)
+                # Seller fee (on Vinted, $0 seller fee)
                 net_payout = sold_price
 
                 order = SalesOrder(
