@@ -44,3 +44,13 @@ def test_infer_brand():
     assert infer_brand("Vintage 505 Regular Fit Jeans", "Levis red tab") == "Levi's"
     assert infer_brand("The North Face Denali Fleece", "") == "The North Face"
     assert infer_brand("Random Generic Shirt", "No brand") == ""
+
+
+def test_normalize_date_str():
+    from src.sheets.sync import normalize_date_str
+
+    assert normalize_date_str("2026-10-19") == "2026-10-19"
+    assert normalize_date_str("10/19/2026") == "2026-10-19"
+    assert normalize_date_str("2026/10/19") == "2026-10-19"
+    assert normalize_date_str("10-19-2026") == "2026-10-19"
+    assert normalize_date_str("") == ""

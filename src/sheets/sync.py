@@ -12,6 +12,19 @@ from src.sheets.schemas import (
 from src.models import ItemListing, SalesOrder
 
 
+def normalize_date_str(s: str) -> str:
+    """Normalizes various date formats (e.g. 10/19/2026, 2026-10-19) to YYYY-MM-DD."""
+    if not s:
+        return ""
+    cleaned = s.strip()
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d", "%m-%d-%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(cleaned, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return cleaned
+
+
 class SheetsSyncEngine:
     def __init__(self, client: GoogleSheetsClient):
         self.client = client
@@ -26,10 +39,74 @@ class SheetsSyncEngine:
         ws = sh.worksheet(TAB_SALES_LOG)
         return ws.get_all_records()
 
+    def get_date_to_lot_map(self) -> Dict[str, str]:
+        """Reads Inventory_Lots to map Purchase_Date (YYYY-MM-DD) -> Lot_ID."""
+        sh = self.client.get_spreadsheet()
+        ws_lots = sh.worksheet(TAB_INVENTORY_LOTS)
+        lots_rows = ws_lots.get_all_values()
+        date_to_lot_id: Dict[str, str] = {}
+
+        if len(lots_rows) > 1:
+            l_headers = lots_rows[0]
+            l_id_idx = l_headers.index("Lot_ID") if "Lot_ID" in l_headers else 0
+            p_date_idx = l_headers.index("Purchase_Date") if "Purchase_Date" in l_headers else 1
+
+            for lr in lots_rows[1:]:
+                lot_identifier = lr[l_id_idx].strip() if len(lr) > l_id_idx else ""
+                purch_dt = lr[p_date_idx].strip() if len(lr) > p_date_idx else ""
+                if purch_dt and lot_identifier:
+                    norm_p_dt = normalize_date_str(purch_dt)
+                    if norm_p_dt:
+                        date_to_lot_id[norm_p_dt] = lot_identifier
+                # Also allow matching if Lot_ID itself is written as a date (e.g. 2026-10-19)
+                if lot_identifier:
+                    norm_id_dt = normalize_date_str(lot_identifier)
+                    if norm_id_dt and norm_id_dt not in date_to_lot_id:
+                        date_to_lot_id[norm_id_dt] = lot_identifier
+
+        return date_to_lot_id
+
+    def auto_assign_lots_by_date(self) -> int:
+        """
+        Scans Item_Listings for rows with empty Lot_ID and auto-assigns
+        any that have Date_Listed matching a lot's Purchase_Date.
+        """
+        sh = self.client.get_spreadsheet()
+        ws = sh.worksheet(TAB_ITEM_LISTINGS)
+        all_rows = ws.get_all_values()
+        if len(all_rows) <= 1:
+            return 0
+
+        date_to_lot_id = self.get_date_to_lot_map()
+        if not date_to_lot_id:
+            return 0
+
+        headers = all_rows[0]
+        lot_id_idx = headers.index("Lot_ID") if "Lot_ID" in headers else 1
+        date_col_idx = headers.index("Date_Listed") if "Date_Listed" in headers else 13
+
+        updates = []
+        for row_idx, r in enumerate(all_rows[1:], start=2):
+            cur_lot = r[lot_id_idx].strip() if len(r) > lot_id_idx else ""
+            cur_date = r[date_col_idx].strip() if len(r) > date_col_idx else ""
+            norm_dt = normalize_date_str(cur_date)
+
+            if not cur_lot and norm_dt in date_to_lot_id:
+                col_letter = chr(ord('A') + lot_id_idx)
+                updates.append({
+                    "range": f"{col_letter}{row_idx}",
+                    "values": [[date_to_lot_id[norm_dt]]],
+                })
+
+        if updates:
+            ws.batch_update(updates, value_input_option="USER_ENTERED")
+        return len(updates)
+
     def sync_listings(self, scraped_items: List[ItemListing]) -> Dict[str, int]:
         """
         Updates live prices and statuses of existing listings,
-        and appends new listings discovered on Vinted.
+        appends new listings discovered on Vinted, and automatically
+        assigns Lot_ID when Date_Listed matches Inventory_Lots purchase date.
         """
         sh = self.client.get_spreadsheet()
         ws = sh.worksheet(TAB_ITEM_LISTINGS)
@@ -38,15 +115,20 @@ class SheetsSyncEngine:
         if not all_rows:
             return {"updated": 0, "created": 0}
 
+        # Build Purchase_Date -> Lot_ID lookup
+        date_to_lot_id = self.get_date_to_lot_map()
+
         headers = all_rows[0]
-        id_col_idx = headers.index("Vinted_ID") if "Vinted_ID" in headers else 10
+        sku_col_idx = headers.index("Item_SKU") if "Item_SKU" in headers else 0
+        lot_id_col_idx = headers.index("Lot_ID") if "Lot_ID" in headers else 1
         title_col_idx = headers.index("Title") if "Title" in headers else 2
         price_col_idx = headers.index("Current_Price") if "Current_Price" in headers else 7
         fav_col_idx = headers.index("Favorites") if "Favorites" in headers else 8
         views_col_idx = headers.index("Views") if "Views" in headers else 9
+        id_col_idx = headers.index("Vinted_ID") if "Vinted_ID" in headers else 10
         status_col_idx = headers.index("Status") if "Status" in headers else 12
+        date_col_idx = headers.index("Date_Listed") if "Date_Listed" in headers else 13
         synced_col_idx = headers.index("Last_Synced") if "Last_Synced" in headers else 14
-        sku_col_idx = headers.index("Item_SKU") if "Item_SKU" in headers else 0
 
         # Map existing Vinted IDs and Titles to row index (1-based)
         existing_by_vinted_id: Dict[str, int] = {}
@@ -74,6 +156,7 @@ class SheetsSyncEngine:
         for item in scraped_items:
             v_id = item.vinted_id.strip() if item.vinted_id else ""
             clean_title = item.title.strip().lower()
+            item_date_str = item.date_listed.strftime("%Y-%m-%d") if item.date_listed else datetime.now().strftime("%Y-%m-%d")
 
             target_row = existing_by_vinted_id.get(v_id) or existing_by_title.get(clean_title)
 
@@ -84,6 +167,19 @@ class SheetsSyncEngine:
                 col_letter_views = chr(ord('A') + views_col_idx)
                 col_letter_status = chr(ord('A') + status_col_idx)
                 col_letter_synced = chr(ord('A') + synced_col_idx)
+
+                # Check if existing row is missing Lot_ID and can be auto-assigned by date
+                existing_row_data = all_rows[target_row - 1]
+                existing_lot = existing_row_data[lot_id_col_idx].strip() if len(existing_row_data) > lot_id_col_idx else ""
+                existing_date = existing_row_data[date_col_idx].strip() if len(existing_row_data) > date_col_idx else ""
+                row_date_str = normalize_date_str(existing_date) or item_date_str
+
+                if not existing_lot and row_date_str in date_to_lot_id:
+                    col_letter_lot = chr(ord('A') + lot_id_col_idx)
+                    updates.append({
+                        "range": f"{col_letter_lot}{target_row}",
+                        "values": [[date_to_lot_id[row_date_str]]],
+                    })
 
                 updates.append({
                     "range": f"{col_letter_price}{target_row}",
@@ -112,9 +208,13 @@ class SheetsSyncEngine:
                 max_sku_num += 1
                 new_sku = f"SKU-{max_sku_num}"
                 new_row_idx = len(all_rows) + len(new_rows) + 1
+
+                # Auto-assign Lot_ID if item listing date matches a purchase date
+                assigned_lot = item.lot_id or date_to_lot_id.get(item_date_str, "")
+
                 row_data = [
                     new_sku,
-                    item.lot_id or "",
+                    assigned_lot,
                     item.title,
                     item.brand or "",
                     item.category or "",
@@ -126,7 +226,7 @@ class SheetsSyncEngine:
                     item.vinted_id,
                     item.vinted_url,
                     item.status or "Listed",
-                    item.date_listed.strftime("%Y-%m-%d") if item.date_listed else datetime.now().strftime("%Y-%m-%d"),
+                    item_date_str,
                     now_str,
                 ]
                 new_rows.append(row_data)
@@ -136,6 +236,9 @@ class SheetsSyncEngine:
 
         if new_rows:
             ws.append_rows(new_rows, value_input_option="USER_ENTERED")
+
+        # Also run back-fill on any other unassigned items
+        self.auto_assign_lots_by_date()
 
         return {"updated": updated_count, "created": len(new_rows)}
 

@@ -1,7 +1,7 @@
 """Scrapes active closet listings and current asking prices from Vinted."""
 
 import re
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional
 from rich.console import Console
 from playwright.async_api import BrowserContext, Page
@@ -208,6 +208,7 @@ async def scrape_closet_listings(username: Optional[str] = None) -> List[ItemLis
                     vinted_id=v_id,
                     vinted_url=full_url,
                     status=status,
+                    date_listed=date.today(),
                     last_synced=datetime.now(),
                 )
                 items.append(item)
