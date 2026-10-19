@@ -88,7 +88,7 @@ Your cloud sync is already configured in [`.github/workflows/vinted_sync.yml`](f
    python -m src.cli upload-session
    ```
 2. **That's it!** GitHub Actions will automatically:
-   * Run every 6 hours (`00:00, 06:00, 12:00, 18:00 UTC`).
+   * Run once a day at 14:00 UTC (9:00 AM Central Time).
    * Scrape your live closet and sold orders in the cloud.
    * Update your Google Sheet in the background.
 3. **Trigger from your phone or browser**:

@@ -2,8 +2,8 @@ name: Vinted Automated Cloud Sync
 
 on:
   schedule:
-    # Runs every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
-    - cron: '0 */6 * * *'
+    # Runs once a day at 14:00 UTC (9:00 AM Central Time)
+    - cron: '0 14 * * *'
   workflow_dispatch:
     # Allows manual trigger anytime from GitHub web UI or mobile app
     inputs:
