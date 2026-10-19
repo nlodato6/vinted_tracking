@@ -80,11 +80,20 @@ python -m src.cli sync --type sales
 
 ---
 
-### Option B: Scheduled Background Runner
-Run the built-in periodic scheduler so it automatically syncs in the background every 6 hours:
-```bash
-python -m src.cli scheduler
-```
+### Option B: 24/7 GitHub Actions Cloud Sync (Configured & Ready! ☁️)
+Your cloud sync is already configured in [`.github/workflows/vinted_sync.yml`](file:///Users/nicol/Desktop/vinted_tracking/.github/workflows/vinted_sync.yml) and runs on GitHub's servers **even when your laptop is closed or turned off**:
+
+1. After logging in locally with `python -m src.cli login`, upload your session to GitHub once:
+   ```bash
+   python -m src.cli upload-session
+   ```
+2. **That's it!** GitHub Actions will automatically:
+   * Run every 6 hours (`00:00, 06:00, 12:00, 18:00 UTC`).
+   * Scrape your live closet and sold orders in the cloud.
+   * Update your Google Sheet in the background.
+3. **Trigger from your phone or browser**:
+   * Open [GitHub Actions](https://github.com/nlodato6/vinted_tracking/actions).
+   * Click **Vinted Automated Cloud Sync** $\rightarrow$ **Run workflow**.
 
 ---
 
