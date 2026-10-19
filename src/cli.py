@@ -188,10 +188,15 @@ def sync(
             console.print(f"[green]✔ Listings synced: {res['updated']} updated, {res['created']} newly added.[/green]")
 
         if sync_type in ("sales", "all"):
-            console.print("[yellow]2/2 Scraped sold orders...[/yellow]")
+            console.print("[yellow]2/3 Scraped sold orders...[/yellow]")
             orders = await scrape_vinted_orders()
             res = engine.sync_orders(orders)
             console.print(f"[green]✔ Orders synced: {res['synced_orders']} new sales logged.[/green]")
+
+        if sync_type in ("lots", "all"):
+            console.print("[yellow]3/3 Updating inventory lots & statuses...[/yellow]")
+            lot_res = engine.sync_lots()
+            console.print(f"[green]✔ Inventory Lots synced: {lot_res['total_lots']} lots tracked ({lot_res['completed_lots']} completed, {lot_res['active_lots']} active).[/green]")
 
         console.print("\n[bold green]🎉 Sync finished successfully![/bold green]\n")
 
@@ -199,6 +204,20 @@ def sync(
         asyncio.run(_execute())
     except Exception as e:
         console.print(f"[bold red]❌ Sync error:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def sync_lots():
+    """Recalculate unit costs, items processed, and lot completion status in Inventory_Lots."""
+    console.print("\n[bold cyan]📦 Synchronizing Inventory Lots...[/bold cyan]")
+    try:
+        client = GoogleSheetsClient()
+        engine = SheetsSyncEngine(client)
+        res = engine.sync_lots()
+        console.print(f"[bold green]✅ Synced {res['total_lots']} lots ({res['completed_lots']} completed, {res['active_lots']} active).[/bold green]\n")
+    except Exception as e:
+        console.print(f"[bold red]❌ Error syncing lots: {e}[/bold red]")
         raise typer.Exit(code=1)
 
 

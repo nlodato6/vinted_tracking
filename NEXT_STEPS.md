@@ -53,12 +53,14 @@ python -m src.cli sync --type all
 
 To calculate **exact net profit margins** per sale, fill in your purchases in the spreadsheet:
 
-### 1. In the `Inventory_Lots` Tab:
+### 1. In the `Inventory_Lots` Tab (Fully Automated!):
 Whenever you buy clothing in bulk (thrift stores, wholesale, garage sales, bins):
-* Enter a **`Lot_ID`** (e.g. `LOT-001`, `LOT-002`).
+* Enter a **`Lot_ID`** (e.g. `LOT-001`, `LOT-002`) and **`Purchase_Date`** (YYYY-MM-DD).
 * Enter **`Total_Lot_Cost`** (e.g. `$120.00`) and **`Total_Articles`** (e.g. `24` items).
-* The sheet automatically computes **`Unit_Cost`** (`$5.00/item`).
-* In the **`Item_Listings`** tab, select that `Lot_ID` for each garment so its unit acquisition cost is automatically attached!
+* **`Unit_Cost`** is **automatically calculated live** (`$5.00/item`) as soon as you type or change cost/articles.
+* **`Items_Processed`** is **automatically updated** on every sync by counting garments linked to this lot across `Item_Listings` and `Sold_Items`.
+* **`Status`** is **100% automated**: starts as `Pending`, shifts to `Active` as items are processed, and automatically moves to **`Completed`** as soon as all articles in that lot are sold!
+* Any garment listed on the purchase date will automatically be assigned this `Lot_ID`.
 
 ### 2. In the `Shipping_Supplies` Tab:
 Whenever you buy packaging materials:

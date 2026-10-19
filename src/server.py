@@ -43,6 +43,10 @@ async def run_sync_task(sync_type: str):
             res = engine.sync_orders(orders)
             console.print(f"[green]Orders sync complete: {res}[/green]")
 
+        if sync_type in ("lots", "all"):
+            lot_res = engine.sync_lots()
+            console.print(f"[green]Lots sync complete: {lot_res}[/green]")
+
     except Exception as e:
         console.print(f"[bold red]❌ Background sync error: {e}[/bold red]")
 
@@ -62,8 +66,8 @@ async def health_check():
 @app.post("/sync")
 async def trigger_sync(payload: SyncRequest, background_tasks: BackgroundTasks):
     """Manual sync trigger via HTTP API."""
-    if payload.sync_type not in ("listings", "sales", "all"):
-        raise HTTPException(status_code=400, detail="sync_type must be 'listings', 'sales', or 'all'")
+    if payload.sync_type not in ("listings", "sales", "lots", "all"):
+        raise HTTPException(status_code=400, detail="sync_type must be 'listings', 'sales', 'lots', or 'all'")
 
     background_tasks.add_task(run_sync_task, payload.sync_type)
     return {

@@ -45,15 +45,35 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
         ws_lots = sh.add_worksheet(title=TAB_INVENTORY_LOTS, rows=200, cols=len(LOTS_HEADERS))
     else:
         ws_lots = existing_worksheets[TAB_INVENTORY_LOTS]
-    ws_lots.update("A1", [LOTS_HEADERS])
+    ws_lots.update(range_name="A1", values=[LOTS_HEADERS])
     format_header_row(ws_lots, len(LOTS_HEADERS))
+
+    # Pre-populate automated formulas for Unit_Cost, Items_Processed, and Status (rows 2 to 100)
+    lots_formula_rows = []
+    for r in range(2, 101):
+        f_cost = f'=IF(A{r}="", "", IF(AND(ISNUMBER(E{r}), E{r}>0), D{r}/E{r}, ""))'
+        f_proc = f'=IF(A{r}="", "", COUNTIF(Item_Listings!B:B, A{r}) + COUNTIF(Sold_Items!B:B, A{r}))'
+        f_status = (
+            f'=IF(A{r}="", "", IF(AND(ISNUMBER(E{r}), E{r}>0, COUNTIF(Sold_Items!B:B, A{r})>=E{r}), '
+            f'"Completed", IF(COUNTIF(Item_Listings!B:B, A{r})+COUNTIF(Sold_Items!B:B, A{r})>0, '
+            f'"Active", "Pending")))'
+        )
+        lots_formula_rows.append([f_cost, f_proc, f_status])
+    ws_lots.update(range_name="F2:H100", values=lots_formula_rows, value_input_option="USER_ENTERED")
+
+    # Format numeric and currency columns in Inventory_Lots
+    ws_lots.format("D2:D100", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
+    ws_lots.format("E2:E100", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
+    ws_lots.format("F2:F100", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
+    ws_lots.format("G2:G100", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
+    ws_lots.format("H2:H100", {"horizontalAlignment": "CENTER"})
 
     # 2. Item_Listings (Active listings only)
     if TAB_ITEM_LISTINGS not in existing_worksheets:
         ws_listings = sh.add_worksheet(title=TAB_ITEM_LISTINGS, rows=500, cols=len(LISTINGS_HEADERS))
     else:
         ws_listings = existing_worksheets[TAB_ITEM_LISTINGS]
-    ws_listings.update("A1", [LISTINGS_HEADERS])
+    ws_listings.update(range_name="A1", values=[LISTINGS_HEADERS])
     format_header_row(ws_listings, len(LISTINGS_HEADERS))
 
     # 3. Sold_Items (Dedicated archive for completed/sold garments)
@@ -61,15 +81,19 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
         ws_sold = sh.add_worksheet(title=TAB_SOLD_ITEMS, rows=500, cols=len(SOLD_ITEMS_HEADERS))
     else:
         ws_sold = existing_worksheets[TAB_SOLD_ITEMS]
-    ws_sold.update("A1", [SOLD_ITEMS_HEADERS])
+    ws_sold.update(range_name="A1", values=[SOLD_ITEMS_HEADERS])
     format_header_row(ws_sold, len(SOLD_ITEMS_HEADERS))
+
+    for ws_item in (ws_listings, ws_sold):
+        ws_item.format("F2:H500", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
+        ws_item.format("I2:J500", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
 
     # 4. Shipping_Supplies
     if TAB_SHIPPING_SUPPLIES not in existing_worksheets:
         ws_supplies = sh.add_worksheet(title=TAB_SHIPPING_SUPPLIES, rows=200, cols=len(SUPPLIES_HEADERS))
     else:
         ws_supplies = existing_worksheets[TAB_SHIPPING_SUPPLIES]
-    ws_supplies.update("A1", [SUPPLIES_HEADERS])
+    ws_supplies.update(range_name="A1", values=[SUPPLIES_HEADERS])
     format_header_row(ws_supplies, len(SUPPLIES_HEADERS))
 
     # Ensure global average packaging formula in H2
@@ -87,15 +111,20 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
         ]
         ws_supplies.append_row(sample_supply, value_input_option="USER_ENTERED")
     elif not ws_supplies.acell("H2").value:
-        ws_supplies.update("H2", [['=IF(SUM(E2:E)>0, SUM(F2:F)/SUM(E2:E), 0.75)']], value_input_option="USER_ENTERED")
+        ws_supplies.update(range_name="H2", values=[['=IF(SUM(E2:E)>0, SUM(F2:F)/SUM(E2:E), 0.75)']], value_input_option="USER_ENTERED")
+
+    ws_supplies.format("E2:E200", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
+    ws_supplies.format("F2:H200", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
 
     # 5. Sales_Log
     if TAB_SALES_LOG not in existing_worksheets:
         ws_sales = sh.add_worksheet(title=TAB_SALES_LOG, rows=500, cols=len(SALES_HEADERS))
     else:
         ws_sales = existing_worksheets[TAB_SALES_LOG]
-    ws_sales.update("A1", [SALES_HEADERS])
+    ws_sales.update(range_name="A1", values=[SALES_HEADERS])
     format_header_row(ws_sales, len(SALES_HEADERS))
+    ws_sales.format("I2:N500", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
+    ws_sales.format("O2:O500", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
 
     # 6. Analytics_Dashboard
     if TAB_ANALYTICS_DASHBOARD not in existing_worksheets:

@@ -116,6 +116,106 @@ class SheetsSyncEngine:
 
         return total_updates
 
+    def sync_lots(self) -> Dict[str, Any]:
+        """
+        Synchronizes Inventory_Lots:
+        1. Ensures Unit_Cost formula '=IF(AND(ISNUMBER(E{row}), E{row}>0), D{row}/E{row}, "")' is present.
+        2. Updates Items_Processed with '=COUNTIF(Item_Listings!B:B, A{row}) + COUNTIF(Sold_Items!B:B, A{row})'.
+        3. Evaluates and updates Status to 'Completed' once all items in that lot are sold
+           (sold_count >= total_articles > 0), otherwise 'Active' if items are processed, or 'Pending'.
+        """
+        sh = self.client.get_spreadsheet()
+        ws_lots = sh.worksheet(TAB_INVENTORY_LOTS)
+        ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+        ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+        lots_rows = ws_lots.get_all_values()
+        if len(lots_rows) <= 1:
+            return {"total_lots": 0, "completed_lots": 0, "active_lots": 0, "updated_cells": 0}
+
+        headers = lots_rows[0]
+        lot_id_idx = headers.index("Lot_ID") if "Lot_ID" in headers else 0
+        total_art_idx = headers.index("Total_Articles") if "Total_Articles" in headers else 4
+        unit_cost_idx = headers.index("Unit_Cost") if "Unit_Cost" in headers else 5
+        proc_idx = headers.index("Items_Processed") if "Items_Processed" in headers else 6
+        status_idx = headers.index("Status") if "Status" in headers else 7
+
+        listings_rows = ws_listings.get_all_values()
+        sold_rows = ws_sold.get_all_values()
+
+        active_counts: Dict[str, int] = {}
+        if len(listings_rows) > 1:
+            l_lot_idx = listings_rows[0].index("Lot_ID") if "Lot_ID" in listings_rows[0] else 1
+            for lr in listings_rows[1:]:
+                if len(lr) > l_lot_idx and lr[l_lot_idx].strip():
+                    l_id = lr[l_lot_idx].strip()
+                    active_counts[l_id] = active_counts.get(l_id, 0) + 1
+
+        sold_counts: Dict[str, int] = {}
+        if len(sold_rows) > 1:
+            s_lot_idx = sold_rows[0].index("Lot_ID") if "Lot_ID" in sold_rows[0] else 1
+            for sr in sold_rows[1:]:
+                if len(sr) > s_lot_idx and sr[s_lot_idx].strip():
+                    s_id = sr[s_lot_idx].strip()
+                    sold_counts[s_id] = sold_counts.get(s_id, 0) + 1
+
+        updates = []
+        completed_count = 0
+        active_lot_count = 0
+
+        col_unit_cost = chr(ord('A') + unit_cost_idx)
+        col_proc = chr(ord('A') + proc_idx)
+        col_status = chr(ord('A') + status_idx)
+
+        for row_idx, r in enumerate(lots_rows[1:], start=2):
+            lot_id = r[lot_id_idx].strip() if len(r) > lot_id_idx else ""
+            if not lot_id:
+                continue
+
+            total_articles_str = r[total_art_idx].strip() if len(r) > total_art_idx else ""
+            try:
+                total_articles = int(float(total_articles_str)) if total_articles_str else 0
+            except ValueError:
+                total_articles = 0
+
+            sold_for_lot = sold_counts.get(lot_id, 0)
+            active_for_lot = active_counts.get(lot_id, 0)
+            processed_for_lot = sold_for_lot + active_for_lot
+
+            if total_articles > 0 and sold_for_lot >= total_articles:
+                completed_count += 1
+            elif processed_for_lot > 0:
+                active_lot_count += 1
+
+            expected_cost_formula = f'=IF(A{row_idx}="", "", IF(AND(ISNUMBER(E{row_idx}), E{row_idx}>0), D{row_idx}/E{row_idx}, ""))'
+            expected_proc_formula = f'=IF(A{row_idx}="", "", COUNTIF(Item_Listings!B:B, A{row_idx}) + COUNTIF(Sold_Items!B:B, A{row_idx}))'
+            expected_status_formula = (
+                f'=IF(A{row_idx}="", "", IF(AND(ISNUMBER(E{row_idx}), E{row_idx}>0, COUNTIF(Sold_Items!B:B, A{row_idx})>=E{row_idx}), '
+                f'"Completed", IF(COUNTIF(Item_Listings!B:B, A{row_idx})+COUNTIF(Sold_Items!B:B, A{row_idx})>0, '
+                f'"Active", "Pending")))'
+            )
+
+            cur_cost = r[unit_cost_idx].strip() if len(r) > unit_cost_idx else ""
+            cur_proc = r[proc_idx].strip() if len(r) > proc_idx else ""
+            cur_status = r[status_idx].strip() if len(r) > status_idx else ""
+
+            if not cur_cost.startswith("="):
+                updates.append({"range": f"{col_unit_cost}{row_idx}", "values": [[expected_cost_formula]]})
+            if not cur_proc.startswith("="):
+                updates.append({"range": f"{col_proc}{row_idx}", "values": [[expected_proc_formula]]})
+            if not cur_status.startswith("="):
+                updates.append({"range": f"{col_status}{row_idx}", "values": [[expected_status_formula]]})
+
+        if updates:
+            ws_lots.batch_update(updates, value_input_option="USER_ENTERED")
+
+        return {
+            "total_lots": len([r for r in lots_rows[1:] if len(r) > lot_id_idx and r[lot_id_idx].strip()]),
+            "completed_lots": completed_count,
+            "active_lots": active_lot_count,
+            "updated_cells": len(updates),
+        }
+
     def get_max_sku_num(self) -> int:
         """Finds highest SKU number across Item_Listings, Sold_Items, and Sales_Log."""
         sh = self.client.get_spreadsheet()
@@ -224,6 +324,11 @@ class SheetsSyncEngine:
 
         ws_sold.append_row(target_row_data, value_input_option="USER_ENTERED")
         ws_listings.delete_rows(target_row_idx)
+
+        try:
+            self.sync_lots()
+        except Exception:
+            pass
 
         return {headers[i]: target_row_data[i] for i in range(min(len(headers), len(target_row_data)))}
 
@@ -468,6 +573,9 @@ class SheetsSyncEngine:
         # Backfill lot IDs by purchase date
         self.auto_assign_lots_by_date()
 
+        # Update Inventory_Lots: unit costs, items processed, status (Completed when all sold)
+        self.sync_lots()
+
         return {
             "updated": updated_count,
             "created": len(new_active_rows) + len(new_sold_rows),
@@ -571,5 +679,8 @@ class SheetsSyncEngine:
 
         # Also sweep any listings marked Sold
         self.reconcile_sold_listings()
+
+        # Update Inventory_Lots
+        self.sync_lots()
 
         return {"synced_orders": len(new_sales_rows)}

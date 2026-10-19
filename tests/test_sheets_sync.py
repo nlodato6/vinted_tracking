@@ -307,3 +307,43 @@ def test_sync_orders_moves_listing_and_logs_sale(mock_sheets_env):
     assert sales_entry[4] == "Carhartt"
     # Formula for Item_Cost references Sold_Items first
     assert "Sold_Items!A:F" in sales_entry[11]
+
+
+def test_sync_lots_updates_formulas_and_status(mock_sheets_env):
+    engine, sh = mock_sheets_env
+    ws_lots = sh.worksheet(TAB_INVENTORY_LOTS)
+
+    # Initially LOT-001 has 1 item in active listings (SKU-1001)
+    # LOT-002 has 0 items
+    res = engine.sync_lots()
+    assert res["total_lots"] == 2
+    assert res["active_lots"] == 1
+    assert res["completed_lots"] == 0
+
+    # Verify formula insertion for row 2 (LOT-001)
+    lot_1_row = ws_lots.rows[1]
+    assert "D2/E2" in lot_1_row[5]
+    assert "COUNTIF(Item_Listings!B:B, A2)" in lot_1_row[6]
+    assert "Completed" in lot_1_row[7]
+
+
+def test_sync_lots_marks_completed_when_all_sold(mock_sheets_env):
+    engine, sh = mock_sheets_env
+    ws_lots = sh.worksheet(TAB_INVENTORY_LOTS)
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Set LOT-001 Total_Articles to 1
+    ws_lots.rows[1][4] = "1"
+
+    # Add 1 sold item belonging to LOT-001 in Sold_Items
+    ws_sold.append_row([
+        "SKU-1001", "LOT-001", "Vintage Jacket", "Carhartt", "Outerwear",
+        "5.00", "70.00", "70.00", "15", "120", "v_111", "url", "Sold", "2026-10-15", "now"
+    ])
+
+    res = engine.sync_lots()
+    assert res["completed_lots"] == 1
+
+    # Check status formula for LOT-001
+    lot_1_row = ws_lots.rows[1]
+    assert "Completed" in lot_1_row[7]
