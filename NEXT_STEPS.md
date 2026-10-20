@@ -1,160 +1,41 @@
-# 📋 Vinted Sales Tracking Pipeline — Remaining Setup Guide
+# 📋 Vinted Sales Tracking Pipeline — Status & Next Steps
 
-> **Current Status**:
-> * ✅ Google Cloud Service Account authenticated (`vinged-bot@...`)
-> * ✅ Google Spreadsheet provisioned with all 6 tabs and formulas: [Open Sheet](https://docs.google.com/spreadsheets/d/1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg/edit)
-> * ✅ GitHub repository created and backed up: [nlodato6/vinted_tracking](https://github.com/nlodato6/vinted_tracking)
-> * ⏳ **Remaining**: Vinted session login, initial data population, and automation setup.
-
----
-
-## 🚀 Step 1: Perform 1-Time Vinted Authentication
-
-To scrape your live closet listings, active prices, favorites, and sold orders, Playwright needs an authenticated session token. Choose whichever method is easiest for you:
-
-### Option A: Direct Interactive Browser Login (Google Chrome Stealth)
-```bash
-python -m src.cli login
-```
-* A Google Chrome browser window will open with anti-automation flags stripped and stealth evasions enabled.
-* Log in with your account credentials (**Email & Password** or **Apple ID**).
-* *Note: If you use "Continue with Google", Google specifically blocks automated browsers ("This browser or app may not be secure"). In that case, use Option B below.*
-* Once your profile is visible, return to the terminal and press **[ENTER]**.
-
-### Option B: Instant Cookie Import (100% Anti-Bot Proof & Bypasses All Challenges)
-If you are already logged in to Vinted on your regular browser (Chrome, Brave, Safari, etc.):
-1. **Via Cookie-Editor Extension** (Fastest):
-   * Install the free [Cookie-Editor extension](https://cookie-editor.com/).
-   * Go to `vinted.com` $\rightarrow$ click Cookie-Editor $\rightarrow$ click **Export** $\rightarrow$ **Export as JSON**.
-2. **Via Chrome DevTools Console**:
-   * Open `vinted.com` in your regular browser.
-   * Press `Cmd + Option + I` (or Right Click $\rightarrow$ Inspect) $\rightarrow$ click **Console**.
-   * Type: `copy(document.cookie)` and press Enter.
-3. Run:
-   ```bash
-   python -m src.cli import-cookie
-   ```
-   Paste the copied cookie text and press **[ENTER]**. It will immediately create `.session/vinted_state.json` without any bot challenges!
-
-> [!TIP]
-> You can verify the session is active anytime by running:
-> ```bash
-> python -m src.cli check-session
-> ```
+> **Current System State**:
+> * ✅ **Pipeline Architecture**: Clean, bot-free HTML file imports & email parsing (Zero Playwright bot blocks, zero login hassles).
+> * ✅ **Google Spreadsheet**: Fully synchronized live with **159 active listings** and **147 sold items** ([Open Sheet](https://docs.google.com/spreadsheets/d/1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg/edit)).
+> * ✅ **Inventory Lots**: `LOT-001` automatically tracks **306** processed items and unit costs.
+> * ✅ **Dashboard Status Banner**: Displays live timestamp of last HTML import and last email parsed.
+> * 📄 **Frontend Implementation Plan**: Ready in [`STREAMLIT_FRONTEND_PLAN.md`](./STREAMLIT_FRONTEND_PLAN.md).
 
 ---
 
-## 🔄 Step 2: Run Your First Full Sync
+## 🚀 How to Run HTML Imports Today (CLI)
 
-Once authenticated, pull your live closet inventory and order history into Google Sheets:
+Whenever you save new HTML pages from your browser (`Cmd + S` / `Ctrl + S`), you can sync them with:
 
 ```bash
-# Sync both active listings and sold orders
-python -m src.cli sync --type all
-```
+# 1. Import active closet listings:
+PYTHONPATH=. venv/bin/python -m src.cli import-closet "tlodato24 - member profile _ Vinted_active.html" --lot "LOT-001"
 
-* **`Item_Listings` Tab**: Holds **active listings only** with initial **`Posted_Price`**, live **`Current_Price`**, automated **`Price_Lowered`** (YES/NO) and **`Price_Drop`** ($ amount), timestamped **`Price_History`** log, heart/favorite counts, and views.
-* **`Sold_Items` Tab**: When an item sells (on Vinted or FB Marketplace), it is automatically archived here with all listing fields intact, plus final **`Sold_Price`**, **`Price_Discount`**, **`Sale_Type`** (`Original Price`, `Lowered Price`, `Accepted Offer`), **`Sale_Date`**, **`Platform`**, **`Packaging_Cost`**, **`Net_Profit`** ($0 Vinted seller fee deducted!), and **`Margin_%`**.
-* **`Analytics_Dashboard` Tab**: Real-time business intelligence with financial KPIs, Price Reduction & Offer breakdown, garment category markdown leaderboards, top 5 price-cut items, and favorite conversion rates.
+# 2. Import sales & completed orders:
+PYTHONPATH=. venv/bin/python -m src.cli import-orders "My orders _ Vinted_all.html"
 
----
+# 3. Recalculate Inventory Lots:
+PYTHONPATH=. venv/bin/python -m src.cli sync-lots
 
-## 📊 Step 3: Input Inventory Hauls & Packaging Supplies
-
-To calculate **exact net profit margins** per sale, fill in your purchases in the spreadsheet:
-
-### 1. In the `Inventory_Lots` Tab (Fully Automated!):
-Whenever you buy clothing in bulk (thrift stores, wholesale, garage sales, bins):
-* Enter a **`Lot_ID`** (e.g. `LOT-001`, `LOT-002`) and **`Purchase_Date`** (YYYY-MM-DD).
-* Enter **`Total_Lot_Cost`** (e.g. `$120.00`) and **`Total_Articles`** (e.g. `24` items).
-* **`Unit_Cost`** is **automatically calculated live** (`$5.00/item`) as soon as you type or change cost/articles.
-* **`Items_Processed`** is **automatically updated** on every sync by counting garments linked to this lot across `Item_Listings` and `Sold_Items`.
-* **`Status`** is **100% automated**: starts as `Pending`, shifts to `Active` as items are processed, and automatically moves to **`Completed`** as soon as all articles in that lot are sold!
-* Any garment listed on the purchase date will automatically be assigned this `Lot_ID`.
-
-### 2. In the `Shipping_Supplies` Tab:
-Whenever you buy packaging materials:
-* Enter poly mailers, packing tape, thermal labels, and boxes with quantity and total cost.
-* Cell **`H2`** automatically calculates your **average packaging cost per shipment** (e.g. `$0.75`), which is automatically deducted from every sale in `Sold_Items` to calculate true net profit.
-
----
-
-## ⚡ Step 4: Choose Your Automation Method
-
-### Option A: On-Demand Manual Triggers (Simplest)
-Whenever you list new clothing or adjust prices on Vinted, simply run:
-```bash
-python -m src.cli sync --type listings
-```
-When you make a sale:
-```bash
-python -m src.cli sync --type sales
+# 4. Check system status & timestamps:
+PYTHONPATH=. venv/bin/python -m src.cli status
 ```
 
 ---
 
-### Option B: 24/7 GitHub Actions Cloud Sync (Configured & Ready! ☁️)
-Your cloud sync is already configured in [`.github/workflows/vinted_sync.yml`](file:///Users/nicol/Desktop/vinted_tracking/.github/workflows/vinted_sync.yml) and runs on GitHub's servers **even when your laptop is closed or turned off**:
+## 🎨 Upcoming Next Step: Streamlit Web Frontend
 
-1. After logging in locally with `python -m src.cli login`, upload your session to GitHub once:
-   ```bash
-   python -m src.cli upload-session
-   ```
-2. **That's it!** GitHub Actions will automatically:
-   * Run once a day at 14:00 UTC (9:00 AM Central Time).
-   * Scrape your live closet and sold orders in the cloud.
-   * Update your Google Sheet in the background.
-3. **Trigger from your phone or browser**:
-   * Open [GitHub Actions](https://github.com/nlodato6/vinted_tracking/actions).
-   * Click **Vinted Automated Cloud Sync** $\rightarrow$ **Run workflow**.
+We have formulated a complete architecture plan to replace manual CLI commands with a modern drag-and-drop web application:
 
----
-
-### Option C: Real-Time Gmail Webhook (`tsavoie90@gmail.com`)
-Since your Vinted notifications go to `tsavoie90@gmail.com`, you can trigger instant synchronization whenever a sale, favorite, or offer email arrives:
-
-1. **Start the Webhook Server**:
-   ```bash
-   python -m src.cli serve --port 8000
-   ```
-2. **Google Apps Script Automation (Zero Web Scraping / Zero Bot Risk)**:
-   - Uses the deployed Apps Script in your Google account running a time-driven trigger every 5 minutes.
-   - **Supported Email Triggers from `no-reply@vinted.com`**:
-     - **Sales** (`"You sold an item on Vinted"`): Moves item from `Item_Listings` to `Sold_Items`, calculates profit, and marks order.
-     - **Favorites** (`"was just favorited"`): Automatically increments favorite count on the garment in `Item_Listings`.
-     - **Offers** (`"new offer for..."` / `"<offer> instead of <listed price>"`): Automatically appends offer timestamp and dollar amount to `Price_History` without polling!
-   - Full Apps Script code and instructions are preserved in [`vinted_email_automation_setup.md`](file:///Users/nicol/.gemini/antigravity-ide/brain/dbe0ba03-eeff-4807-b681-82f5145b9d4d/vinted_email_automation_setup.md).
-
----
-
-## 🚨 Automated Authentication Alerts & Self-Healing
-
-If Vinted prompts for verification or your session expires:
-1. **Google Sheets Banner**: Row 2 of `Analytics_Dashboard` prominently switches to a coral red alert banner (`🔴 AUTHENTICATION REQUIRED`) with error details and clear recovery instructions.
-2. **GitHub Issue & Push Notification**: GitHub automatically opens an issue (`⚠️ Vinted Authentication Expired — Re-login Required`) on your repository, triggering email and mobile notifications.
-3. **One-Command Recovery**:
-   ```bash
-   python -m src.cli login
-   python -m src.cli upload-session
-   ```
-   Uploading your refreshed token automatically resets the Google Sheet banner to mint green (`🟢 SYSTEM STATUS: Active & Authenticated`) and closes the GitHub Issue!
-
----
-
-## 🛠️ CLI Quick Reference Cheat Sheet
-
-| Command | What It Does |
-| :--- | :--- |
-| `python -m src.cli status` | Displays Google Sheets connection, session status, and config |
-| `python -m src.cli login` | Opens Google Chrome with stealth for 1-time login session capture |
-| `python -m src.cli import-cookie` | Imports active cookies from regular browser (bypasses bot blocks) |
-| `python -m src.cli upload-session` | Uploads session to GitHub Secrets and resets auth status |
-| `python -m src.cli check-session` | Checks if your saved Vinted login token is still valid |
-| `python -m src.cli sync --type listings` | Refreshes asking prices, favorites, and new listings |
-| `python -m src.cli sync --type sales` | Scrapes sold orders and calculates net payouts |
-| `python -m src.cli sync --type lots` | Recalculates unit costs, processed counts, and completion statuses |
-| `python -m src.cli sync --type all` | Full sync of listings, sales, and lots |
-| `python -m src.cli log-sale --sku SKU-1001 --price 45` | Logs external sale (e.g. FB Marketplace) and moves item to `Sold_Items` |
-| `python -m src.cli serve --port 8000` | Starts the webhook listener server |
-| `python -m src.cli scheduler` | Starts background automatic periodic sync daemon |
-| `pytest -v` | Runs all 38 verification unit tests |
+* **File**: Read the complete plan in [`STREAMLIT_FRONTEND_PLAN.md`](./STREAMLIT_FRONTEND_PLAN.md).
+* **Key Features**:
+  1. **Drag & Drop Upload**: Upload all 3 HTML files at once.
+  2. **Smart In-Memory Deduplication**: No-op duplicates are filtered out in RAM before touching Google Sheets, using $\le 5$ API calls per sync.
+  3. **Zero Disk Footprint**: Uploaded files stay in memory and are discarded immediately after syncing.
+  4. **Free Cloud Hosting**: Deployable to [Streamlit Community Cloud](https://share.streamlit.app) for free using Streamlit Secrets.
