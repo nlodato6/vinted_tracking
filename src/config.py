@@ -52,7 +52,10 @@ class Settings(BaseSettings):
     webhook_secret: str = ""
 
     # Scheduler
-    sync_interval_hours: int = 6
+    sync_mode: str = "cron"  # "cron" or "interval"
+    sync_schedule_hour: int = 8
+    sync_schedule_minute: int = 0
+    sync_interval_hours: int = 24
 
     @property
     def full_storage_state_path(self) -> Path:

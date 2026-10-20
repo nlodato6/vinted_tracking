@@ -339,6 +339,14 @@ def status():
     # Marketplace Domain
     table.add_row("Vinted Domain", settings.vinted_domain, "[green]OK[/green]")
 
+    # Scheduler
+    sched_desc = (
+        f"Daily at {settings.sync_schedule_hour:02d}:{settings.sync_schedule_minute:02d}"
+        if settings.sync_mode.lower() == "cron"
+        else f"Every {settings.sync_interval_hours}h"
+    )
+    table.add_row("Auto-Sync Schedule", sched_desc, "[green]Configured[/green]")
+
     console.print(table)
 
 
