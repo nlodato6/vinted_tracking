@@ -69,7 +69,7 @@ def infer_brand(title: str, card_text: str = "") -> str:
 def parse_closet_html(html_content_or_path: Union[str, Path], default_lot: str = "") -> List[ItemListing]:
     """
     Parses a saved Vinted closet/profile HTML file or string.
-    Extracts all listings with title, asking price, Vinted ID, favorites, and status.
+    Extracts all listings with title, asking price, Vinted ID, favorites, views, and status.
     """
     if isinstance(html_content_or_path, Path) or (isinstance(html_content_or_path, str) and "\n" not in html_content_or_path and Path(html_content_or_path).exists()):
         with open(html_content_or_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -83,6 +83,8 @@ def parse_closet_html(html_content_or_path: Union[str, Path], default_lot: str =
 
     # Strategy 1: Look for item cards via feed-grid or item box
     cards = soup.select("[data-testid*='grid-item'], div[class*='feed-grid__item'], div[class*='ItemBox_item-box'], div[class*='web_ui__ItemBox__box']")
+    if not cards:
+        cards = soup.select("div[data-testid*='product-item-id-']")
     if not cards:
         cards = soup.select("a[href*='/items/']")
 
@@ -100,30 +102,44 @@ def parse_closet_html(html_content_or_path: Union[str, Path], default_lot: str =
 
         full_url = f"https://www.vinted.com/items/{v_id}"
 
-        # Extract title
-        title = link.get("title", "") or ""
+        # Extract title and brand from img alt if formatted like "Title, brand: Brand, condition: ..."
         img = card.find("img")
-        if not title and img and img.get("alt"):
-            title = img.get("alt", "").strip()
+        raw_alt = (img.get("alt") if img else "") or link.get("title", "") or ""
+
+        title = ""
+        brand = ""
+        if "brand:" in raw_alt:
+            m = re.match(r"^(.*?),\s*brand:\s*([^,]+)", raw_alt)
+            if m:
+                title = m.group(1).strip()
+                brand = m.group(2).strip()
+
         if not title:
-            # Try to extract title from text or url slug
-            slug_match = re.search(r"/items/\d+-([a-zA-Z0-9-]+)", href)
-            if slug_match:
-                title = slug_match.group(1).replace("-", " ").title()
+            if raw_alt and "brand:" not in raw_alt:
+                title = raw_alt.split(",")[0].strip()
+            else:
+                slug_match = re.search(r"/items/\d+-([a-zA-Z0-9-]+)", href)
+                if slug_match:
+                    title = slug_match.group(1).replace("-", " ").title()
 
         # Extract price
-        price_match = re.search(r"\$\s*(\d+(?:\.\d{2})?)", text)
+        price_match = re.search(r"\$\s*(\d+(?:\.\d{2})?)", text) or re.search(r"\$\s*(\d+(?:\.\d{2})?)", raw_alt)
         price_val = float(price_match.group(1)) if price_match else 0.0
 
         # Extract favorites
         fav_match = re.search(r"(\d+)\s*(?:favou?rites?|likes?)", text, re.IGNORECASE)
         fav_count = int(fav_match.group(1)) if fav_match else 0
 
+        # Extract views
+        views_match = re.search(r"(\d+)\s*views?", text, re.IGNORECASE)
+        views_count = int(views_match.group(1)) if views_match else 0
+
         # Check status
         is_sold = bool(re.search(r"\b(?:sold|closed)\b", text, re.IGNORECASE))
         status = "Sold" if is_sold else "Listed"
 
-        brand = infer_brand(title, text)
+        if not brand:
+            brand = infer_brand(title, text)
         category = infer_clothing_category(title)
 
         listing = ItemListing(
@@ -137,7 +153,7 @@ def parse_closet_html(html_content_or_path: Union[str, Path], default_lot: str =
             current_price=price_val,
             sold_price=price_val if is_sold else None,
             favorites=fav_count,
-            views=0,
+            views=views_count,
             vinted_id=v_id,
             vinted_url=full_url,
             status=status,
@@ -165,45 +181,47 @@ def parse_orders_html(html_content_or_path: Union[str, Path]) -> List[SalesOrder
     seen_order_ids = set()
 
     # Look for order cards or links
-    order_elements = soup.select("a[href*='/transaction/'], a[href*='/inbox/'], div[class*='order'], div[class*='transaction']")
+    order_elements = soup.find_all("a", attrs={"data-testid": "my-orders-item"})
     if not order_elements:
-        order_elements = soup.find_all(text=re.compile(r"Order|Transaction|Sold", re.IGNORECASE))
+        order_elements = soup.find_all("a", href=re.compile(r"/(?:transaction|inbox)/([a-zA-Z0-9-]+)"))
 
     for elem in order_elements:
-        node = elem if hasattr(elem, "find_all") else elem.parent
-        text = node.get_text(separator=" ", strip=True) if node else ""
-
-        # Find transaction or inbox link
-        link = node.find("a", href=re.compile(r"/(?:transaction|inbox)/([a-zA-Z0-9-]+)")) if node else None
-        order_id = ""
-        if link:
-            m = re.search(r"/(?:transaction|inbox)/([a-zA-Z0-9-]+)", link.get("href", ""))
-            if m:
-                order_id = m.group(1)
-
-        if not order_id:
+        node = elem.parent if elem.parent and elem.parent.name in ("div", "li") and ("order" in elem.parent.get("class", [""])[0] or "transaction" in elem.parent.get("class", [""])[0]) else elem
+        href = elem.get("href", "")
+        m = re.search(r"/(?:transaction|inbox)/([a-zA-Z0-9-]+)", href)
+        if not m:
             continue
+        order_id = m.group(1)
         if order_id in seen_order_ids:
             continue
         seen_order_ids.add(order_id)
 
-        # Extract price
-        price_match = re.search(r"\$\s*(\d+(?:\.\d{2})?)", text)
-        sold_price = float(price_match.group(1)) if price_match else 0.0
-
-        # Extract item link if present
-        v_url = ""
-        item_link = node.find("a", href=re.compile(r"/items/(\d+)"))
-        if item_link:
-            v_url = f"https://www.vinted.com{item_link.get('href')}" if item_link.get('href').startswith('/') else item_link.get('href')
-
-        # Extract title
+        # Extract text and child elements
+        strings = list(elem.stripped_strings)
         title = ""
-        img = node.find("img")
-        if img and img.get("alt"):
-            title = img.get("alt", "").strip()
-        if not title and item_link:
+        sold_price = 0.0
+
+        for s in strings:
+            if re.search(r"^\$\s*\d+", s):
+                p_m = re.search(r"\$\s*(\d+(?:\.\d{2})?)", s)
+                if p_m:
+                    sold_price = float(p_m.group(1))
+            elif not title and not s.lower().startswith("transaction") and not s.lower().startswith("order") and not "shipping label" in s.lower() and not "tracking" in s.lower() and not "delivered" in s.lower() and not "cancelled" in s.lower():
+                title = s
+
+        # Item link if present always provides the specific product title
+        item_link = node.find("a", href=re.compile(r"/items/"))
+        if item_link and item_link.get_text(strip=True):
             title = item_link.get_text(strip=True)
+
+        if not sold_price:
+            all_text = node.get_text(separator=" ", strip=True)
+            p_m = re.search(r"\$\s*(\d+(?:\.\d{2})?)", all_text)
+            if p_m:
+                sold_price = float(p_m.group(1))
+
+        if not title and len(strings) > 1:
+            title = strings[1]
 
         order = SalesOrder(
             order_id=order_id,
@@ -211,7 +229,7 @@ def parse_orders_html(html_content_or_path: Union[str, Path]) -> List[SalesOrder
             sold_price=sold_price,
             sale_date=date.today(),
             platform="Vinted",
-            brand=infer_brand(title, text),
+            brand=infer_brand(title, " ".join(strings)),
             category=infer_clothing_category(title),
         )
         orders.append(order)

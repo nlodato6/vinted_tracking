@@ -33,8 +33,10 @@ client_secret*.json
 .session/
 playwright-report/
 test-results/
-
-# IDE
+# Saved browser exports
+*.html
+*_files/
+.sync_status.json
 .vscode/
 .idea/
 *.swp

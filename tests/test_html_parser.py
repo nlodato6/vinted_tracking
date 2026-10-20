@@ -74,3 +74,50 @@ def test_parse_orders_html():
     assert orders[0].order_id == "ORD-998877"
     assert orders[0].item_title == "Blue Polo"
     assert orders[0].sold_price == 18.0
+
+
+def test_parse_closet_vinted_real_format():
+    sample_real = """
+    <div class="feed-grid__item" data-testid="grid-item">
+        <div data-testid="product-item-id-10452369337">
+            <a href="https://www.vinted.com/items/10452369337" title="Black Skinny Jeans, brand: Madewell, condition: Very good, size: S / US 4-6, $4.00">
+                <img alt="Black Skinny Jeans, brand: Madewell, condition: Very good, size: S / US 4-6, $4.00" />
+            </a>
+            <div data-testid="product-item-id-10452369337--description-content">
+                <p>12 views</p>
+                <p>4 favorites</p>
+            </div>
+            <p data-testid="product-item-id-10452369337--price-text">$4.00</p>
+        </div>
+    </div>
+    """
+    items = parse_closet_html(sample_real, default_lot="LOT-001")
+    assert len(items) == 1
+    assert items[0].title == "Black Skinny Jeans"
+    assert items[0].brand == "Madewell"
+    assert items[0].posted_price == 4.0
+    assert items[0].vinted_id == "10452369337"
+    assert items[0].favorites == 4
+    assert items[0].views == 12
+    assert items[0].category == "Pants & Jeans"
+
+
+def test_parse_orders_vinted_real_format():
+    sample_orders = """
+    <a class="web_ui__Cell__link" data-testid="my-orders-item" href="https://www.vinted.com/inbox/01a156e8-4d82-7f71-a896-cfb3f421c16c">
+        <div>
+            <span>Transaction status: Actions required</span>
+            <span>Wrangler Regular Taper Cargo Pants</span>
+            <span>$6.00</span>
+            <span>Shipping label sent to seller.</span>
+        </div>
+    </a>
+    """
+    orders = parse_orders_html(sample_orders)
+    assert len(orders) == 1
+    assert orders[0].order_id == "01a156e8-4d82-7f71-a896-cfb3f421c16c"
+    assert orders[0].item_title == "Wrangler Regular Taper Cargo Pants"
+    assert orders[0].sold_price == 6.0
+    assert orders[0].brand == "Wrangler"
+    assert orders[0].category == "Pants & Jeans"
+

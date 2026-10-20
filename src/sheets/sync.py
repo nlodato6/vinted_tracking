@@ -751,7 +751,31 @@ class SheetsSyncEngine:
             sale_date_str = order.sale_date.strftime("%Y-%m-%d") if order.sale_date else datetime.now().strftime("%Y-%m-%d")
             clean_low = clean_title.lower()
 
-            # 1. Check if already in Sold_Items, enrich with Order_ID and confirmed sold price
+            # 1. Check if present in active listings FIRST and move it to Sold_Items
+            has_active_match = (
+                (order.item_sku and order.item_sku.strip().upper() in active_sku_to_row)
+                or (clean_low in active_title_to_row)
+            )
+
+            if has_active_match:
+                moved_item = self.move_listing_to_sold(
+                    sku=order.item_sku,
+                    title=clean_title,
+                    status="Sold",
+                    sold_price=order.sold_price,
+                    sale_date=sale_date_str,
+                    platform=order.platform or "Vinted",
+                    order_id=order.order_id,
+                )
+                if moved_item:
+                    synced_count += 1
+                    existing_order_ids.add(order.order_id.strip())
+                    if order.item_sku:
+                        active_sku_to_row.pop(order.item_sku.strip().upper(), None)
+                    active_title_to_row.pop(clean_low, None)
+                    continue
+
+            # 2. If not in active listings, check if already in Sold_Items and enrich with Order_ID / sold price
             matched_r_i = None
             if order.item_sku and order.item_sku.strip().upper() in sold_by_sku:
                 matched_r_i = sold_by_sku[order.item_sku.strip().upper()]
@@ -772,27 +796,6 @@ class SheetsSyncEngine:
                 synced_count += 1
                 existing_order_ids.add(order.order_id.strip())
                 continue
-
-            # 2. If not yet in Sold_Items, check if present in active listings and move it
-            has_active_match = (
-                (order.item_sku and order.item_sku.strip().upper() in active_sku_to_row)
-                or (clean_low in active_title_to_row)
-            )
-
-            if has_active_match:
-                moved_item = self.move_listing_to_sold(
-                    sku=order.item_sku,
-                    title=clean_title,
-                    status="Sold",
-                    sold_price=order.sold_price,
-                    sale_date=sale_date_str,
-                    platform=order.platform or "Vinted",
-                    order_id=order.order_id,
-                )
-                if moved_item:
-                    synced_count += 1
-                    existing_order_ids.add(order.order_id.strip())
-                    continue
 
             # 3. If neither active listing nor existing sold item found, queue for batch append
             max_sku_num += 1

@@ -58,26 +58,22 @@ class GoogleSheetsClient:
 
         client = self.authenticate()
 
-        if self.sheet_id:
+        import time
+        for attempt in range(5):
             try:
-                self._spreadsheet = client.open_by_key(self.sheet_id)
+                if self.sheet_id:
+                    self._spreadsheet = client.open_by_key(self.sheet_id)
+                else:
+                    self._spreadsheet = client.open(settings.google_sheet_title)
                 return self._spreadsheet
             except Exception as e:
+                if "429" in str(e) and attempt < 4:
+                    time.sleep(12 * (attempt + 1))
+                    continue
                 email = self.service_account_email or "your service account"
+                target_desc = f"ID '{self.sheet_id}'" if self.sheet_id else f"title '{settings.google_sheet_title}'"
                 raise RuntimeError(
-                    f"Could not open spreadsheet by ID '{self.sheet_id}'. "
+                    f"Could not open spreadsheet by {target_desc}. "
                     f"Ensure you shared the Google Sheet with editor permissions to: {email}\n"
                     f"Details: {e}"
                 )
-
-        try:
-            self._spreadsheet = client.open(settings.google_sheet_title)
-            return self._spreadsheet
-        except Exception as e:
-            email = self.service_account_email or "your service account"
-            raise RuntimeError(
-                f"Could not open spreadsheet with title '{settings.google_sheet_title}'. "
-                f"Ensure the sheet exists and is shared with: {email}\n"
-                f"Or set GOOGLE_SHEET_ID in your .env.\n"
-                f"Details: {e}"
-            )
