@@ -9,6 +9,7 @@ from rich.table import Table
 from src.config import settings
 from src.html_parser import parse_closet_html, parse_orders_html
 from src.sheets import GoogleSheetsClient, initialize_all_tabs, SheetsSyncEngine
+from src.notifications import record_html_parse_event, get_sync_status
 
 app = typer.Typer(help="Vinted Sales & Inventory Tracking CLI (HTML & Email Automation)")
 console = Console()
@@ -39,6 +40,7 @@ def import_closet(
     res = engine.sync_listings(items)
     console.print(f"[bold green]✔ Done! {res['updated']} existing items updated, {res['created']} newly added.[/bold green]\n")
     engine.sync_lots()
+    record_html_parse_event(details=f"Closet: {p.name} ({len(items)} items)", client=client)
 
 
 @app.command()
@@ -65,6 +67,7 @@ def import_orders(
     res = engine.sync_orders(orders)
     console.print(f"[bold green]✔ Done! {res['synced_orders']} orders synced into Sold_Items.[/bold green]\n")
     engine.sync_lots()
+    record_html_parse_event(details=f"Orders: {p.name} ({len(orders)} orders)", client=client)
 
 
 @app.command()
@@ -200,6 +203,16 @@ def status():
 
     # Pipeline Mode
     table.add_row("Pipeline Mode", "HTML & Email Automation", "[green]Active (No Bot Scraper)[/green]")
+
+    # Sync Timestamps
+    sync_status = get_sync_status()
+    h_time = sync_status.get("last_html_parsed_at", "Not yet run")
+    h_detail = f" ({sync_status.get('last_html_details')})" if sync_status.get("last_html_details") else ""
+    table.add_row("Last HTML Parser Run", f"{h_time}{h_detail}", "[green]Recorded[/green]" if h_time != "Not yet run" else "[yellow]Pending[/yellow]")
+
+    e_time = sync_status.get("last_email_parsed_at", "Not yet run")
+    e_detail = f" ({sync_status.get('last_email_details')})" if sync_status.get("last_email_details") else ""
+    table.add_row("Last Email Parsed", f"{e_time}{e_detail}", "[green]Recorded[/green]" if e_time != "Not yet run" else "[yellow]Pending[/yellow]")
 
     console.print(table)
 

@@ -851,6 +851,12 @@ class SheetsSyncEngine:
         with Google Sheets without invoking any web scraping.
         """
         sh = self.client.get_spreadsheet()
+        try:
+            from src.notifications import record_email_parse_event
+            record_email_parse_event(details=f"{event.event_type.title()}: {event.item_title or event.order_id}", client=self.client)
+        except Exception:
+            pass
+
         ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
         listings_rows = ws_listings.get_all_values()
 

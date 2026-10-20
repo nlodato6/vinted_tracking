@@ -1,28 +1,49 @@
-"""Notification system for Vinted authentication alerts via Google Sheets banner and GitHub Issues."""
+"""Notification and sync status tracking for HTML imports and email parsing."""
 
-import os
 import json
-import subprocess
-import urllib.request
-import urllib.error
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from pathlib import Path
+from typing import Optional, Dict, Any
 from rich.console import Console
 from src.sheets.client import GoogleSheetsClient
 from src.sheets.schemas import TAB_ANALYTICS_DASHBOARD
 
 console = Console()
 
-GITHUB_REPO_DEFAULT = "nlodato6/vinted_tracking"
-AUTH_ISSUE_TITLE = "⚠️ Vinted Authentication Expired — Re-login Required"
-AUTH_ISSUE_LABEL = "authentication"
+STATUS_FILE = Path(__file__).resolve().parent.parent / ".sync_status.json"
 
 
-def update_sheet_auth_status(client: Optional[GoogleSheetsClient] = None, is_valid: bool = True, error_message: str = "") -> bool:
+def get_sync_status() -> Dict[str, str]:
+    """Reads the persistent sync timestamp tracking state."""
+    if STATUS_FILE.exists():
+        try:
+            return json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {
+        "last_html_parsed_at": "Not yet run",
+        "last_html_details": "",
+        "last_email_parsed_at": "Not yet run",
+        "last_email_details": "",
+    }
+
+
+def save_sync_status(data: Dict[str, str]) -> None:
+    """Saves sync timestamps to persistent local file."""
+    try:
+        STATUS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception as e:
+        console.print(f"[dim]Warning: Could not save .sync_status.json: {e}[/dim]")
+
+
+def update_sheet_status_banner(
+    client: Optional[GoogleSheetsClient] = None,
+    html_time: Optional[str] = None,
+    email_time: Optional[str] = None,
+) -> bool:
     """
     Updates the prominent System Status Banner in Row 2 of Analytics_Dashboard:
-    - Green banner when Vinted session is active and healthy.
-    - Red alert banner when authentication is required or session expired.
+    Displays the timestamp of the last HTML parser run and last email parsed.
     """
     try:
         if not client:
@@ -30,17 +51,13 @@ def update_sheet_auth_status(client: Optional[GoogleSheetsClient] = None, is_val
         sh = client.get_spreadsheet()
         ws_dash = sh.worksheet(TAB_ANALYTICS_DASHBOARD)
 
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        status_data = get_sync_status()
+        h_time = html_time or status_data.get("last_html_parsed_at") or "Not yet run"
+        e_time = email_time or status_data.get("last_email_parsed_at") or "Not yet run"
 
-        if is_valid:
-            status_text = f"🟢 SYSTEM STATUS: Active & Authenticated | Cloud Automation Healthy (Verified: {now_str})"
-            bg_color = {"red": 0.90, "green": 0.97, "blue": 0.92}  # Soft mint green
-            text_color = {"red": 0.08, "green": 0.40, "blue": 0.20} # Dark green
-        else:
-            err_snippet = f" ({error_message})" if error_message else ""
-            status_text = f"🔴 AUTHENTICATION REQUIRED: Vinted session expired{err_snippet}. Run 'python -m src.cli login' on computer | Alert: {now_str}"
-            bg_color = {"red": 0.99, "green": 0.90, "blue": 0.90}  # Soft warning rose
-            text_color = {"red": 0.65, "green": 0.10, "blue": 0.10} # Dark red
+        status_text = f"🟢 SYSTEM STATUS: Active | Last HTML Import: {h_time} | Last Email Parsed: {e_time}"
+        bg_color = {"red": 0.90, "green": 0.97, "blue": 0.92}  # Soft mint green
+        text_color = {"red": 0.08, "green": 0.40, "blue": 0.20} # Dark green
 
         ws_dash.update(range_name="A2", values=[[status_text, "", "", "", "", "", "", ""]])
         ws_dash.format(
@@ -61,181 +78,34 @@ def update_sheet_auth_status(client: Optional[GoogleSheetsClient] = None, is_val
         return False
 
 
-def _get_github_headers(token: str) -> Dict[str, str]:
-    return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "Vinted-Tracking-Bot",
-    }
+def record_html_parse_event(details: str = "", client: Optional[GoogleSheetsClient] = None) -> None:
+    """Records an HTML import event timestamp and updates the spreadsheet banner."""
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    status = get_sync_status()
+    status["last_html_parsed_at"] = now_str
+    status["last_html_details"] = details
+    save_sync_status(status)
+    update_sheet_status_banner(client=client, html_time=now_str)
+    console.print(f"[dim]Recorded HTML parser timestamp: {now_str}[/dim]")
 
 
-def find_open_github_auth_issue(repo: str, token: Optional[str]) -> Optional[int]:
-    """Finds existing open authentication issue number if one exists."""
-    if token:
-        try:
-            url = f"https://api.github.com/repos/{repo}/issues?state=open&per_page=20"
-            req = urllib.request.Request(url, headers=_get_github_headers(token))
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                issues = json.loads(resp.read().decode())
-                for issue in issues:
-                    if AUTH_ISSUE_TITLE.lower() in issue.get("title", "").lower():
-                        return issue.get("number")
-        except Exception:
-            pass
-
-    # Fallback to local gh CLI if available
-    try:
-        cmd = ["gh", "issue", "list", "--repo", repo, "--state", "open", "--json", "number,title"]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if result.returncode == 0 and result.stdout.strip():
-            issues = json.loads(result.stdout)
-            for issue in issues:
-                if AUTH_ISSUE_TITLE.lower() in issue.get("title", "").lower():
-                    return issue.get("number")
-    except Exception:
-        pass
-
-    return None
+def record_email_parse_event(details: str = "", client: Optional[GoogleSheetsClient] = None) -> None:
+    """Records an email parsing event timestamp and updates the spreadsheet banner."""
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    status = get_sync_status()
+    status["last_email_parsed_at"] = now_str
+    status["last_email_details"] = details
+    save_sync_status(status)
+    update_sheet_status_banner(client=client, email_time=now_str)
+    console.print(f"[dim]Recorded email parser timestamp: {now_str}[/dim]")
 
 
-def create_or_update_github_issue(error_message: str = "") -> bool:
-    """
-    Creates an issue on the GitHub repository to trigger email and mobile push notifications.
-    If an open issue already exists, leaves an update comment instead of creating duplicates.
-    """
-    repo = os.environ.get("GITHUB_REPOSITORY", GITHUB_REPO_DEFAULT)
-    token = os.environ.get("GITHUB_TOKEN")
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
-
-    existing_issue_num = find_open_github_auth_issue(repo, token)
-
-    if existing_issue_num:
-        comment_body = f"⚠️ Automated sync re-check detected authentication still required on `{timestamp}`.\n*Details:* `{error_message or 'Session token expired'}`"
-        if token:
-            try:
-                url = f"https://api.github.com/repos/{repo}/issues/{existing_issue_num}/comments"
-                data = json.dumps({"body": comment_body}).encode()
-                req = urllib.request.Request(url, data=data, headers=_get_github_headers(token))
-                with urllib.request.urlopen(req, timeout=10):
-                    console.print(f"[yellow]Updated open GitHub issue #{existing_issue_num} with latest check timestamp.[/yellow]")
-                    return True
-            except Exception:
-                pass
-        try:
-            cmd = ["gh", "issue", "comment", str(existing_issue_num), "--repo", repo, "--body", comment_body]
-            subprocess.run(cmd, capture_output=True, text=True, check=False)
-            return True
-        except Exception:
-            return False
-
-    issue_body = f"""## ⚠️ Vinted Authentication Required
-
-The automated sales & inventory sync detected that your Vinted authentication session has expired or requires security verification.
-
-* **Alert Timestamp:** `{timestamp}`
-* **Error Detail:** `{error_message or 'Session storage state expired or redirected to login'}`
-
----
-
-### 🛠️ How to Reconnect (Takes ~1 minute):
-
-1. Open your terminal on your Mac:
-   ```bash
-   cd /Users/nicol/Desktop/vinted_tracking
-   source venv/bin/activate
-   python -m src.cli login
-   ```
-2. Log in through the opened browser window and press **[ENTER]**.
-3. Upload your renewed session tokens to GitHub Secrets:
-   ```bash
-   python -m src.cli upload-session
-   ```
-4. **Done!** This issue will automatically close on your next successful sync.
-"""
-
-    if token:
-        try:
-            url = f"https://api.github.com/repos/{repo}/issues"
-            payload = {
-                "title": AUTH_ISSUE_TITLE,
-                "body": issue_body,
-                "labels": [AUTH_ISSUE_LABEL],
-            }
-            data = json.dumps(payload).encode()
-            req = urllib.request.Request(url, data=data, headers=_get_github_headers(token))
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                created = json.loads(resp.read().decode())
-                console.print(f"[bold red]📢 Created GitHub Issue #{created.get('number')} to notify owner via email and mobile push.[/bold red]")
-                return True
-        except Exception as e:
-            console.print(f"[dim]GitHub API issue creation error: {e}[/dim]")
-
-    # Fallback to local gh CLI
-    try:
-        cmd = [
-            "gh", "issue", "create",
-            "--repo", repo,
-            "--title", AUTH_ISSUE_TITLE,
-            "--body", issue_body,
-            "--label", AUTH_ISSUE_LABEL,
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if result.returncode == 0:
-            console.print(f"[bold red]📢 Created GitHub Issue via gh CLI: {result.stdout.strip()}[/bold red]")
-            return True
-    except Exception as e:
-        console.print(f"[dim]gh CLI issue creation error: {e}[/dim]")
-
-    return False
-
-
-def resolve_github_auth_issue() -> bool:
-    """Closes any open authentication issue on GitHub once session is renewed."""
-    repo = os.environ.get("GITHUB_REPOSITORY", GITHUB_REPO_DEFAULT)
-    token = os.environ.get("GITHUB_TOKEN")
-
-    existing_issue_num = find_open_github_auth_issue(repo, token)
-    if not existing_issue_num:
-        return False
-
-    comment_body = "✅ **Vinted authentication session successfully refreshed and verified!** Automated sync resumed."
-
-    if token:
-        try:
-            # Post comment
-            url_c = f"https://api.github.com/repos/{repo}/issues/{existing_issue_num}/comments"
-            req_c = urllib.request.Request(url_c, data=json.dumps({"body": comment_body}).encode(), headers=_get_github_headers(token))
-            urllib.request.urlopen(req_c, timeout=10)
-
-            # Close issue
-            url_i = f"https://api.github.com/repos/{repo}/issues/{existing_issue_num}"
-            req_i = urllib.request.Request(url_i, data=json.dumps({"state": "closed"}).encode(), headers=_get_github_headers(token))
-            req_i.get_method = lambda: "PATCH"
-            urllib.request.urlopen(req_i, timeout=10)
-
-            console.print(f"[bold green]✔ Automatically closed resolved GitHub Issue #{existing_issue_num}.[/bold green]")
-            return True
-        except Exception:
-            pass
-
-    try:
-        subprocess.run(["gh", "issue", "comment", str(existing_issue_num), "--repo", repo, "--body", comment_body], check=False)
-        subprocess.run(["gh", "issue", "close", str(existing_issue_num), "--repo", repo], check=False)
-        console.print(f"[bold green]✔ Automatically closed resolved GitHub Issue #{existing_issue_num} via gh CLI.[/bold green]")
-        return True
-    except Exception:
-        return False
-
-
+# Backward compatibility aliases
 def notify_auth_failure(error_message: str = "") -> None:
-    """Dispatches authentication failure alerts to both Google Sheet banner and GitHub Issue."""
-    console.print(f"[bold red]🚨 Triggering authentication alert: {error_message}[/bold red]")
-    update_sheet_auth_status(is_valid=False, error_message=error_message)
-    create_or_update_github_issue(error_message=error_message)
-
+    pass
 
 def notify_auth_success() -> None:
-    """Marks Google Sheet status healthy and closes any open GitHub auth issues."""
-    update_sheet_auth_status(is_valid=True)
-    resolve_github_auth_issue()
+    pass
+
+def update_sheet_auth_status(client: Optional[GoogleSheetsClient] = None, is_valid: bool = True, error_message: str = "") -> bool:
+    return update_sheet_status_banner(client=client)
