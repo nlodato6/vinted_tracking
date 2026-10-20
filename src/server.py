@@ -86,6 +86,7 @@ async def receive_vinted_email(
     """
     Inbound webhook endpoint for Vinted email alerts (e.g. from SendGrid Inbound Parse,
     Mailgun, Cloudflare Email Routing, or Zapier/Make).
+    Directly updates Google Sheets without web scraping.
     """
     if settings.webhook_secret and settings.webhook_secret != "your_optional_webhook_secret_here":
         if x_webhook_secret != settings.webhook_secret:
@@ -99,7 +100,7 @@ async def receive_vinted_email(
     if "application/json" in content_type:
         data = await request.json()
         subject = data.get("subject", "")
-        body = data.get("body", "") or data.get("text", "")
+        body = data.get("body", "") or data.get("text", "") or data.get("html", "")
     else:
         form = await request.form()
         subject = str(form.get("subject", ""))
@@ -107,15 +108,23 @@ async def receive_vinted_email(
 
     console.print(f"[bold magenta]📩 Inbound email webhook received:[/bold magenta] '{subject}'")
 
-    # Detect sale or order confirmation patterns
-    is_sale_event = bool(
-        re.search(r"(you'?ve made a sale|item sold|order confirmed|buyer bought)", subject, re.IGNORECASE)
-        or re.search(r"(congratulations on your sale|has been purchased)", body, re.IGNORECASE)
-    )
+    from src.email_parser import parse_vinted_email
+    event = parse_vinted_email(subject, body)
 
-    if is_sale_event:
-        console.print("[bold green]🎯 Sale alert detected! Queuing instant order sync...[/bold green]")
-        background_tasks.add_task(run_sync_task, "all")
-        return {"status": "accepted", "event": "sale_detected", "action": "sync_queued"}
+    if event.event_type in ("sale", "favorite", "offer"):
+        console.print(f"[bold green]🎯 {event.event_type.upper()} event detected! Updating Google Sheets directly...[/bold green]")
+        client = GoogleSheetsClient()
+        engine = SheetsSyncEngine(client)
+        result = engine.process_email_event(event)
+        console.print(f"[green]✔ Sheet update complete: {result}[/green]")
+        return {
+            "status": "success",
+            "event": "sale_detected" if event.event_type == "sale" else f"{event.event_type}_detected",
+            "action": "sync_queued",
+            "event_type": event.event_type,
+            "details": result,
+        }
 
-    return {"status": "ignored", "event": "non_sale_email", "message": "Email did not match sale triggers"}
+    return {"status": "ignored", "event": "non_sale_email", "message": "Email did not match sale or favorite patterns"}
+
+

@@ -120,7 +120,14 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
     ws_supplies.update(range_name="A1", values=[SUPPLIES_HEADERS])
     format_header_row(ws_supplies, len(SUPPLIES_HEADERS))
 
-    # Ensure global average packaging formula in H2
+    # Ensure unit cost and global average packaging formulas across rows 2 to 100
+    supplies_formula_rows = []
+    for r in range(2, 101):
+        f_unit = f"=IF(AND(ISNUMBER(E{r}), E{r}>0), F{r}/E{r}, \"\")"
+        f_avg = "=IF(SUM(E2:E)>0, SUM(F2:F)/SUM(E2:E), 0.25)" if r == 2 else f"=IF(E{r}=\"\", \"\", H$2)"
+        supplies_formula_rows.append([f_unit, f_avg])
+    ws_supplies.update(range_name="G2:H100", values=supplies_formula_rows, value_input_option="USER_ENTERED")
+
     all_supplies_rows = ws_supplies.get_all_values()
     if len(all_supplies_rows) <= 1:
         sample_supply = [
@@ -130,12 +137,8 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
             "Amazon",
             100,
             18.99,
-            "=IF(E2>0, F2/E2, 0)",
-            '=IF(SUM(E2:E)>0, SUM(F2:F)/SUM(E2:E), 0.75)',
         ]
         ws_supplies.append_row(sample_supply, value_input_option="USER_ENTERED")
-    elif not ws_supplies.acell("H2").value:
-        ws_supplies.update(range_name="H2", values=[['=IF(SUM(E2:E)>0, SUM(F2:F)/SUM(E2:E), 0.75)']], value_input_option="USER_ENTERED")
 
     ws_supplies.format("E2:E200", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
     ws_supplies.format("F2:H200", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})

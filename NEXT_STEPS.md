@@ -110,17 +110,20 @@ Your cloud sync is already configured in [`.github/workflows/vinted_sync.yml`](f
 
 ---
 
-### Option C: Real-Time Sales Webhook (`tlodato24@gmail.com`)
-Since your Vinted notifications go to `tlodato24@gmail.com`, you can trigger instant synchronization whenever a sale email arrives:
+### Option C: Real-Time Gmail Webhook (`tsavoie90@gmail.com`)
+Since your Vinted notifications go to `tsavoie90@gmail.com`, you can trigger instant synchronization whenever a sale, favorite, or offer email arrives:
 
-1. Start the webhook server:
+1. **Start the Webhook Server**:
    ```bash
    python -m src.cli serve --port 8000
    ```
-2. Set up an inbound email forwarder to `POST http://<your-host>:8000/webhook/vinted-email`.
-   * **Free tools**: Zapier, Make.com, or Cloudflare Email Workers.
-   * **Filter**: Emails from `*@vinted.com` with subject containing *"You've made a sale"* or *"Item sold"*.
-   * When triggered, the server immediately fetches the sold order and logs it into your sheet without manual intervention.
+2. **Google Apps Script Automation (Zero Web Scraping / Zero Bot Risk)**:
+   - Uses the deployed Apps Script in your Google account running a time-driven trigger every 5 minutes.
+   - **Supported Email Triggers from `no-reply@vinted.com`**:
+     - **Sales** (`"You sold an item on Vinted"`): Moves item from `Item_Listings` to `Sold_Items`, calculates profit, and marks order.
+     - **Favorites** (`"was just favorited"`): Automatically increments favorite count on the garment in `Item_Listings`.
+     - **Offers** (`"new offer for..."` / `"<offer> instead of <listed price>"`): Automatically appends offer timestamp and dollar amount to `Price_History` without polling!
+   - Full Apps Script code and instructions are preserved in [`vinted_email_automation_setup.md`](file:///Users/nicol/.gemini/antigravity-ide/brain/dbe0ba03-eeff-4807-b681-82f5145b9d4d/vinted_email_automation_setup.md).
 
 ---
 

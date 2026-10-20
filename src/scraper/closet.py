@@ -101,6 +101,7 @@ async def scrape_closet_listings(username: Optional[str] = None) -> List[ItemLis
     """
     Scrapes all listings from the seller's closet / items dashboard.
     Extracts title, asking price, item ID, favorites count, category, and status.
+    Uses authenticated Vinted wardrobe API pagination for full catalog capture with DOM fallback.
     """
     console.print("[cyan]🔍 Starting Vinted closet scraper...[/cyan]")
     context: BrowserContext = await get_browser_context(headless=settings.headless, use_storage_state=True)
@@ -116,17 +117,93 @@ async def scrape_closet_listings(username: Optional[str] = None) -> List[ItemLis
         else:
             target_url = f"{settings.vinted_base_url}/member/items"
 
+        headers_captured: dict = {}
+        detected_user_id = target_username
+
+        async def on_request(req):
+            nonlocal detected_user_id
+            if "wardrobe" in req.url:
+                headers_captured.update(req.headers)
+                m = re.search(r"/wardrobe/(\d+)/items", req.url)
+                if m:
+                    detected_user_id = m.group(1)
+
+        page.on("request", on_request)
+
         console.print(f"[dim]Navigating to {target_url}...[/dim]")
-        await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
-        await human_delay(2.0, 3.5)
+        await page.goto(target_url, wait_until="networkidle", timeout=45000)
+        await human_delay(1.5, 2.5)
 
         if "login" in page.url or "auth" in page.url:
             console.print("[bold red]❌ Authentication required. Please run 'python -m src.cli login' to refresh session.[/bold red]")
             notify_auth_failure("Redirected to login while accessing closet listings")
             return []
 
-        # Scroll to load dynamically rendered items (infinite scroll)
-        for _ in range(3):
+        # 1. Primary Strategy: Authenticated Wardrobe API Pagination
+        if headers_captured and detected_user_id:
+            console.print(f"[cyan]⚡ Fetching complete wardrobe via Vinted API for member {detected_user_id}...[/cyan]")
+            api_page = 1
+            while True:
+                api_url = f"{settings.vinted_base_url}/api/v2/wardrobe/{detected_user_id}/items?page={api_page}&per_page=96&order=relevance"
+                resp = await page.request.get(api_url, headers=headers_captured)
+                if resp.status != 200:
+                    console.print(f"[dim]Wardrobe API returned status {resp.status}, finished pagination.[/dim]")
+                    break
+
+                data = await resp.json()
+                raw_items = data.get("items", [])
+                if not raw_items:
+                    break
+
+                for it in raw_items:
+                    price_val = float(it.get("price", {}).get("amount", 0.0))
+                    is_closed = bool(it.get("is_closed") or it.get("is_sold"))
+                    is_reserved = bool(it.get("is_reserved"))
+                    status = "Sold" if is_closed else ("Reserved" if is_reserved else "Listed")
+
+                    raw_brand = it.get("brand")
+                    brand_str = raw_brand.get("title", "") if isinstance(raw_brand, dict) else str(raw_brand or "")
+                    item_title = it.get("title", "").strip()
+                    if not brand_str:
+                        brand_str = infer_brand(item_title, "")
+
+                    v_id = str(it.get("id"))
+                    v_url = it.get("url") or f"{settings.vinted_base_url}/items/{v_id}"
+
+                    listing = ItemListing(
+                        item_sku="",
+                        title=item_title,
+                        brand=brand_str,
+                        category=infer_clothing_category(item_title),
+                        posted_price=price_val,
+                        target_price=price_val,
+                        current_price=price_val,
+                        sold_price=price_val if is_closed else None,
+                        favorites=it.get("favourite_count", 0),
+                        views=it.get("view_count", 0),
+                        vinted_id=v_id,
+                        vinted_url=v_url,
+                        status=status,
+                        date_listed=date.today(),
+                        last_synced=datetime.now(),
+                    )
+                    items.append(listing)
+
+                pagination = data.get("pagination", {})
+                total_pages = pagination.get("total_pages", 1)
+                if api_page >= total_pages:
+                    break
+                api_page += 1
+
+            if items:
+                active_count = sum(1 for i in items if i.status != "Sold")
+                sold_count = sum(1 for i in items if i.status == "Sold")
+                console.print(f"[bold green]✨ Successfully loaded {len(items)} items from Vinted ({active_count} active, {sold_count} sold).[/bold green]")
+                return items
+
+        # 2. Resilient Fallback: DOM scraping with infinite scroll
+        console.print("[dim]Falling back to DOM scraping...[/dim]")
+        for _ in range(5):
             await page.mouse.wheel(0, 1500)
             await human_delay(1.0, 1.5)
 
@@ -257,3 +334,4 @@ async def scrape_closet_listings(username: Optional[str] = None) -> List[ItemLis
 
     console.print(f"[bold green]✨ Successfully scraped {len(items)} closet items.[/bold green]")
     return items
+

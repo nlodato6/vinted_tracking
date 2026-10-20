@@ -51,15 +51,29 @@ async def scrape_vinted_orders() -> List[SalesOrder]:
                 card_text = await elem.inner_text()
                 lines = [l.strip() for l in card_text.split("\n") if l.strip()]
 
-                # First line is usually the garment / item title
-                title = lines[0] if lines else f"Sold Item {idx + 1}"
+                # Filter out price and status lines to find the actual garment title
+                title_candidates = [
+                    l for l in lines
+                    if not re.search(r"^\$\s*\d", l)
+                    and "shipping label" not in l.lower()
+                    and "order shipped" not in l.lower()
+                    and "delivered" not in l.lower()
+                    and "canceled" not in l.lower()
+                    and "cancelled" not in l.lower()
+                    and "completed" not in l.lower()
+                ]
+                title = title_candidates[0] if title_candidates else (lines[0] if lines else f"Sold Item {idx + 1}")
 
                 # Extract price ($X.XX)
-                price_matches = re.findall(r"\$\s*\d+(?:\.\d{2})?", card_text)
+                price_matches = re.findall(r"\$\s*(\d+(?:\.\d{2})?)", card_text)
                 sold_price = parse_price(price_matches[0]) if price_matches else 0.0
 
                 # Extract Order ID from inbox/transaction link
                 href = (await elem.get_attribute("href")) or ""
+                if not href:
+                    inbox_link = await elem.query_selector("a[href*='/inbox/'], a[href*='/transaction/']")
+                    if inbox_link:
+                        href = (await inbox_link.get_attribute("href")) or ""
                 if "/" in href:
                     order_id = href.rstrip("/").split("/")[-1]
                 else:
@@ -68,7 +82,7 @@ async def scrape_vinted_orders() -> List[SalesOrder]:
                 # Status
                 card_lower = card_text.lower()
                 status = "Completed"
-                if "shipping label" in card_lower or "in progress" in card_lower:
+                if "shipping label" in card_lower or "in progress" in card_lower or "shipped" in card_lower:
                     status = "In Progress"
                 elif "canceled" in card_lower or "cancelled" in card_lower:
                     status = "Canceled"
