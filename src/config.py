@@ -36,32 +36,10 @@ class Settings(BaseSettings):
         default="",
         description="Vinted seller username",
     )
-    headless: bool = Field(
-        default=True,
-        description="Run Playwright in headless mode (set to false for interactive login)",
-    )
-    session_dir: Path = Field(
-        default=Path(".session"),
-        description="Directory to store persistent browser state/cookies",
-    )
-    storage_state_file: str = "vinted_state.json"
-
     # Webhook server
     webhook_host: str = "0.0.0.0"
     webhook_port: int = 8000
     webhook_secret: str = ""
-
-    # Scheduler
-    sync_mode: str = "cron"  # "cron" or "interval"
-    sync_schedule_hour: int = 8
-    sync_schedule_minute: int = 0
-    sync_interval_hours: int = 24
-
-    @property
-    def full_storage_state_path(self) -> Path:
-        p = Path(self.session_dir)
-        p.mkdir(parents=True, exist_ok=True)
-        return p / self.storage_state_file
 
     @property
     def vinted_base_url(self) -> str:

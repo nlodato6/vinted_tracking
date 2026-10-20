@@ -1,5 +1,3 @@
-import asyncio
-import json
 import sys
 from pathlib import Path
 from typing import Optional
@@ -9,135 +7,64 @@ from rich.console import Console
 from rich.table import Table
 
 from src.config import settings
-from src.scraper import interactive_login, verify_session, parse_and_save_cookies, scrape_closet_listings, scrape_vinted_orders
+from src.html_parser import parse_closet_html, parse_orders_html
 from src.sheets import GoogleSheetsClient, initialize_all_tabs, SheetsSyncEngine
-from src.notifications import notify_auth_failure, notify_auth_success
 
-app = typer.Typer(help="Vinted Automated Sales & Inventory Tracking CLI")
+app = typer.Typer(help="Vinted Sales & Inventory Tracking CLI (HTML & Email Automation)")
 console = Console()
 
 
 @app.command()
-def login():
-    """Launch interactive browser to log in to Vinted and save authentication session."""
-    asyncio.run(interactive_login())
-
-
-@app.command()
-def import_cookie(
-    file: Optional[str] = typer.Option(None, "--file", "-f", help="Path to exported cookie JSON file from browser"),
+def import_closet(
+    file_path: str = typer.Argument(..., help="Path to saved Vinted closet/profile HTML file"),
+    lot: Optional[str] = typer.Option("LOT-001", "--lot", "-l", help="Lot ID to assign to new active items"),
 ):
-    """Import active Vinted session cookies directly from your regular browser."""
-    console.print("\n[bold cyan]🍪 Vinted Session Cookie Importer[/bold cyan]")
-
-    if file:
-        p = Path(file)
-        if not p.exists():
-            console.print(f"[bold red]❌ File not found: {file}[/bold red]")
-            raise typer.Exit(code=1)
-        raw_text = p.read_text(encoding="utf-8")
-    elif not sys.stdin.isatty():
-        # Input piped in (e.g. `pbpaste | python -m src.cli import-cookie`)
-        raw_text = sys.stdin.read().strip()
-    else:
-        console.print("[dim]Tip: You can export cookies from your regular browser (Chrome/Safari) using:[/dim]")
-        console.print("[dim]  Option A: Chrome DevTools Console on vinted.com -> type: copy(document.cookie)[/dim]")
-        console.print("[dim]  Option B: A free extension like 'Cookie-Editor' (Click Export -> Export as JSON).[/dim]")
-        console.print("[dim]  Option C: Pipe clipboard on Mac: pbpaste | python -m src.cli import-cookie[/dim]")
-        console.print("\n[yellow]Paste your cookie JSON or cookie header string below, then press [ENTER]:[/yellow]")
-
-        lines = []
-        try:
-            while True:
-                line = input()
-                if not line:
-                    if lines:
-                        # Empty line entered; check if we have complete content
-                        joined = "\n".join(lines).strip()
-                        try:
-                            json.loads(joined)
-                            break
-                        except Exception:
-                            # Finished pasting
-                            break
-                    else:
-                        break
-                lines.append(line)
-                # If a single-line cookie string like key=value; key2=value2, finish immediately
-                if len(lines) == 1 and ";" in line and not line.strip().startswith(("{", "[")):
-                    break
-        except (EOFError, KeyboardInterrupt):
-            pass
-        raw_text = "\n".join(lines).strip()
-
-    if not raw_text:
-        console.print("[bold red]❌ No cookie data provided.[/bold red]")
+    """
+    Import active listings from a saved Vinted closet HTML file directly into Google Sheets.
+    """
+    p = Path(file_path)
+    if not p.exists():
+        console.print(f"[bold red]❌ HTML file not found: {file_path}[/bold red]")
         raise typer.Exit(code=1)
 
-    try:
-        saved_path = parse_and_save_cookies(raw_text)
-        console.print(f"[bold green]✅ Session successfully imported and saved to {saved_path}![/bold green]")
-        notify_auth_success()
-        console.print("[dim]You can verify it anytime by running: python -m src.cli check-session[/dim]\n")
-    except Exception as e:
-        console.print(f"[bold red]❌ Failed to import cookies: {e}[/bold red]")
+    console.print(f"\n[bold cyan]📦 Parsing closet listings from '{p.name}'...[/bold cyan]")
+    items = parse_closet_html(p, default_lot=lot or "")
+    if not items:
+        console.print("[yellow]⚠ No item cards found in this HTML file.[/yellow]")
         raise typer.Exit(code=1)
+
+    console.print(f"[green]Found {len(items)} items in HTML file. Syncing to Google Sheets...[/green]")
+    client = GoogleSheetsClient()
+    engine = SheetsSyncEngine(client)
+    res = engine.sync_listings(items)
+    console.print(f"[bold green]✔ Done! {res['updated']} existing items updated, {res['created']} newly added.[/bold green]\n")
+    engine.sync_lots()
 
 
 @app.command()
-def check_session():
-    """Verify if the current saved Vinted session is active and valid."""
-    is_valid = asyncio.run(verify_session())
-    if not is_valid:
+def import_orders(
+    file_path: str = typer.Argument(..., help="Path to saved Vinted 'My orders' / sales HTML file"),
+):
+    """
+    Import sold orders from a saved Vinted 'My orders' HTML file directly into Google Sheets.
+    """
+    p = Path(file_path)
+    if not p.exists():
+        console.print(f"[bold red]❌ HTML file not found: {file_path}[/bold red]")
         raise typer.Exit(code=1)
 
-
-@app.command()
-def upload_session():
-    """Upload local Vinted session tokens to GitHub Secrets for cloud automation."""
-    import subprocess
-    session_path = settings.full_storage_state_path
-    if not session_path.exists():
-        console.print("[bold red]❌ No local session file found at .session/vinted_state.json.[/bold red]")
-        console.print("[yellow]Please run 'python -m src.cli login' first to authenticate.[/yellow]")
+    console.print(f"\n[bold cyan]💰 Parsing sold orders from '{p.name}'...[/bold cyan]")
+    orders = parse_orders_html(p)
+    if not orders:
+        console.print("[yellow]⚠ No order records found in this HTML file.[/yellow]")
         raise typer.Exit(code=1)
 
-    console.print("\n[bold cyan]☁️ Uploading Vinted session to GitHub Secrets...[/bold cyan]")
-    try:
-        with open(session_path, "rb") as f:
-            subprocess.run(
-                ["gh", "secret", "set", "VINTED_STORAGE_STATE", "--repo", "nlodato6/vinted_tracking"],
-                stdin=f,
-                check=True,
-            )
-        console.print("[bold green]✅ Successfully uploaded VINTED_STORAGE_STATE to GitHub![/bold green]")
-        console.print("[dim]GitHub Actions can now run scheduled syncs in the cloud with your laptop closed.[/dim]\n")
-        notify_auth_success()
-    except Exception as e:
-        console.print(f"[bold red]❌ Error uploading to GitHub: {e}[/bold red]")
-        raise typer.Exit(code=1)
-
-
-@app.command()
-def clear_sample_data():
-    """Remove the initial placeholder demo rows so your spreadsheet starts 100% clean."""
-    console.print("\n[bold cyan]🧹 Clearing demo placeholder rows from Google Sheets...[/bold cyan]")
-    try:
-        client = GoogleSheetsClient()
-        sh = client.get_spreadsheet()
-        for tab_name in ["Inventory_Lots", "Item_Listings", "Sold_Items"]:
-            try:
-                ws = sh.worksheet(tab_name)
-                rows = ws.get_all_values()
-                if len(rows) > 1:
-                    ws.delete_rows(2, len(rows))
-                    console.print(f"[dim]Cleaned demo rows from {tab_name}[/dim]")
-            except Exception:
-                pass
-        console.print("[bold green]✅ All demo rows removed! Spreadsheet is now fresh and ready for your real inventory.[/bold green]\n")
-    except Exception as e:
-        console.print(f"[bold red]❌ Error clearing sample rows: {e}[/bold red]")
-        raise typer.Exit(code=1)
+    console.print(f"[green]Found {len(orders)} orders in HTML file. Syncing to Google Sheets...[/green]")
+    client = GoogleSheetsClient()
+    engine = SheetsSyncEngine(client)
+    res = engine.sync_orders(orders)
+    console.print(f"[bold green]✔ Done! {res['synced_orders']} orders synced into Sold_Items.[/bold green]\n")
+    engine.sync_lots()
 
 
 @app.command()
@@ -178,7 +105,6 @@ def log_sale(
         sale_dt = date_sold or date.today().strftime("%Y-%m-%d")
         order_ref = f"ORD-{datetime.now().strftime('%Y%m%d%H%M')}"
 
-        # Move item from active Item_Listings to Sold_Items with full sale details
         moved = engine.move_listing_to_sold(
             sku=sku_clean,
             status=f"Sold ({platform})",
@@ -192,7 +118,6 @@ def log_sale(
             item_title = moved.get("Title") or sku_clean
             console.print(f"[bold green]✅ Moved '{item_title}' ({sku_clean}) to Sold_Items at ${price:.2f}![/bold green]")
         else:
-            # Check if it was already moved or exists in Sold_Items
             sold_rows = ws_sold.get_all_values()
             found_in_sold = False
             if len(sold_rows) > 1:
@@ -226,53 +151,6 @@ def log_sale(
 
 
 @app.command()
-def sync(
-    sync_type: str = typer.Option("all", "--type", "-t", help="Sync type: 'listings', 'sales', or 'all'"),
-):
-    """
-    On-demand synchronization between Vinted and Google Sheets.
-    Use this after listing new items or making a sale.
-    """
-    console.print(f"\n[bold cyan]🔄 Initiating manual sync: type='{sync_type}'...[/bold cyan]")
-
-    if sync_type in ("listings", "sales", "all") and not settings.full_storage_state_path.exists():
-        console.print("[bold red]❌ No saved session file found at .session/vinted_state.json.[/bold red]")
-        console.print("[yellow]Please run 'python -m src.cli login' to authenticate.[/yellow]")
-        notify_auth_failure("Missing session storage state file (.session/vinted_state.json)")
-        raise typer.Exit(code=1)
-
-    async def _execute():
-        client = GoogleSheetsClient()
-        engine = SheetsSyncEngine(client)
-
-        if sync_type in ("listings", "all"):
-            console.print("[yellow]1/2 Scraped closet items...[/yellow]")
-            items = await scrape_closet_listings()
-            res = engine.sync_listings(items)
-            console.print(f"[green]✔ Listings synced: {res['updated']} updated, {res['created']} newly added.[/green]")
-
-        if sync_type in ("sales", "all"):
-            console.print("[yellow]2/3 Scraped sold orders...[/yellow]")
-            orders = await scrape_vinted_orders()
-            res = engine.sync_orders(orders)
-            console.print(f"[green]✔ Orders synced: {res['synced_orders']} new sales logged.[/green]")
-
-        if sync_type in ("lots", "all"):
-            console.print("[yellow]3/3 Updating inventory lots & statuses...[/yellow]")
-            lot_res = engine.sync_lots()
-            console.print(f"[green]✔ Inventory Lots synced: {lot_res['total_lots']} lots tracked ({lot_res['completed_lots']} completed, {lot_res['active_lots']} active).[/green]")
-
-        notify_auth_success()
-        console.print("\n[bold green]🎉 Sync finished successfully![/bold green]\n")
-
-    try:
-        asyncio.run(_execute())
-    except Exception as e:
-        console.print(f"[bold red]❌ Sync error:[/bold red] {e}")
-        raise typer.Exit(code=1)
-
-
-@app.command()
 def sync_lots():
     """Recalculate unit costs, items processed, and lot completion status in Inventory_Lots."""
     console.print("\n[bold cyan]📦 Synchronizing Inventory Lots...[/bold cyan]")
@@ -298,13 +176,6 @@ def serve(
 
 
 @app.command()
-def scheduler():
-    """Start the periodic background synchronization service."""
-    from src.scheduler import start_scheduler
-    start_scheduler()
-
-
-@app.command()
 def status():
     """Display system status, configuration, and credentials."""
     table = Table(title="Vinted Tracking Pipeline Status", show_header=True)
@@ -327,25 +198,8 @@ def status():
     sheet_id = settings.google_sheet_id or "Auto-match title"
     table.add_row("Google Sheet Target", sheet_id, "[green]Configured[/green]" if settings.google_sheet_id else "[yellow]Using title[/yellow]")
 
-    # Vinted Session
-    session_file = settings.full_storage_state_path
-    session_exists = session_file.exists()
-    table.add_row(
-        "Vinted Session",
-        str(session_file),
-        "[green]Active state saved[/green]" if session_exists else "[yellow]No session (run login)[/yellow]",
-    )
-
-    # Marketplace Domain
-    table.add_row("Vinted Domain", settings.vinted_domain, "[green]OK[/green]")
-
-    # Scheduler
-    sched_desc = (
-        f"Daily at {settings.sync_schedule_hour:02d}:{settings.sync_schedule_minute:02d}"
-        if settings.sync_mode.lower() == "cron"
-        else f"Every {settings.sync_interval_hours}h"
-    )
-    table.add_row("Auto-Sync Schedule", sched_desc, "[green]Configured[/green]")
+    # Pipeline Mode
+    table.add_row("Pipeline Mode", "HTML & Email Automation", "[green]Active (No Bot Scraper)[/green]")
 
     console.print(table)
 

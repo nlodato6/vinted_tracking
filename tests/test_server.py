@@ -5,14 +5,12 @@ from src.server import app
 client = TestClient(app)
 
 
-@patch("src.server.verify_session", new_callable=AsyncMock)
-def test_health_check(mock_verify):
-    mock_verify.return_value = True
+def test_health_check():
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "online"
-    assert "vinted_session_active" in data
+    assert "domain" in data
 
 
 def test_sync_trigger_invalid_type():

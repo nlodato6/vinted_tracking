@@ -1,11 +1,10 @@
-# Core dependencies
-playwright>=1.49.0
-playwright-stealth>=1.0.6
+# Core Google Sheets & Data Models
 gspread>=6.1.4
 google-auth>=2.37.0
 pydantic>=2.10.0
 pydantic-settings>=2.7.0
 python-dotenv>=1.0.1
+beautifulsoup4>=4.12.0
 
 # CLI & Terminal UI
 typer[all]>=0.15.1
@@ -16,9 +15,6 @@ fastapi>=0.115.6
 uvicorn[standard]>=0.34.0
 python-multipart>=0.0.20
 httpx>=0.28.1
-
-# Scheduling & Async
-apscheduler>=3.10.4
 
 # Testing
 pytest>=8.3.4

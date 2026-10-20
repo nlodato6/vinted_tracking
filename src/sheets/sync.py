@@ -486,7 +486,7 @@ class SheetsSyncEngine:
         if len(sold_rows) > 1:
             for row_idx, row in enumerate(sold_rows[1:], start=2):
                 if s_url_idx != -1 and len(row) > s_url_idx and row[s_url_idx].strip():
-                    from src.scraper.closet import extract_vinted_id
+                    from src.html_parser import extract_vinted_id
                     v_id_extracted = extract_vinted_id(row[s_url_idx])
                     if v_id_extracted:
                         sold_by_vinted_id[v_id_extracted] = row_idx

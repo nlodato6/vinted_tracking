@@ -9,14 +9,13 @@ from rich.console import Console
 
 from src.config import settings
 from src.sheets import GoogleSheetsClient, SheetsSyncEngine
-from src.scraper import scrape_closet_listings, scrape_vinted_orders, verify_session
 
 console = Console()
 app = FastAPI(title="Vinted Automation Webhook Server", version="0.1.0")
 
 
 class SyncRequest(BaseModel):
-    sync_type: str = "all"  # listings, sales, or all
+    sync_type: str = "lots"  # lots or supplies
 
 
 class EmailWebhookPayload(BaseModel):
@@ -27,26 +26,13 @@ class EmailWebhookPayload(BaseModel):
 
 
 async def run_sync_task(sync_type: str):
-    """Background task to run scrapers and update Google Sheets."""
+    """Background task to synchronize lots in Google Sheets."""
     console.print(f"[bold cyan]⚡ Running background sync task: '{sync_type}'...[/bold cyan]")
     try:
         client = GoogleSheetsClient()
         engine = SheetsSyncEngine(client)
-
-        if sync_type in ("listings", "all"):
-            listings = await scrape_closet_listings()
-            res = engine.sync_listings(listings)
-            console.print(f"[green]Listings sync complete: {res}[/green]")
-
-        if sync_type in ("sales", "all"):
-            orders = await scrape_vinted_orders()
-            res = engine.sync_orders(orders)
-            console.print(f"[green]Orders sync complete: {res}[/green]")
-
-        if sync_type in ("lots", "all"):
-            lot_res = engine.sync_lots()
-            console.print(f"[green]Lots sync complete: {lot_res}[/green]")
-
+        lot_res = engine.sync_lots()
+        console.print(f"[green]Lots sync complete: {lot_res}[/green]")
     except Exception as e:
         console.print(f"[bold red]❌ Background sync error: {e}[/bold red]")
 
@@ -54,11 +40,9 @@ async def run_sync_task(sync_type: str):
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    session_valid = await verify_session()
     return {
         "status": "online",
         "domain": settings.vinted_domain,
-        "vinted_session_active": session_valid,
         "sheet_id": settings.google_sheet_id or "auto-detected",
     }
 
