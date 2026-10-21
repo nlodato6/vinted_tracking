@@ -40,6 +40,26 @@ if "parsed_results" not in st.session_state:
     st.session_state.parsed_results = None
 
 # -----------------------------------------------------------------------------
+# Legal & Compliance Dialogs
+# -----------------------------------------------------------------------------
+@st.dialog("🛡️ SpreadThrift Privacy Policy", width="large")
+def show_privacy_dialog():
+    privacy_file = settings.base_dir / "PRIVACY_POLICY.md"
+    if privacy_file.exists():
+        st.markdown(privacy_file.read_text(encoding="utf-8"))
+    else:
+        st.info("Privacy Policy document is available at PRIVACY_POLICY.md")
+
+
+@st.dialog("📜 SpreadThrift Terms of Service", width="large")
+def show_terms_dialog():
+    terms_file = settings.base_dir / "TERMS_OF_SERVICE.md"
+    if terms_file.exists():
+        st.markdown(terms_file.read_text(encoding="utf-8"))
+    else:
+        st.info("Terms of Service document is available at TERMS_OF_SERVICE.md")
+
+# -----------------------------------------------------------------------------
 # OAuth Callback Handler
 # -----------------------------------------------------------------------------
 query_params = st.query_params
@@ -141,11 +161,18 @@ if not st.session_state.authenticated:
         """)
 
     st.divider()
-    st.caption(
-        "⚖️ **Third-Party Trademark & Legal Disclaimer**: SpreadThrift is an independent software utility and is not affiliated with, "
-        "endorsed by, sponsored by, or associated with Vinted, UAB, Google LLC, or Meta Platforms, Inc. "
-        "All trademarks, service marks, and company names are property of their respective owners and used solely for identification."
-    )
+    leg_col1, leg_col2, leg_col3 = st.columns([2.5, 1, 1], vertical_alignment="center")
+    with leg_col1:
+        st.caption(
+            "⚖️ **Third-Party Trademark & Legal Disclaimer**: Independent tool. Not affiliated with, authorized, or endorsed by "
+            "Vinted, Google LLC, or Meta Platforms, Inc. All trademarks belong to their respective owners."
+        )
+    with leg_col2:
+        if st.button("🛡️ Privacy Policy", width="stretch", key="login_privacy_btn"):
+            show_privacy_dialog()
+    with leg_col3:
+        if st.button("📜 Terms of Service", width="stretch", key="login_terms_btn"):
+            show_terms_dialog()
 
     st.stop()
 
@@ -242,11 +269,18 @@ with st.sidebar:
                     st.error(f"Could not submit feedback: {e}")
 
     st.sidebar.divider()
-    with st.sidebar.expander("⚖️ Legal & Trademarks"):
+    with st.sidebar.expander("⚖️ Legal & Compliance"):
         st.caption(
             "**SpreadThrift** is an independent third-party tool and is not affiliated with, authorized, or endorsed by "
             "Vinted, Google LLC, or Meta Platforms, Inc. All trademarks belong to their respective owners."
         )
+        col_sp, col_st = st.columns(2)
+        with col_sp:
+            if st.button("Privacy Policy", width="stretch", key="sb_privacy_btn"):
+                show_privacy_dialog()
+        with col_st:
+            if st.button("Terms of Service", width="stretch", key="sb_terms_btn"):
+                show_terms_dialog()
 
 # -----------------------------------------------------------------------------
 # Multi-Page Navigation
