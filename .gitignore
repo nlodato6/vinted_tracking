@@ -28,6 +28,7 @@ env/
 credentials.json
 service_account.json
 client_secret*.json
+.streamlit/secrets.toml
 
 # Playwright session state & cookies
 .session/

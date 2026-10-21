@@ -44,8 +44,7 @@ if "code" in query_params and not st.session_state.authenticated:
     code = query_params["code"]
     state = query_params.get("state")
     try:
-        redirect_uri = "http://localhost:8501"
-        creds, user_info = exchange_code_for_credentials(code, redirect_uri=redirect_uri, state=state)
+        creds, user_info = exchange_code_for_credentials(code, state=state)
         st.session_state.user_credentials = creds
         st.session_state.user_info = user_info
         st.session_state.authenticated = True
@@ -76,7 +75,7 @@ if not st.session_state.authenticated:
         # 1. Sign in with Google (OAuth)
         if is_oauth_configured():
             try:
-                auth_url, _ = get_authorization_url(redirect_uri="http://localhost:8501")
+                auth_url, _ = get_authorization_url()
                 st.link_button("🔑 Sign in with Google", auth_url, type="primary", width="stretch")
                 st.caption("Sign in with your Google account to connect directly to your personal Google Sheets.")
             except Exception as e:

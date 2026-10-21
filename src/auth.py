@@ -49,8 +49,24 @@ def is_oauth_configured() -> bool:
     return get_oauth_config() is not None
 
 
-def get_authorization_url(redirect_uri: str) -> Tuple[str, str]:
+def get_redirect_uri() -> str:
+    """Returns the configured OAuth redirect URI (defaults to http://localhost:8501)."""
+    uri = os.getenv("GOOGLE_REDIRECT_URI", "")
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets"):
+            uri = st.secrets.get("GOOGLE_REDIRECT_URI", uri)
+    except Exception:
+        pass
+    return uri or "http://localhost:8501"
+
+
+def get_authorization_url(redirect_uri: Optional[str] = None) -> Tuple[str, str]:
     """Generates the Google OAuth authorization URL and state token."""
+    redirect_uri = redirect_uri or get_redirect_uri()
+    if redirect_uri.startswith("http://"):
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+
     config = get_oauth_config()
     if not config:
         raise ValueError("Google OAuth credentials (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) not configured.")
@@ -68,8 +84,12 @@ def get_authorization_url(redirect_uri: str) -> Tuple[str, str]:
     return auth_url, state
 
 
-def exchange_code_for_credentials(code: str, redirect_uri: str, state: Optional[str] = None) -> Tuple[Credentials, Dict[str, Any]]:
+def exchange_code_for_credentials(code: str, redirect_uri: Optional[str] = None, state: Optional[str] = None) -> Tuple[Credentials, Dict[str, Any]]:
     """Exchanges an authorization code for user Credentials and retrieves basic user info."""
+    redirect_uri = redirect_uri or get_redirect_uri()
+    if redirect_uri.startswith("http://"):
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+
     config = get_oauth_config()
     if not config:
         raise ValueError("Google OAuth credentials not configured.")
