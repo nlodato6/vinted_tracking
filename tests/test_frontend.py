@@ -29,7 +29,7 @@ def test_is_oauth_configured():
     assert isinstance(is_oauth_configured(), bool)
 
 
-def test_invintory_assets_and_branding():
+def test_spreadthrift_assets_and_branding():
     from pathlib import Path
 
     logo_path = Path("assets/invintory.png")
@@ -37,14 +37,19 @@ def test_invintory_assets_and_branding():
     assert logo_path.stat().st_size > 1000, "assets/invintory.png should be non-empty"
 
     app_py = Path("app.py").read_text()
-    assert "InVintory" in app_py
+    assert "SpreadThrift" in app_py
     assert "From inbox alerts to bottom-line gains." in app_py
+    assert "Third-Party Trademark & Legal Disclaimer" in app_py
 
     metrics_py = Path("app_pages/metrics.py").read_text()
-    assert "InVintory" in metrics_py
+    assert "SpreadThrift" in metrics_py
     assert "From inbox alerts to bottom-line gains." in metrics_py
 
     sync_py = Path("app_pages/sync.py").read_text()
-    assert "InVintory" in sync_py
+    assert "SpreadThrift" in sync_py
     assert "From inbox alerts to bottom-line gains." in sync_py
+
+    readme_md = Path("README.md").read_text()
+    assert "SpreadThrift" in readme_md
+    assert "Third-Party Trademarks & Legal Disclaimer" in readme_md
 

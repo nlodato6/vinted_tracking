@@ -1,20 +1,20 @@
-# 🔑 Google OAuth 2.0 Setup Guide for InVintory
+# 🔑 Google OAuth 2.0 Setup Guide for SpreadThrift
 > Step-by-step instructions to enable **"Sign in with Google"** for multi-tenant Google Sheets access.
 
 ---
 
 ## 🎯 What This Does
 With Google OAuth enabled:
-1. Users visit your InVintory web app and click **"🔑 Sign in with Google"**.
-2. They authenticate with their own Google account and grant permission for InVintory to access their Google Sheets.
-3. InVintory reads and updates their personal spreadsheet directly. **You incur $0 in Google API bills** because each user uses their own free Google API quota.
+1. Users visit your SpreadThrift web app and click **"🔑 Sign in with Google"**.
+2. They authenticate with their own Google account and grant permission for SpreadThrift to access their Google Sheets.
+3. SpreadThrift reads and updates their personal spreadsheet directly. **You incur $0 in Google API bills** because each user uses their own free Google API quota.
 
 ---
 
 ## 🛠️ Step 1: Open Google Cloud Console & Enable APIs
 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Select an existing project or click the project dropdown at the top $\rightarrow$ **New Project** (e.g. name it `InVintory`).
+2. Select an existing project or click the project dropdown at the top $\rightarrow$ **New Project** (e.g. name it `SpreadThrift`).
 3. In the top search bar, search for **Google Sheets API** $\rightarrow$ click it $\rightarrow$ click **Enable**.
 4. In the top search bar, search for **Google Drive API** $\rightarrow$ click it $\rightarrow$ click **Enable**.
 
@@ -25,7 +25,7 @@ With Google OAuth enabled:
 1. In the left navigation menu, go to **APIs & Services** $\rightarrow$ [**OAuth consent screen**](https://console.cloud.google.com/apis/credentials/consent).
 2. Under **User Type**, select **External** $\rightarrow$ click **Create**.
 3. **App Information**:
-   * **App name**: `InVintory`
+   * **App name**: `SpreadThrift`
    * **User support email**: Select your email address.
    * **Developer contact information**: Enter your email address.
    * Click **Save and Continue**.
@@ -51,7 +51,7 @@ With Google OAuth enabled:
 1. In the left navigation menu, go to [**Credentials**](https://console.cloud.google.com/apis/credentials).
 2. Click **+ Create Credentials** (at the top) $\rightarrow$ select **OAuth client ID**.
 3. **Application type**: Select **Web application**.
-4. **Name**: `InVintory Web Client`.
+4. **Name**: `SpreadThrift Web Client`.
 5. **Authorized redirect URIs** *(Most important step)*:
    * Click **+ Add URI**.
    * Enter:
@@ -71,7 +71,7 @@ With Google OAuth enabled:
 
 ---
 
-## ⚙️ Step 4: Add Your Keys to InVintory
+## ⚙️ Step 4: Add Your Keys to SpreadThrift
 
 You can configure your keys in either **Option A** (`.env`) or **Option B** (`.streamlit/secrets.toml`).
 
@@ -113,6 +113,6 @@ GOOGLE_CLIENT_SECRET = "GOCSPX-your_client_secret_here"
 | Error | Cause | Solution |
 | :--- | :--- | :--- |
 | **"Error 400: redirect_uri_mismatch"** | The redirect URI in Google Cloud Console doesn't match the current browser URL. | Go to Credentials $\rightarrow$ your OAuth Client ID $\rightarrow$ ensure `http://localhost:8501` is listed under **Authorized redirect URIs** exactly (no trailing slash). |
-| **"Access blocked: InVintory has not completed the Google verification process"** | Your Google Cloud project is in "Testing" mode and your email isn't in Test Users. | Go to **OAuth consent screen** $\rightarrow$ **Test users** $\rightarrow$ click **+ Add Users** and add your Google email address. |
+| **"Access blocked: SpreadThrift has not completed the Google verification process"** | Your Google Cloud project is in "Testing" mode and your email isn't in Test Users. | Go to **OAuth consent screen** $\rightarrow$ **Test users** $\rightarrow$ click **+ Add Users** and add your Google email address. |
 | **"API [sheets.googleapis.com] not enabled"** | The Google Sheets API is not activated on your Google Cloud project. | Search for "Google Sheets API" in Google Cloud Console and click **Enable**. |
-| **"InsecureTransportError"** | Trying to use OAuth over `http://` instead of `https://`. | Handled automatically: InVintory automatically enables `OAUTHLIB_INSECURE_TRANSPORT=1` on localhost. |
+| **"InsecureTransportError"** | Trying to use OAuth over `http://` instead of `https://`. | Handled automatically: SpreadThrift automatically enables `OAUTHLIB_INSECURE_TRANSPORT=1` on localhost. |

@@ -28,7 +28,7 @@ def load_raw_sheet_data(sheet_id: str, _creds):
 
 
 def render_metrics_page():
-    st.header("📈 InVintory Analytics & Performance")
+    st.header("📈 SpreadThrift Analytics & Performance")
     st.caption("From inbox alerts to bottom-line gains. Interactive metrics, profit trends, and inventory intelligence.")
 
     spreadsheet_id = st.session_state.get("spreadsheet_id")

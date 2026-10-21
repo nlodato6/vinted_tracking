@@ -1,4 +1,4 @@
-"""InVintory - Streamlit Multi-Tenant Web App for Vinted Inventory, Sales & Analytics."""
+"""SpreadThrift - Streamlit Multi-Tenant Web App for Vinted Inventory, Sales & Analytics."""
 
 import os
 import re
@@ -11,7 +11,7 @@ from src.auth import is_oauth_configured, get_authorization_url, exchange_code_f
 LOGO_PATH = "assets/invintory.png"
 
 st.set_page_config(
-    page_title="InVintory",
+    page_title="SpreadThrift",
     page_icon=LOGO_PATH if os.path.exists(LOGO_PATH) else "👕",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -60,9 +60,9 @@ if not st.session_state.authenticated:
     header_col1, header_col2 = st.columns([0.12, 0.88], vertical_alignment="center")
     with header_col1:
         if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, width=80, alt="InVintory Logo")
+            st.image(LOGO_PATH, width=80, alt="SpreadThrift Logo")
     with header_col2:
-        st.title("InVintory")
+        st.title("SpreadThrift")
         st.markdown("**From inbox alerts to bottom-line gains.**")
 
     st.markdown("Automate your Vinted inventory tracking, net profits, and performance metrics directly with Google Sheets.")
@@ -110,6 +110,13 @@ if not st.session_state.authenticated:
         * **📬 Real-Time Email Sync**: Pull sales and offers directly from your Gmail inbox via IMAP.
         * **🔒 100% Private**: Your data connects straight to your personal Google Drive with zero middleman database.
         """)
+
+    st.divider()
+    st.caption(
+        "⚖️ **Third-Party Trademark & Legal Disclaimer**: SpreadThrift is an independent software utility and is not affiliated with, "
+        "endorsed by, sponsored by, or associated with Vinted, UAB, Google LLC, or Meta Platforms, Inc. "
+        "All trademarks, service marks, and company names are property of their respective owners and used solely for identification."
+    )
 
     st.stop()
 
@@ -159,6 +166,13 @@ with st.sidebar:
     if st.session_state.spreadsheet_id:
         sheet_url = f"https://docs.google.com/spreadsheets/d/{st.session_state.spreadsheet_id}/edit"
         st.sidebar.link_button("🔗 Open Live Sheet", sheet_url, width="stretch")
+
+    st.sidebar.divider()
+    with st.sidebar.expander("⚖️ Legal & Trademarks"):
+        st.caption(
+            "**SpreadThrift** is an independent third-party tool and is not affiliated with, authorized, or endorsed by "
+            "Vinted, Google LLC, or Meta Platforms, Inc. All trademarks belong to their respective owners."
+        )
 
 # -----------------------------------------------------------------------------
 # Multi-Page Navigation
