@@ -9,6 +9,7 @@ from src.sheets.schemas import (
     TAB_SOLD_ITEMS,
     TAB_SALES_LOG,
     TAB_INVENTORY_LOTS,
+    TAB_SHIPPING_SUPPLIES,
     SOLD_ITEMS_HEADERS,
 )
 import re
@@ -169,6 +170,109 @@ class SheetsSyncEngine:
 
         ws.append_row(row_data, value_input_option="USER_ENTERED")
         return {"status": "created", "row": next_row, "lot_id": lot_id.strip().upper()}
+
+    def get_all_supplies(self) -> Dict[str, Any]:
+        """Reads Shipping_Supplies and returns active supplies and global average packaging cost."""
+        sh = self.client.get_spreadsheet()
+        ws_sup = sh.worksheet(TAB_SHIPPING_SUPPLIES)
+        rows = ws_sup.get_all_values()
+        if len(rows) <= 1:
+            return {"supplies": [], "avg_cost_per_shipment": 0.25, "total_rows": 0}
+
+        headers = [h.strip() for h in rows[0]]
+        supplies = []
+        for r_idx, r in enumerate(rows[1:], start=2):
+            if not r or not any(r):
+                continue
+            s_dict = {}
+            for h, val in zip(headers, r):
+                s_dict[h] = str(val).strip() if val is not None else ""
+            s_dict["_row"] = r_idx
+
+            has_desc = bool(s_dict.get("Item_Description"))
+            has_vendor = bool(s_dict.get("Vendor"))
+            has_qty = bool(s_dict.get("Quantity"))
+            has_cost = bool(s_dict.get("Total_Cost"))
+
+            if has_desc or has_vendor or has_qty or has_cost:
+                supplies.append(s_dict)
+
+        avg_cost_str = rows[1][7] if len(rows) > 1 and len(rows[1]) > 7 else "$0.24"
+        avg_cost = parse_price(avg_cost_str) or 0.24
+        return {"supplies": supplies, "avg_cost_per_shipment": avg_cost, "total_rows": len(rows)}
+
+    def get_next_supply_id(self) -> str:
+        """Finds next supply ID (or first empty placeholder ID)."""
+        sh = self.client.get_spreadsheet()
+        ws_sup = sh.worksheet(TAB_SHIPPING_SUPPLIES)
+        rows = ws_sup.get_all_values()
+        if len(rows) <= 1:
+            return "SUP-01"
+
+        max_num = 0
+        first_empty_id = None
+        for r in rows[1:]:
+            s_id = r[0].strip() if len(r) > 0 else ""
+            m = re.search(r"SUP-(\d+)", s_id, re.IGNORECASE)
+            if m:
+                try:
+                    num = int(m.group(1))
+                    if num > max_num:
+                        max_num = num
+                except ValueError:
+                    pass
+            is_empty = not any(c.strip() for c in r[1:6] if c)
+            if is_empty and not first_empty_id and s_id:
+                first_empty_id = s_id
+
+        if first_empty_id:
+            return first_empty_id
+        return f"SUP-{max_num + 1:02d}"
+
+    def save_shipping_supply(
+        self,
+        supply_id: str,
+        purchase_date: str = "",
+        item_description: str = "",
+        vendor: str = "",
+        quantity: int = 1,
+        total_cost: float = 0.0,
+    ) -> Dict[str, Any]:
+        """Saves or updates a shipping supply row with formulas preserved."""
+        sh = self.client.get_spreadsheet()
+        ws_sup = sh.worksheet(TAB_SHIPPING_SUPPLIES)
+        rows = ws_sup.get_all_values()
+
+        target_row = None
+        if len(rows) > 1:
+            for r_idx, r in enumerate(rows[1:], start=2):
+                if len(r) > 0 and r[0].strip().upper() == supply_id.strip().upper():
+                    target_row = r_idx
+                    break
+
+        clean_p_date = purchase_date.strip() if purchase_date else datetime.now().strftime("%Y-%m-%d")
+
+        if target_row:
+            update_range = f"B{target_row}:F{target_row}"
+            values = [[clean_p_date, item_description.strip(), vendor.strip(), quantity, total_cost]]
+            ws_sup.update(values=values, range_name=update_range, value_input_option="USER_ENTERED")
+            return {"status": "updated", "row": target_row, "supply_id": supply_id}
+        else:
+            next_row = len(rows) + 1
+            unit_cost_formula = f'=IF(AND(ISNUMBER(E{next_row}), E{next_row}>0), F{next_row}/E{next_row}, "")'
+            avg_cost_formula = f'=IF(E{next_row}="", "", H$2)'
+            row_data = [
+                supply_id.strip().upper(),
+                clean_p_date,
+                item_description.strip(),
+                vendor.strip(),
+                quantity,
+                total_cost,
+                unit_cost_formula,
+                avg_cost_formula,
+            ]
+            ws_sup.append_row(row_data, value_input_option="USER_ENTERED")
+            return {"status": "created", "row": next_row, "supply_id": supply_id}
 
     def auto_assign_lots_by_date(self) -> int:
         """

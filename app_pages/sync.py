@@ -6,7 +6,7 @@ from datetime import datetime, date
 import streamlit as st
 import pandas as pd
 
-from src.sheets import GoogleSheetsClient, SheetsSyncEngine
+from src.sheets import GoogleSheetsClient, SheetsSyncEngine, parse_price
 from src.html_parser import parse_closet_html, parse_orders_html, detect_html_type
 from src.email_parser import fetch_vinted_emails_via_imap
 from src.notifications import record_html_parse_event, record_email_parse_event, get_sync_status
@@ -59,7 +59,11 @@ def render_sync_page():
     # -------------------------------------------------------------------------
     # Main Tabs: HTML Import & Email Sync
     # -------------------------------------------------------------------------
-    tab_html, tab_email = st.tabs(["📦 HTML Batch Import & Reconciliation", "📬 Direct Email Sync"])
+    tab_html, tab_email, tab_supplies = st.tabs([
+        "📦 HTML Batch Import & Reconciliation",
+        "📬 Direct Email Sync",
+        "🏷️ Shipping Supplies",
+    ])
 
     # ---------------------------------------------------------
     # TAB 1: HTML IMPORT
@@ -347,6 +351,123 @@ def render_sync_page():
             3. Copy the 16-character password into the box on the left.
             4. Reference the guide: [`GOOGLE_APP_PASSWORD_SETUP.md`](./GOOGLE_APP_PASSWORD_SETUP.md).
             """)
+
+    # ---------------------------------------------------------
+    # TAB 3: SHIPPING SUPPLIES
+    # ---------------------------------------------------------
+    with tab_supplies:
+        st.markdown("### 🏷️ Shipping Supplies & Packaging Costs")
+        st.caption("Manage boxes, poly mailers, labels, and tape. The global weighted average packaging cost is automatically deducted from every sale in `Sold_Items` to compute true net profits.")
+
+        sup_engine = SheetsSyncEngine(client)
+        sup_data = sup_engine.get_all_supplies()
+        active_supplies = sup_data.get("supplies", [])
+        avg_cost_val = sup_data.get("avg_cost_per_shipment", 0.24)
+
+        # KPI Metrics Row
+        tot_units = sum(int(float(s.get("Quantity", 0))) for s in active_supplies if s.get("Quantity"))
+        tot_spent = sum(parse_price(s.get("Total_Cost", 0)) for s in active_supplies if s.get("Total_Cost"))
+
+        sk1, sk2, sk3, sk4 = st.columns(4)
+        with sk1:
+            st.metric("Active Supplies", len(active_supplies), border=True)
+        with sk2:
+            st.metric("Total Units Stocked", f"{tot_units:,} units", border=True)
+        with sk3:
+            st.metric("Total Spend", f"${tot_spent:,.2f}", border=True)
+        with sk4:
+            st.metric("Avg Packaging Cost / Order", f"${avg_cost_val:.2f}", help="Deducted automatically from each Vinted sale to calculate Net Profit in Sold_Items.", border=True)
+
+        st.divider()
+
+        # Section 1: Form to Add or Update Supply
+        with st.container(border=True):
+            st.markdown("#### ➕ Add or Update Shipping Supply")
+
+            next_sup_id = sup_engine.get_next_supply_id()
+            sup_mode_options = [f"➕ New Supply ({next_sup_id})"] + [
+                f"{s['Supply_ID']} — {s.get('Item_Description') or 'Supply'} ({s.get('Vendor') or 'Vendor'})"
+                for s in active_supplies
+            ]
+
+            selected_sup_mode = st.selectbox(
+                "Action / Select Supply to Edit",
+                options=sup_mode_options,
+                key="select_supply_mode",
+            )
+
+            is_editing_existing = not selected_sup_mode.startswith("➕ New Supply")
+            if is_editing_existing:
+                selected_sup_id = selected_sup_mode.split(" — ")[0].strip()
+                existing_item = next((s for s in active_supplies if s["Supply_ID"] == selected_sup_id), {})
+                default_date_str = existing_item.get("Purchase_Date", "")
+                try:
+                    default_date = datetime.strptime(default_date_str, "%Y-%m-%d").date() if default_date_str else date.today()
+                except ValueError:
+                    default_date = date.today()
+                default_desc = existing_item.get("Item_Description", "")
+                default_vendor = existing_item.get("Vendor", "")
+                default_qty = int(float(existing_item.get("Quantity", 1))) if existing_item.get("Quantity") else 100
+                default_cost = parse_price(existing_item.get("Total_Cost", 0)) or 18.99
+                form_sup_id = selected_sup_id
+            else:
+                default_date = date.today()
+                default_desc = ""
+                default_vendor = "Amazon"
+                default_qty = 100
+                default_cost = 18.99
+                form_sup_id = next_sup_id
+
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                input_sup_id = st.text_input("Supply ID", value=form_sup_id, disabled=is_editing_existing, help="e.g. SUP-01, SUP-02")
+                input_sup_date = st.date_input("Purchase Date", value=default_date, key="sup_date_input")
+                input_sup_desc = st.text_input("Item Description", value=default_desc, placeholder="e.g. 10x13 Poly Mailers (Pack of 100)", key="sup_desc_input")
+            with sc2:
+                input_sup_vendor = st.text_input("Vendor / Store", value=default_vendor, placeholder="e.g. Amazon, Uline, Target", key="sup_vendor_input")
+                input_sup_qty = st.number_input("Quantity in Package", min_value=1, value=default_qty, step=1, key="sup_qty_input")
+                input_sup_cost = st.number_input("Total Cost Paid ($)", min_value=0.0, value=float(default_cost), step=1.0, key="sup_cost_input")
+
+            calc_sup_unit = (input_sup_cost / input_sup_qty) if input_sup_qty > 0 else 0.0
+            st.info(f"💡 Calculated Unit Packaging Cost: **${calc_sup_unit:.3f} per unit** (`${input_sup_cost:.2f} ÷ {input_sup_qty} units`)")
+
+            if st.button("💾 Save Supply to Spreadsheet", type="primary", width="stretch", key="btn_save_supply"):
+                with st.spinner(f"Saving supply {form_sup_id} to Google Sheets..."):
+                    res = sup_engine.save_shipping_supply(
+                        supply_id=form_sup_id,
+                        purchase_date=input_sup_date.strftime("%Y-%m-%d"),
+                        item_description=input_sup_desc,
+                        vendor=input_sup_vendor,
+                        quantity=int(input_sup_qty),
+                        total_cost=float(input_sup_cost),
+                    )
+                    st.cache_data.clear()
+
+                st.success(f"✔ Supply {form_sup_id} saved successfully! Global packaging deduction updated in Google Sheets.")
+                st.balloons()
+                time.sleep(1.2)
+                st.rerun()
+
+        # Section 2: Current Inventory Table
+        st.markdown("#### 📋 Current Shipping Supplies in Sheet")
+        if active_supplies:
+            display_supplies = []
+            for s in active_supplies:
+                q_num = int(float(s.get("Quantity", 0))) if s.get("Quantity") else 0
+                c_num = parse_price(s.get("Total_Cost", 0))
+                u_str = s.get("Unit_Cost") or (f"${c_num / q_num:.3f}" if q_num > 0 else "$0.00")
+                display_supplies.append({
+                    "Supply ID": s.get("Supply_ID"),
+                    "Purchase Date": s.get("Purchase_Date"),
+                    "Item Description": s.get("Item_Description"),
+                    "Vendor": s.get("Vendor"),
+                    "Quantity": q_num,
+                    "Total Cost": f"${c_num:.2f}",
+                    "Unit Cost": u_str,
+                })
+            st.dataframe(pd.DataFrame(display_supplies), width="stretch")
+        else:
+            st.info("No shipping supplies recorded yet.")
 
 
 if __name__ == "__main__":

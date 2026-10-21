@@ -11,10 +11,12 @@ from src.sheets.schemas import (
     TAB_SOLD_ITEMS,
     TAB_SALES_LOG,
     TAB_INVENTORY_LOTS,
+    TAB_SHIPPING_SUPPLIES,
     LISTINGS_HEADERS,
     SOLD_ITEMS_HEADERS,
     SALES_HEADERS,
     LOTS_HEADERS,
+    SUPPLIES_HEADERS,
 )
 from src.models import ItemListing, SalesOrder
 
@@ -63,18 +65,29 @@ class MockWorksheet:
                     self.rows[row_idx].append("")
                 self.rows[row_idx][col_idx] = val
 
-    def update(self, range_name, values, value_input_option=None):
-        match = re.match(r"([A-Za-z]+)(\d+)", range_name)
+    def update(self, *args, **kwargs):
+        values = kwargs.get("values")
+        range_name = kwargs.get("range_name")
+        if not range_name and len(args) > 0:
+            range_name = args[0]
+        if values is None and len(args) > 1:
+            values = args[1]
+        if isinstance(values, str) and isinstance(range_name, list):
+            range_name, values = values, range_name
+        match = re.match(r"([A-Za-z]+)(\d+)(?::([A-Za-z]+)(\d+))?", range_name or "")
         if match:
-            col_letter, row_str = match.groups()
-            col_idx = ord(col_letter.upper()) - ord("A")
-            row_idx = int(row_str) - 1
-            val = values[0][0]
-            while len(self.rows) <= row_idx:
-                self.rows.append([])
-            while len(self.rows[row_idx]) <= col_idx:
-                self.rows[row_idx].append("")
-            self.rows[row_idx][col_idx] = val
+            start_col, start_row, end_col, end_row = match.groups()
+            c_start = ord(start_col.upper()) - ord("A")
+            r_start = int(start_row) - 1
+            for r_offset, row_vals in enumerate(values or []):
+                curr_r = r_start + r_offset
+                while len(self.rows) <= curr_r:
+                    self.rows.append([])
+                for c_offset, v in enumerate(row_vals):
+                    curr_c = c_start + c_offset
+                    while len(self.rows[curr_r]) <= curr_c:
+                        self.rows[curr_r].append("")
+                    self.rows[curr_r][curr_c] = v
 
 
 class MockSpreadsheet:
@@ -145,12 +158,21 @@ def mock_sheets_env():
     )
     ws_sold = MockWorksheet(TAB_SOLD_ITEMS, headers=SOLD_ITEMS_HEADERS)
     ws_sales = MockWorksheet(TAB_SALES_LOG, headers=SALES_HEADERS)
+    ws_supplies = MockWorksheet(
+        TAB_SHIPPING_SUPPLIES,
+        headers=SUPPLIES_HEADERS,
+        initial_rows=[
+            ["SUP-01", "2026-10-01", "10x13 Poly Mailers", "Amazon", "100", "18.99", "0.19", "0.24"],
+            ["SUP-02", "", "", "", "", "", "", ""],
+        ],
+    )
 
     spreadsheet = MockSpreadsheet({
         TAB_INVENTORY_LOTS: ws_lots,
         TAB_ITEM_LISTINGS: ws_listings,
         TAB_SOLD_ITEMS: ws_sold,
         TAB_SALES_LOG: ws_sales,
+        TAB_SHIPPING_SUPPLIES: ws_supplies,
     })
 
     client = MagicMock()
@@ -476,3 +498,53 @@ def test_get_all_lots_and_add_inventory_lot(mock_sheets_env):
 
     # Verify next lot ID is now LOT-004
     assert engine.get_next_lot_id() == "LOT-004"
+
+
+def test_get_all_supplies_and_save_shipping_supply(mock_sheets_env):
+    engine, sh = mock_sheets_env
+
+    # 1. Fetch current supplies
+    sup_data = engine.get_all_supplies()
+    assert len(sup_data["supplies"]) == 1
+    assert sup_data["supplies"][0]["Supply_ID"] == "SUP-01"
+    assert sup_data["avg_cost_per_shipment"] == 0.24
+
+    # 2. Next suggested supply ID should find the empty placeholder SUP-02
+    next_id = engine.get_next_supply_id()
+    assert next_id == "SUP-02"
+
+    # 3. Save to SUP-02
+    res_update = engine.save_shipping_supply(
+        supply_id="SUP-02",
+        purchase_date="2026-10-21",
+        item_description="Thermal Shipping Labels (500ct)",
+        vendor="Amazon",
+        quantity=500,
+        total_cost=15.00,
+    )
+    assert res_update["status"] == "updated"
+    assert res_update["supply_id"] == "SUP-02"
+
+    # Verify updated row
+    ws_sup = sh.worksheet(TAB_SHIPPING_SUPPLIES)
+    row_2 = ws_sup.rows[2]
+    assert row_2[0] == "SUP-02"
+    assert row_2[2] == "Thermal Shipping Labels (500ct)"
+    assert row_2[4] == 500
+    assert row_2[5] == 15.00
+
+    # 4. Save a brand new supply SUP-03
+    res_create = engine.save_shipping_supply(
+        supply_id="SUP-03",
+        purchase_date="2026-10-21",
+        item_description="Bubble Wrap 12x100ft",
+        vendor="Uline",
+        quantity=1,
+        total_cost=22.50,
+    )
+    assert res_create["status"] == "created"
+    assert len(ws_sup.rows) == 4
+    row_3 = ws_sup.rows[3]
+    assert row_3[0] == "SUP-03"
+    assert "F4/E4" in row_3[6]
+    assert "H$2" in row_3[7]
