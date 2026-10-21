@@ -73,6 +73,13 @@ def render_metrics_page():
     except Exception as e:
         log_error(u_email, "metrics.py:fetch_data", e)
         st.error(f"Failed to fetch data from spreadsheet: {e}")
+        if not user_creds:
+            st.info(
+                "💡 **Why did this happen?** You signed in using the Manual Password fallback instead of Google OAuth.\n\n"
+                "To access Google Sheets, you can either:\n"
+                "1. **Sign out and click '🔑 Sign in with Google'** (easiest, no service account needed).\n"
+                "2. **Add `GOOGLE_SERVICE_ACCOUNT_JSON` to Streamlit Cloud Secrets** with your `credentials.json` contents so manual logins can query Google Sheets."
+            )
         st.button("🔄 Retry Connection", on_click=lambda: st.cache_data.clear())
         return
 
