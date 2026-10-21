@@ -138,11 +138,11 @@ Never let packaging costs eat into your margins unnoticed.
 Hands-free sale tracking directly from your email notifications.
 
 1. **How it works**:
-   * Connects securely to your Gmail inbox via a Google App Password.
+   * Connects securely to your Gmail inbox via a 16-character Google App Password (requires **2-Step Verification** enabled on your Google Account).
    * Searches for Vinted order confirmation emails (`"You sold an item!"`, `"Offer accepted"`).
    * Automatically parses the sold price, buyer username, shipping label status, and item title.
 2. **Running a Sync**:
-   * Click **"Check Inbox & Sync New Sales"**.
+   * Click **"Check Inbox & Sync New Sales"** or **"Scan & Preview Vinted Emails"**.
    * Any newly received sale alerts are extracted, formatted, and appended to your Google Sheet without manual intervention.
 
 ---

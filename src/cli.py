@@ -189,7 +189,8 @@ def sync_emails(
             "[bold red]❌ Gmail credentials missing.[/bold red]\n"
             "Set [cyan]GMAIL_USER[/cyan] and [cyan]GMAIL_APP_PASSWORD[/cyan] in your [bold].env[/bold] file,\n"
             "or provide them with flags: [dim]--user tsavoie90@gmail.com --password <app-password>[/dim]\n\n"
-            "[dim]Tip: Generate a 16-character App Password at: https://myaccount.google.com/apppasswords[/dim]"
+            "[dim]Tip: Generate a 16-character App Password at: https://myaccount.google.com/apppasswords\n"
+            "     (Make sure 2-Step Verification is turned ON in Google Security first!)[/dim]"
         )
         raise typer.Exit(code=1)
 

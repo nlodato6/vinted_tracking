@@ -537,14 +537,22 @@ def render_sync_page():
                             st.error(f"IMAP Connection failed: {e}")
 
         with e2:
-            st.markdown("""
-            #### Need an App Password?
-            Google requires a 16-character **App Password** for direct IMAP access:
-            1. Go to [Google App Passwords](https://myaccount.google.com/apppasswords) (while logged into `tsavoie90@gmail.com`).
-            2. Enter app name: `Vinted Tracker` $\rightarrow$ click **Create**.
-            3. Copy the 16-character password into the box on the left.
-            4. Reference the guide: [`GOOGLE_APP_PASSWORD_SETUP.md`](./GOOGLE_APP_PASSWORD_SETUP.md).
-            """)
+            with st.container(border=True):
+                st.markdown("#### 🔑 Need a Google App Password?")
+                st.info(
+                    "**Prerequisite:** You must have **2-Step Verification (Two-Factor Authentication / 2FA)** enabled on your Google account. If 2FA is turned off, Google disables App Passwords and displays an error saying the setting is not available.",
+                    icon=":material/security:",
+                )
+                account_email = gmail_user_input.strip() if gmail_user_input else "your Gmail account"
+                st.markdown(f"""
+                **Step-by-step setup:**
+                1. **Enable 2FA:** Visit [Google Security Settings](https://myaccount.google.com/security) and ensure **2-Step Verification** is turned **ON**.
+                2. **Open App Passwords:** Go to [Google App Passwords](https://myaccount.google.com/apppasswords) (while signed into `{account_email}`).
+                3. **Create Key:** Type `Vinted Tracker` under **App name** $\\rightarrow$ click **Create**.
+                4. **Copy & Paste:** Copy the 16-character passcode (e.g. `abcd efgh ijkl mnop`) into the password box on the left.
+                
+                📘 *For full troubleshooting steps, see the [`GOOGLE_APP_PASSWORD_SETUP.md`](./GOOGLE_APP_PASSWORD_SETUP.md) guide.*
+                """)
 
         # -------------------------------------------------------------
         # Email Sync Preview & Confirmation Block

@@ -12,7 +12,12 @@ Google requires **2-Step Verification (2FA)** to be enabled on your account befo
 1. Open your browser and make sure you are logged into **`tsavoie90@gmail.com`**.
 2. Go to: [https://myaccount.google.com/security](https://myaccount.google.com/security)
 3. Under **"How you sign in to Google"**, verify that **2-Step Verification** is turned **On**.
-   - If it is Off, click on it and follow the prompts to add your phone number.
+   - If it is Off, click on it and follow the prompts to add your phone number or authenticator.
+
+> [!IMPORTANT]
+> **Why this is required:** If 2-Step Verification (2FA) is not enabled on your Google account, visiting the App Passwords page will display:  
+> *"The setting you are looking for is not available for your account."*  
+> Once 2-Step Verification is turned ON, the App Passwords generation page immediately unlocks.
 
 ---
 
