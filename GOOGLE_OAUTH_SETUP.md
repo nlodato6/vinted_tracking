@@ -31,12 +31,20 @@ With Google OAuth enabled:
    * Click **Save and Continue**.
 4. **Scopes**:
    * Click **Add or Remove Scopes**.
-   * In the filter box, search and select these scopes:
-     * `.../auth/spreadsheets` (Google Sheets API - see, edit, create, and delete spreadsheets)
-     * `.../auth/drive.file` (Google Drive API - see, create, and delete its own configuration files)
-     * `.../auth/userinfo.email` (See primary Google Account email)
-     * `.../auth/userinfo.profile` (See personal info including photo)
-     * `openid`
+   * In the popup drawer, you have two ways to add them:
+     * **Option A (Table Selection)**: In the **Filter** box at the top of the table, search for `spreadsheets`, `drive`, and check their checkboxes.
+     * **Option B (Manually Add Scopes)**: In the text box at the very bottom of the drawer labeled **Manually add scopes**, paste the **FULL URLs** (do **not** paste the `...` shorthand) $\rightarrow$ click **Add to table**:
+       ```text
+       https://www.googleapis.com/auth/spreadsheets
+       https://www.googleapis.com/auth/drive.file
+       https://www.googleapis.com/auth/userinfo.email
+       https://www.googleapis.com/auth/userinfo.profile
+       openid
+       ```
+   * > **⚠️ Fixing the "Invalid Scope" Error**:
+     > If Google says `'.../auth/spreadsheets' is invalid`, it means:
+     > 1. **You pasted the literal dots `...`**: Google Console requires the full protocol prefix: `https://www.googleapis.com/auth/spreadsheets`.
+     > 2. **Or the API is not enabled yet**: The [**Google Sheets API**](https://console.cloud.google.com/apis/library/sheets.googleapis.com) must be enabled in your Google Cloud Project before Google will accept its scope. Click the link to enable it, then try adding the scope again.
    * Click **Update** $\rightarrow$ click **Save and Continue**.
 5. **Test Users** *(Crucial while app is in testing mode)*:
    * Click **+ Add Users**.
