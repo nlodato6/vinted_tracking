@@ -61,18 +61,25 @@ With Google OAuth enabled:
 3. **Application type**: Select **Web application**.
 4. **Name**: `SpreadThrift Web Client`.
 5. **Authorized redirect URIs** *(Most important step)*:
-   * Click **+ Add URI**.
+   * > [!WARNING]
+   * > Make sure you are in the **Authorized redirect URIs** section (NOT the "Authorized JavaScript origins" section above it).
+   * Click **+ ADD URI**.
    * Enter:
-     ```
+     ```text
      http://localhost:8501
      ```
-   * *(Optional)* If you plan to deploy to production (e.g., Streamlit Cloud or Render), also add your production URL:
+   * Press **Enter** on your keyboard (the URL will turn into a confirmed chip/tag).
+   * *(Recommended)* Click **+ ADD URI** again and also add:
+     ```text
+     http://127.0.0.1:8501
      ```
+   * *(Optional for production)* If deploying to Streamlit Community Cloud:
+     ```text
      https://your-app-name.streamlit.app
      ```
    * > [!IMPORTANT]
-     > Do **NOT** add a trailing slash to `http://localhost:8501`. It must match the redirect URI sent by the app exactly.
-6. Click **Create**.
+     > Do **NOT** add a trailing slash (e.g. `http://localhost:8501/` will fail). It must be `http://localhost:8501`.
+6. Click **Save** (or **Create** if creating a new client) at the very bottom of the page.
 7. A dialog will appear with:
    * **Your Client ID** (e.g., `123456789012-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com`)
    * **Your Client Secret** (e.g., `GOCSPX-abcdefghijklmnopqrstuvwxyz123456`)
