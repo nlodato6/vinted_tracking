@@ -21,8 +21,8 @@ def get_sheets_client() -> GoogleSheetsClient:
 
 
 def render_sync_page():
-    st.header("⚡ Sync & Batch Inventory Operations")
-    st.caption("Reconcile your Vinted closet via HTML files or sync new sales directly from your Gmail inbox.")
+    st.header("⚡ InVintory Operations & Sync Hub")
+    st.caption("From inbox alerts to bottom-line gains. Reconcile inventory via HTML uploads, live Gmail sync, or supply tracking.")
 
     client = get_sheets_client()
     status_state = get_sync_status()

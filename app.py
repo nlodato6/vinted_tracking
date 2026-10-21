@@ -1,4 +1,4 @@
-"""Streamlit Multi-Tenant Web App for Vinted Inventory, Sales & Analytics."""
+"""InVintory - Streamlit Multi-Tenant Web App for Vinted Inventory, Sales & Analytics."""
 
 import os
 import re
@@ -8,12 +8,17 @@ from src.config import settings
 from src.auth import is_oauth_configured, get_authorization_url, exchange_code_for_credentials
 
 # Page Configuration
+LOGO_PATH = "assets/invintory.png"
+
 st.set_page_config(
-    page_title="Vinted Sales & Inventory Hub",
-    page_icon="👕",
+    page_title="InVintory",
+    page_icon=LOGO_PATH if os.path.exists(LOGO_PATH) else "👕",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+if os.path.exists(LOGO_PATH):
+    st.logo(LOGO_PATH, size="large")
 
 # -----------------------------------------------------------------------------
 # Session State Initialization
@@ -53,7 +58,14 @@ if "code" in query_params and not st.session_state.authenticated:
 # Authentication Screen (if not logged in)
 # -----------------------------------------------------------------------------
 if not st.session_state.authenticated:
-    st.title("👕 Vinted Sales & Inventory Hub")
+    header_col1, header_col2 = st.columns([0.12, 0.88], vertical_alignment="center")
+    with header_col1:
+        if os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, width=80, alt="InVintory Logo")
+    with header_col2:
+        st.title("InVintory")
+        st.markdown("**From inbox alerts to bottom-line gains.**")
+
     st.markdown("Automate your Vinted inventory tracking, net profits, and performance metrics directly with Google Sheets.")
 
     col1, col2 = st.columns([1.2, 1])
@@ -106,6 +118,8 @@ if not st.session_state.authenticated:
 # Sidebar: Settings & User Profile
 # -----------------------------------------------------------------------------
 with st.sidebar:
+    st.sidebar.caption("From inbox alerts to bottom-line gains.")
+    st.sidebar.divider()
     u_email = st.session_state.user_info.get("email", "Local User")
     u_name = st.session_state.user_info.get("name", "Vinted Seller")
     u_pic = st.session_state.user_info.get("picture")

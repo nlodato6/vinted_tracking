@@ -1,6 +1,7 @@
-# 🏷️ Vinted Automated Sales & Inventory Tracking Pipeline
+# 🏷️ InVintory
+> *"From inbox alerts to bottom-line gains."*
 
-A fully automated sync pipeline connecting **Vinted (`vinted.com`)** directly to **Google Sheets**. Tracks clothing inventory lots, unit cost allocations, live listing prices, realized sold amounts, shipping supplies, and net profit margins.
+A modern, multi-tenant sales, inventory, and analytics platform connecting **Vinted (`vinted.com`)** directly to **Google Sheets**. Tracks clothing inventory lots, unit cost allocations, live listing prices, realized sold amounts, shipping supplies, and net profit margins with interactive Plotly analytics.
 
 ---
 

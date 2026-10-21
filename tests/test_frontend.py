@@ -27,3 +27,24 @@ def test_detect_html_type_unknown():
 def test_is_oauth_configured():
     # In test environment, returns boolean without crashing
     assert isinstance(is_oauth_configured(), bool)
+
+
+def test_invintory_assets_and_branding():
+    from pathlib import Path
+
+    logo_path = Path("assets/invintory.png")
+    assert logo_path.exists(), "assets/invintory.png must exist"
+    assert logo_path.stat().st_size > 1000, "assets/invintory.png should be non-empty"
+
+    app_py = Path("app.py").read_text()
+    assert "InVintory" in app_py
+    assert "From inbox alerts to bottom-line gains." in app_py
+
+    metrics_py = Path("app_pages/metrics.py").read_text()
+    assert "InVintory" in metrics_py
+    assert "From inbox alerts to bottom-line gains." in metrics_py
+
+    sync_py = Path("app_pages/sync.py").read_text()
+    assert "InVintory" in sync_py
+    assert "From inbox alerts to bottom-line gains." in sync_py
+

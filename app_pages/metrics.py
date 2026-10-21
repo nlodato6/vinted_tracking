@@ -28,8 +28,8 @@ def load_raw_sheet_data(sheet_id: str, _creds):
 
 
 def render_metrics_page():
-    st.header("📈 Sales & Inventory Metrics Dashboard")
-    st.caption("Interactive performance analytics, profit trends, and inventory intelligence powered by Plotly.")
+    st.header("📈 InVintory Analytics & Performance")
+    st.caption("From inbox alerts to bottom-line gains. Interactive metrics, profit trends, and inventory intelligence.")
 
     spreadsheet_id = st.session_state.get("spreadsheet_id")
     user_creds = st.session_state.get("user_credentials")
