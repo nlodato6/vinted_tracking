@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 from src.sheets import GoogleSheetsClient
+from src.telemetry import log_event, log_error
 from src.analytics import (
     parse_sold_dataframe,
     parse_active_dataframe,
@@ -33,6 +34,7 @@ def render_metrics_page():
 
     spreadsheet_id = st.session_state.get("spreadsheet_id")
     user_creds = st.session_state.get("user_credentials")
+    u_email = (st.session_state.get("user_info", {}).get("email") or "anonymous").lower()
 
     if not spreadsheet_id:
         st.warning("No Google Spreadsheet ID configured. Please specify one in the sidebar.")
@@ -42,7 +44,9 @@ def render_metrics_page():
     try:
         with st.spinner("Loading sales & inventory data from Google Sheets..."):
             sold_rows, active_rows = load_raw_sheet_data(spreadsheet_id, user_creds)
+        log_event(u_email, "view_metrics", f"Loaded data for sheet {spreadsheet_id}", spreadsheet_id=spreadsheet_id)
     except Exception as e:
+        log_error(u_email, "metrics.py:fetch_data", e)
         st.error(f"Failed to fetch data from spreadsheet: {e}")
         st.button("🔄 Retry Connection", on_click=lambda: st.cache_data.clear())
         return

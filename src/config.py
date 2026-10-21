@@ -51,6 +51,20 @@ class Settings(BaseSettings):
         description="Google 16-character App Password for IMAP access",
     )
 
+    # Admin Dashboard & Access
+    admin_emails: str = Field(
+        default="tsavoie90@gmail.com,nicashlod@gmail.com,local-admin@vinted-tracker,admin@spreadthrift.com",
+        description="Comma-separated emails authorized to view Admin telemetry and error alerts",
+    )
+    admin_password: str = Field(
+        default="spreadthrift-admin-2026",
+        description="Master passcode for direct Admin portal login",
+    )
+
+    @property
+    def admin_email_list(self) -> list[str]:
+        return [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
+
     @property
     def vinted_base_url(self) -> str:
         return f"https://www.{self.vinted_domain}"

@@ -12,6 +12,7 @@ from src.sheets.sync import parse_price
 from src.html_parser import parse_closet_html, parse_orders_html, detect_html_type
 from src.email_parser import fetch_vinted_emails_via_imap
 from src.notifications import record_html_parse_event, record_email_parse_event, get_sync_status
+from src.telemetry import log_event, log_error
 
 
 def get_sheets_client() -> GoogleSheetsClient:
@@ -28,6 +29,7 @@ def render_sync_page():
 
     client = get_sheets_client()
     status_state = get_sync_status()
+    u_email = (st.session_state.get("user_info", {}).get("email") or "anonymous").lower()
 
     try:
         sh = client.get_spreadsheet()
@@ -36,10 +38,11 @@ def render_sync_page():
         active_cnt = max(0, len(ws_l.get_all_values()) - 1)
         sold_cnt = max(0, len(ws_s.get_all_values()) - 1)
         connected = True
-    except Exception:
+    except Exception as e:
         active_cnt = 0
         sold_cnt = 0
         connected = False
+        log_error(u_email, "sync.py:connect", e)
 
     # KPI Metric Row
     m1, m2, m3, m4 = st.columns(4)
@@ -152,6 +155,7 @@ def render_sync_page():
                                     notes=new_notes,
                                 )
                                 engine.sync_lots()
+                                log_event(u_email, "lot_created", f"Created lot {target_lot_id} ({new_total_articles} articles)", spreadsheet_id=st.session_state.get("spreadsheet_id"))
                                 st.session_state.selected_lot = target_lot_id
                                 st.cache_data.clear()
                             if res.get("status") == "exists":
@@ -282,6 +286,7 @@ def render_sync_page():
 
                             # 5. Record event and clear cache
                             record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id})", client=client)
+                            log_event(u_email, "html_import", f"HTML import: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id})", spreadsheet_id=st.session_state.get("spreadsheet_id"))
                             st.cache_data.clear()
 
                         lot_msg = f" (New lot {target_lot_id} created in Inventory_Lots)" if is_new_lot else f" (Assigned to {target_lot_id})"
@@ -291,6 +296,7 @@ def render_sync_page():
                         st.rerun()
 
                 except Exception as e:
+                    log_error(u_email, "sync.py:html_import", e)
                     st.error(f"Error during reconciliation preview: {e}")
 
     # ---------------------------------------------------------
@@ -336,12 +342,14 @@ def render_sync_page():
                                     })
                                 engine.sync_lots()
                                 record_email_parse_event(details=f"Web IMAP: {processed} events from {gmail_user_input}", client=client)
+                                log_event(u_email, "email_sync", f"IMAP sync: {processed} events from {gmail_user_input}", spreadsheet_id=st.session_state.get("spreadsheet_id"))
                                 st.cache_data.clear()
                                 st.dataframe(pd.DataFrame(event_rows), width="stretch")
                                 st.balloons()
                                 time.sleep(1.5)
                                 st.rerun()
                         except Exception as e:
+                            log_error(u_email, "sync.py:email_sync", e)
                             st.error(f"IMAP Sync failed: {e}")
 
         with e2:
@@ -443,6 +451,7 @@ def render_sync_page():
                         quantity=int(input_sup_qty),
                         total_cost=float(input_sup_cost),
                     )
+                    log_event(u_email, "supply_saved", f"Supply {form_sup_id}: {input_sup_desc} ({input_sup_qty} @ ${input_sup_cost})", spreadsheet_id=st.session_state.get("spreadsheet_id"))
                     st.cache_data.clear()
 
                 st.success(f"✔ Supply {form_sup_id} saved successfully! Global packaging deduction updated in Google Sheets.")

@@ -6,6 +6,7 @@ import streamlit as st
 
 from src.config import settings
 from src.auth import is_oauth_configured, get_authorization_url, exchange_code_for_credentials
+from src.telemetry import log_session, log_error, log_event
 
 # Page Configuration
 LOGO_PATH = "assets/invintory.png"
@@ -25,6 +26,8 @@ if os.path.exists(LOGO_PATH):
 # -----------------------------------------------------------------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
+if "is_admin" not in st.session_state:
+    st.session_state.is_admin = False
 if "user_info" not in st.session_state:
     st.session_state.user_info = {}
 if "user_credentials" not in st.session_state:
@@ -45,12 +48,16 @@ if "code" in query_params and not st.session_state.authenticated:
     state = query_params.get("state")
     try:
         creds, user_info = exchange_code_for_credentials(code, state=state)
+        u_email = (user_info.get("email") or "").lower()
         st.session_state.user_credentials = creds
         st.session_state.user_info = user_info
         st.session_state.authenticated = True
+        st.session_state.is_admin = u_email in settings.admin_email_list
+        log_session(u_email, user_info.get("name", "Google User"), auth_provider="google")
         st.query_params.clear()
         st.rerun()
     except Exception as e:
+        log_error(None, "app.py:oauth", e)
         st.error(f"Authentication failed: {e}")
 
 # -----------------------------------------------------------------------------
@@ -92,14 +99,36 @@ if not st.session_state.authenticated:
         if sa_exists:
             if st.button("🚀 Continue with Local Credentials", type="secondary", width="stretch"):
                 st.session_state.authenticated = True
+                st.session_state.is_admin = True
                 st.session_state.user_info = {
                     "email": "local-admin@vinted-tracker",
                     "name": "Local Admin",
                 }
+                log_session("local-admin@vinted-tracker", "Local Admin", auth_provider="service_account")
                 st.rerun()
             st.caption(f"Uses local Service Account: `{settings.google_service_account_file.name}`")
         else:
             st.warning("No local `credentials.json` found. Please sign in with Google or place credentials.json in your project directory.")
+
+        st.divider()
+
+        # 3. Direct Administrator Passcode Login
+        with st.expander("👑 Administrator Access"):
+            st.caption("Sign in directly as the SpreadThrift administrator to monitor user metrics and system error alerts:")
+            admin_input_pass = st.text_input("Master Passcode", type="password", key="admin_direct_login_pass")
+            admin_input_email = st.text_input("Admin Email", value="admin@spreadthrift.com", key="admin_direct_login_email")
+            if st.button("Unlock Admin Portal", type="primary", width="stretch", key="btn_admin_direct_login"):
+                if admin_input_pass == settings.admin_password:
+                    st.session_state.authenticated = True
+                    st.session_state.is_admin = True
+                    st.session_state.user_info = {
+                        "email": admin_input_email,
+                        "name": "SpreadThrift Administrator",
+                    }
+                    log_session(admin_input_email, "SpreadThrift Administrator", auth_provider="master_passcode")
+                    st.rerun()
+                else:
+                    st.error("Invalid master passcode.")
 
     with col2:
         st.markdown("""
@@ -125,6 +154,8 @@ if not st.session_state.authenticated:
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.sidebar.caption("From inbox alerts to bottom-line gains.")
+    if st.session_state.get("is_admin", False):
+        st.sidebar.caption("👑 **Administrator Session**")
     st.sidebar.divider()
     u_email = st.session_state.user_info.get("email", "Local User")
     u_name = st.session_state.user_info.get("name", "Vinted Seller")
@@ -181,5 +212,9 @@ pages = [
     st.Page("app_pages/metrics.py", title="Metrics & Analytics", icon=":material/monitoring:", default=True),
     st.Page("app_pages/sync.py", title="Sync & Batch Import", icon=":material/cloud_sync:"),
 ]
+
+if st.session_state.get("is_admin", False):
+    pages.append(st.Page("app_pages/admin.py", title="Admin Dashboard", icon=":material/admin_panel_settings:"))
+
 pg = st.navigation(pages, position="sidebar")
 pg.run()
