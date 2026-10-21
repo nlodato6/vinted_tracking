@@ -605,3 +605,46 @@ def test_auto_provision_user_sheet_fallback_create(monkeypatch):
     s_id, s_title, action = auto_provision_user_sheet(MagicMock(), user_name="Alex")
     assert s_id == "new_created_sheet_789"
     assert action == "initialized"
+
+
+def test_process_email_batch(mock_sheets_env):
+    from datetime import datetime
+    from src.email_parser import ParsedEmailEvent
+
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+
+    # SKU-1001 is "Vintage Carhartt Jacket"
+    events = [
+        ParsedEmailEvent(
+            event_type="favorite",
+            item_title="Vintage Carhartt Jacket",
+            vinted_id="1001",
+            raw_subject="Item favorited",
+            timestamp=datetime.now(),
+        ),
+        ParsedEmailEvent(
+            event_type="offer",
+            item_title="Vintage Carhartt Jacket",
+            offer_price=55.0,
+            listed_price=68.0,
+            vinted_id="1001",
+            raw_subject="New offer",
+            timestamp=datetime.now(),
+        ),
+        ParsedEmailEvent(
+            event_type="sale",
+            item_title="Nike Track Pants",
+            sold_price=35.0,
+            order_id="ORD-EMAIL-TEST-1",
+            raw_subject="Item sold",
+            timestamp=datetime.now(),
+        ),
+    ]
+
+    results = engine.process_email_batch(events)
+    assert len(results) == 3
+    assert results[0]["status"] == "favorite_incremented"
+    assert results[1]["status"] == "offer_logged"
+    assert results[2]["status"] in ("moved_to_sold", "appended_to_sold")
+

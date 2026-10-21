@@ -1069,104 +1069,239 @@ class SheetsSyncEngine:
 
         return {"synced_orders": synced_count}
 
-    def process_email_event(self, event) -> Dict[str, Any]:
+    def process_email_batch(self, events: List[Any]) -> List[Dict[str, Any]]:
         """
-        Directly reconciles a parsed Vinted email event (sale or favorite)
-        with Google Sheets without invoking any web scraping.
+        Batch-processes a list of parsed Vinted email events (sales, offers, favorites)
+        with minimal Google Sheets API calls:
+        - Single batch read for active listings and sold items.
+        - In-memory matching and formula evaluation.
+        - Single batch cell updates for listings and single batch append for sold items.
+        - Single notification banner update at the end.
         """
-        sh = self.client.get_spreadsheet()
-        try:
-            from src.notifications import record_email_parse_event
-            record_email_parse_event(details=f"{event.event_type.title()}: {event.item_title or event.order_id}", client=self.client)
-        except Exception:
-            pass
+        if not events:
+            return []
 
-        ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
-        listings_rows = ws_listings.get_all_values()
+        sh = self.client.get_spreadsheet()
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
+        ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
+
+        # 1. Single batch get for both listings and sold items (1 read request!)
+        batch_ranges = [f"{TAB_ITEM_LISTINGS}!A:N", f"{TAB_SOLD_ITEMS}!A:Y"]
+        try:
+            batch_res = sh.values_batch_get(batch_ranges)
+            value_ranges = batch_res.get("valueRanges", [])
+            listings_rows = value_ranges[0].get("values", []) if len(value_ranges) > 0 else []
+            sold_rows = value_ranges[1].get("values", []) if len(value_ranges) > 1 else []
+        except Exception:
+            listings_rows = ws_listings.get_all_values()
+            sold_rows = ws_sold.get_all_values()
 
         if len(listings_rows) <= 1:
-            return {"status": "no_listings"}
+            return [{"status": "no_listings"} for _ in events]
 
         l_headers = listings_rows[0]
+        sku_idx = l_headers.index("Item_SKU") if "Item_SKU" in l_headers else 0
+        lot_idx = l_headers.index("Lot_ID") if "Lot_ID" in l_headers else 1
         title_idx = l_headers.index("Title") if "Title" in l_headers else 2
-        id_idx = l_headers.index("Vinted_ID") if "Vinted_ID" in l_headers else 13
+        brand_idx = l_headers.index("Brand") if "Brand" in l_headers else 3
+        cat_idx = l_headers.index("Category") if "Category" in l_headers else 4
+        cost_idx = l_headers.index("Unit_Cost") if "Unit_Cost" in l_headers else 5
+        posted_idx = l_headers.index("Posted_Price") if "Posted_Price" in l_headers else 6
+        curr_idx = l_headers.index("Current_Price") if "Current_Price" in l_headers else 7
+        hist_idx = l_headers.index("Price_History") if "Price_History" in l_headers else 10
         fav_idx = l_headers.index("Favorites") if "Favorites" in l_headers else 11
+        views_idx = l_headers.index("Views") if "Views" in l_headers else 12
+        id_idx = l_headers.index("Vinted_ID") if "Vinted_ID" in l_headers else 13
 
-        target_row = None
-        clean_target_title = (event.item_title or "").strip().lower()
-        clean_target_id = (event.vinted_id or "").strip()
+        s_headers = sold_rows[0] if sold_rows else []
+        s_ord_idx = s_headers.index("Order_ID") if "Order_ID" in s_headers else 21
+        existing_orders = set()
+        for sr in sold_rows[1:]:
+            if len(sr) > s_ord_idx and sr[s_ord_idx].strip():
+                existing_orders.add(sr[s_ord_idx].strip())
+
+        max_sku_num = self.get_max_sku_num(cached_rows=listings_rows + sold_rows)
+        cur_sold_count = len(sold_rows)
+
+        # In-memory mapping of active listings: row_idx -> row list
+        active_listings_by_row: Dict[int, List[Any]] = {}
+        row_by_vinted_id: Dict[str, int] = {}
+        row_by_title: Dict[str, int] = {}
 
         for r_i, r in enumerate(listings_rows[1:], start=2):
+            active_listings_by_row[r_i] = list(r)
             r_id = r[id_idx].replace(",", "").strip() if len(r) > id_idx else ""
             r_title = r[title_idx].strip().lower() if len(r) > title_idx else ""
-            if clean_target_id and r_id == clean_target_id:
-                target_row = r_i
-                break
-            if clean_target_title and (clean_target_title == r_title or clean_target_title in r_title or r_title in clean_target_title):
-                target_row = r_i
-                break
+            if r_id:
+                row_by_vinted_id[r_id] = r_i
+            if r_title:
+                row_by_title[r_title] = r_i
 
-        if event.event_type == "favorite":
-            if target_row:
-                col_fav = chr(ord('A') + fav_idx)
-                cur_val = listings_rows[target_row - 1][fav_idx] if len(listings_rows[target_row - 1]) > fav_idx else "0"
-                try:
-                    new_val = int(float(cur_val)) + 1
-                except ValueError:
-                    new_val = 1
-                ws_listings.update(f"{col_fav}{target_row}", [[new_val]], value_input_option="USER_ENTERED")
-                return {"status": "favorite_incremented", "row": target_row, "new_count": new_val}
-            return {"status": "item_not_found"}
+        listings_cell_updates: List[Dict[str, Any]] = []
+        rows_to_append_to_sold: List[List[Any]] = []
+        rows_to_delete_from_listings: List[int] = []
+        results: List[Dict[str, Any]] = []
 
-        if event.event_type == "offer":
-            if target_row:
-                hist_idx = l_headers.index("Price_History") if "Price_History" in l_headers else 10
-                col_hist = chr(ord('A') + hist_idx)
-                old_hist = listings_rows[target_row - 1][hist_idx] if len(listings_rows[target_row - 1]) > hist_idx else ""
-                today_md = event.timestamp.strftime("%m/%d")
-                offer_str = f"{today_md} Offer: ${event.offer_price:.2f}"
-                if event.listed_price > 0:
-                    offer_str += f" (was ${event.listed_price:.2f})"
-                updated_hist = f"{old_hist} | {offer_str}" if old_hist.strip() else offer_str
-                ws_listings.update(f"{col_hist}{target_row}", [[updated_hist]], value_input_option="USER_ENTERED")
-                return {"status": "offer_logged", "row": target_row, "offer": event.offer_price, "history": updated_hist}
-            return {"status": "item_not_found"}
+        col_fav_letter = chr(ord('A') + fav_idx)
+        col_hist_letter = chr(ord('A') + hist_idx)
 
-        if event.event_type == "sale":
-            sale_date_str = event.timestamp.strftime("%Y-%m-%d")
-            if target_row:
-                res = self.move_listing_to_sold(
-                    vinted_id=clean_target_id,
-                    title=event.item_title,
-                    status="Sold",
-                    sold_price=event.sold_price,
-                    sale_date=sale_date_str,
-                    platform="Vinted",
-                    order_id=event.order_id,
-                )
-                return {"status": "moved_to_sold", "details": res}
-            else:
-                ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
-                cur_sold_rows = len(ws_sold.get_all_values())
-                max_sku = self.get_max_sku_num() + 1
-                next_row = cur_sold_rows + 1
+        for event in events:
+            clean_target_title = (event.item_title or "").strip().lower()
+            clean_target_id = (event.vinted_id or "").strip()
+
+            target_row = None
+            if clean_target_id and clean_target_id in row_by_vinted_id:
+                target_row = row_by_vinted_id[clean_target_id]
+            elif clean_target_title:
+                if clean_target_title in row_by_title:
+                    target_row = row_by_title[clean_target_title]
+                else:
+                    for t_str, r_idx in row_by_title.items():
+                        if clean_target_title in t_str or t_str in clean_target_title:
+                            target_row = r_idx
+                            break
+
+            # 1. FAVORITE
+            if event.event_type == "favorite":
+                if target_row and target_row in active_listings_by_row:
+                    row_data = active_listings_by_row[target_row]
+                    cur_val = row_data[fav_idx] if len(row_data) > fav_idx else "0"
+                    try:
+                        new_val = int(float(cur_val)) + 1
+                    except ValueError:
+                        new_val = 1
+                    while len(row_data) <= fav_idx:
+                        row_data.append("")
+                    row_data[fav_idx] = str(new_val)
+                    listings_cell_updates.append({"range": f"{col_fav_letter}{target_row}", "values": [[new_val]]})
+                    results.append({"status": "favorite_incremented", "row": target_row, "new_count": new_val})
+                else:
+                    results.append({"status": "item_not_found"})
+
+            # 2. OFFER
+            elif event.event_type == "offer":
+                if target_row and target_row in active_listings_by_row:
+                    row_data = active_listings_by_row[target_row]
+                    old_hist = row_data[hist_idx] if len(row_data) > hist_idx else ""
+                    today_md = event.timestamp.strftime("%m/%d")
+                    offer_str = f"{today_md} Offer: ${event.offer_price:.2f}"
+                    if event.listed_price > 0:
+                        offer_str += f" (was ${event.listed_price:.2f})"
+                    updated_hist = f"{old_hist} | {offer_str}" if str(old_hist).strip() else offer_str
+                    while len(row_data) <= hist_idx:
+                        row_data.append("")
+                    row_data[hist_idx] = updated_hist
+                    listings_cell_updates.append({"range": f"{col_hist_letter}{target_row}", "values": [[updated_hist]]})
+                    results.append({"status": "offer_logged", "row": target_row, "offer": event.offer_price, "history": updated_hist})
+                else:
+                    results.append({"status": "item_not_found"})
+
+            # 3. SALE
+            elif event.event_type == "sale":
+                if event.order_id and event.order_id in existing_orders:
+                    results.append({"status": "order_already_synced", "order_id": event.order_id})
+                    continue
+
+                sale_date_str = event.timestamp.strftime("%Y-%m-%d")
+                next_sold_row = cur_sold_count + len(rows_to_append_to_sold) + 1
                 col_lot = "B"
                 col_g = "G"
                 col_h = "H"
-                row_data = [
-                    f"SKU-{max_sku}", "", event.item_title, "", "",
-                    f"=IFERROR(VLOOKUP({col_lot}{next_row}, Inventory_Lots!A:F, 6, FALSE), 0)",
-                    event.sold_price, event.sold_price, "NO", 0.0, "", event.sold_price,
-                    f'=IF(OR({col_g}{next_row}="", L{next_row}=""), "", IF(AND(ISNUMBER({col_g}{next_row}), ISNUMBER(L{next_row}), {col_g}{next_row}>L{next_row}), {col_g}{next_row}-L{next_row}, 0))',
-                    f'=IF(OR({col_g}{next_row}="", L{next_row}=""), "", IF(L{next_row}>={col_g}{next_row}, "Original Price", IF(L{next_row}={col_h}{next_row}, "Lowered Price", "Accepted Offer")))',
-                    sale_date_str, "Vinted",
-                    f'=IF(P{next_row}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)',
-                    f'=IF(AND(ISNUMBER(L{next_row}), ISNUMBER(F{next_row}), ISNUMBER(Q{next_row})), L{next_row}-F{next_row}-Q{next_row}, IF(ISNUMBER(L{next_row}), L{next_row}, 0))',
-                    f'=IF(AND(ISNUMBER(L{next_row}), L{next_row}>0), R{next_row}/L{next_row}, 0)',
-                    0, 0, event.order_id, event.vinted_url, "Sold", sale_date_str,
-                ]
-                ws_sold.append_row(row_data, value_input_option="USER_ENTERED")
-                return {"status": "appended_to_sold", "sku": f"SKU-{max_sku}"}
 
-        return {"status": "ignored"}
+                if target_row and target_row in active_listings_by_row:
+                    t_data = active_listings_by_row.pop(target_row)
+                    if clean_target_id in row_by_vinted_id:
+                        row_by_vinted_id.pop(clean_target_id, None)
+                    if clean_target_title in row_by_title:
+                        row_by_title.pop(clean_target_title, None)
+
+                    rows_to_delete_from_listings.append(target_row)
+
+                    item_sku = t_data[sku_idx] if len(t_data) > sku_idx and t_data[sku_idx].strip() else f"SKU-{max_sku_num + 1}"
+                    lot_id = t_data[lot_idx] if len(t_data) > lot_idx else ""
+                    item_title = t_data[title_idx] if len(t_data) > title_idx else event.item_title
+                    brand = t_data[brand_idx] if len(t_data) > brand_idx else ""
+                    category = t_data[cat_idx] if len(t_data) > cat_idx else ""
+                    posted_p = t_data[posted_idx] if len(t_data) > posted_idx else event.sold_price
+                    curr_p = t_data[curr_idx] if len(t_data) > curr_idx else event.sold_price
+                    hist_p = t_data[hist_idx] if len(t_data) > hist_idx else ""
+                    fav_val = t_data[fav_idx] if len(t_data) > fav_idx else 0
+                    view_val = t_data[views_idx] if len(t_data) > views_idx else 0
+                    v_url = event.vinted_url or (f"https://www.vinted.com/items/{clean_target_id}" if clean_target_id else "")
+
+                    sold_row = [
+                        item_sku, lot_id, item_title, brand, category,
+                        f'=IFERROR(VLOOKUP({col_lot}{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)',
+                        posted_p, curr_p, "NO", 0.0, hist_p, event.sold_price,
+                        f'=IF(OR({col_g}{next_sold_row}="", L{next_sold_row}=""), "", IF(AND(ISNUMBER({col_g}{next_sold_row}), ISNUMBER(L{next_sold_row}), {col_g}{next_sold_row}>L{next_sold_row}), {col_g}{next_sold_row}-L{next_sold_row}, 0))',
+                        f'=IF(OR({col_g}{next_sold_row}="", L{next_sold_row}=""), "", IF(L{next_sold_row}>={col_g}{next_sold_row}, "Original Price", IF(L{next_sold_row}={col_h}{next_sold_row}, "Lowered Price", "Accepted Offer")))',
+                        sale_date_str, "Vinted",
+                        f'=IF(P{next_sold_row}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)',
+                        f'=IF(AND(ISNUMBER(L{next_sold_row}), ISNUMBER(F{next_sold_row}), ISNUMBER(Q{next_sold_row})), L{next_sold_row}-F{next_sold_row}-Q{next_sold_row}, IF(ISNUMBER(L{next_sold_row}), L{next_sold_row}, 0))',
+                        f'=IF(AND(ISNUMBER(L{next_sold_row}), L{next_sold_row}>0), R{next_sold_row}/L{next_sold_row}, 0)',
+                        fav_val, view_val, event.order_id, v_url, "Sold", sale_date_str,
+                    ]
+                    rows_to_append_to_sold.append(sold_row)
+                    if event.order_id:
+                        existing_orders.add(event.order_id)
+                    results.append({"status": "moved_to_sold", "title": item_title, "sku": item_sku})
+
+                else:
+                    max_sku_num += 1
+                    new_sku = f"SKU-{max_sku_num}"
+                    sold_row = [
+                        new_sku, "", event.item_title, "", "",
+                        f'=IFERROR(VLOOKUP({col_lot}{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)',
+                        event.sold_price, event.sold_price, "NO", 0.0, "", event.sold_price,
+                        f'=IF(OR({col_g}{next_sold_row}="", L{next_sold_row}=""), "", IF(AND(ISNUMBER({col_g}{next_sold_row}), ISNUMBER(L{next_sold_row}), {col_g}{next_sold_row}>L{next_sold_row}), {col_g}{next_sold_row}-L{next_sold_row}, 0))',
+                        f'=IF(OR({col_g}{next_sold_row}="", L{next_sold_row}=""), "", IF(L{next_sold_row}>={col_g}{next_sold_row}, "Original Price", IF(L{next_sold_row}={col_h}{next_sold_row}, "Lowered Price", "Accepted Offer")))',
+                        sale_date_str, "Vinted",
+                        f'=IF(P{next_sold_row}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)',
+                        f'=IF(AND(ISNUMBER(L{next_sold_row}), ISNUMBER(F{next_sold_row}), ISNUMBER(Q{next_sold_row})), L{next_sold_row}-F{next_sold_row}-Q{next_sold_row}, IF(ISNUMBER(L{next_sold_row}), L{next_sold_row}, 0))',
+                        f'=IF(AND(ISNUMBER(L{next_sold_row}), L{next_sold_row}>0), R{next_sold_row}/L{next_sold_row}, 0)',
+                        0, 0, event.order_id, event.vinted_url, "Sold", sale_date_str,
+                    ]
+                    rows_to_append_to_sold.append(sold_row)
+                    if event.order_id:
+                        existing_orders.add(event.order_id)
+                    results.append({"status": "appended_to_sold", "title": event.item_title, "sku": new_sku})
+
+            else:
+                results.append({"status": "ignored"})
+
+        # 4. Flush updates to Google Sheets in single batch operations!
+        if listings_cell_updates:
+            ws_listings.batch_update(listings_cell_updates, value_input_option="USER_ENTERED")
+
+        if rows_to_append_to_sold:
+            ws_sold.append_rows(rows_to_append_to_sold, value_input_option="USER_ENTERED")
+
+        if rows_to_delete_from_listings:
+            # Delete in descending order of row index so row indices don't shift
+            for d_row in sorted(rows_to_delete_from_listings, reverse=True):
+                try:
+                    ws_listings.delete_rows(d_row)
+                except Exception:
+                    pass
+
+        # 5. Record banner update ONCE for the entire batch
+        try:
+            from src.notifications import record_email_parse_event
+            record_email_parse_event(details=f"Email batch: {len(events)} events processed", client=self.client)
+        except Exception:
+            pass
+
+        # 6. Synchronize inventory lots ONCE
+        self.sync_lots()
+
+        return results
+
+    def process_email_event(self, event) -> Dict[str, Any]:
+        """
+        Directly reconciles a parsed Vinted email event (sale, offer, or favorite)
+        with Google Sheets. Delegates to process_email_batch for single-item safety.
+        """
+        results = self.process_email_batch([event])
+        return results[0] if results else {"status": "ignored"}
+
 

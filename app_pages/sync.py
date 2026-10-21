@@ -442,19 +442,16 @@ def render_sync_page():
                             else:
                                 st.success(f"Found {len(events)} Vinted notification emails! Updating sheet...")
                                 engine = SheetsSyncEngine(client)
-                                processed = 0
+                                results = engine.process_email_batch(events)
                                 event_rows = []
-                                for ev in events:
-                                    res = engine.process_email_event(ev)
-                                    processed += 1
+                                for ev, res in zip(events, results):
                                     event_rows.append({
                                         "Type": ev.event_type.upper(),
                                         "Title / Ref": ev.item_title or ev.order_id,
                                         "Status": res.get("status", "processed"),
                                         "Timestamp": ev.timestamp.strftime("%Y-%m-%d %H:%M"),
                                     })
-                                engine.sync_lots()
-                                record_email_parse_event(details=f"Web IMAP: {processed} events from {gmail_user_input}", client=client)
+                                processed = len([r for r in results if r.get("status") not in ("ignored", "no_listings")])
                                 log_event(u_email, "email_sync", f"IMAP sync: {processed} events from {gmail_user_input}", spreadsheet_id=st.session_state.get("spreadsheet_id"))
                                 st.cache_data.clear()
                                 st.dataframe(pd.DataFrame(event_rows), width="stretch")

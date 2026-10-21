@@ -216,14 +216,13 @@ def sync_emails(
     client = GoogleSheetsClient()
     engine = SheetsSyncEngine(client)
 
+    results = engine.process_email_batch(events)
     synced = 0
-    for ev in events:
-        res = engine.process_email_event(ev)
+    for ev, res in zip(events, results):
         console.print(f"  • [bold]{ev.event_type.upper()}[/bold]: {ev.item_title or ev.order_id} -> {res.get('status', 'processed')}")
-        synced += 1
+        if res.get("status") not in ("ignored", "no_listings"):
+            synced += 1
 
-    engine.sync_lots()
-    record_email_parse_event(details=f"IMAP: {synced} events from {gmail_user}", client=client)
     console.print(f"[bold green]✔ Done! {synced} email events processed and synced to Google Sheets.[/bold green]\n")
 
 
