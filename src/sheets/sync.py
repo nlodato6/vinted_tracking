@@ -87,6 +87,89 @@ class SheetsSyncEngine:
 
         return date_to_lot_id
 
+    def get_all_lots(self) -> List[Dict[str, Any]]:
+        """Reads Inventory_Lots worksheet and returns all lots as dictionaries."""
+        sh = self.client.get_spreadsheet()
+        ws_lots = sh.worksheet(TAB_INVENTORY_LOTS)
+        lots_rows = ws_lots.get_all_values()
+        if len(lots_rows) <= 1:
+            return []
+
+        headers = [h.strip() for h in lots_rows[0]]
+        lots: List[Dict[str, Any]] = []
+        for r in lots_rows[1:]:
+            if not r or not any(r):
+                continue
+            lot_dict = {}
+            for h, val in zip(headers, r):
+                lot_dict[h] = str(val).strip() if val is not None else ""
+            if lot_dict.get("Lot_ID"):
+                lots.append(lot_dict)
+        return lots
+
+    def get_next_lot_id(self) -> str:
+        """Determines the next sequential Lot ID (e.g. LOT-002 if LOT-001 exists)."""
+        lots = self.get_all_lots()
+        max_num = 0
+        for l in lots:
+            lid = l.get("Lot_ID", "")
+            m = re.search(r"LOT-(\d+)", lid, re.IGNORECASE)
+            if m:
+                try:
+                    num = int(m.group(1))
+                    if num > max_num:
+                        max_num = num
+                except ValueError:
+                    pass
+        return f"LOT-{max_num + 1:03d}"
+
+    def add_inventory_lot(
+        self,
+        lot_id: str,
+        purchase_date: str = "",
+        source_vendor: str = "",
+        total_cost: float = 0.0,
+        total_articles: int = 0,
+        status: str = "Active",
+        notes: str = "",
+    ) -> Dict[str, Any]:
+        """Appends a new lot row into Inventory_Lots with automated formulas."""
+        sh = self.client.get_spreadsheet()
+        ws = sh.worksheet(TAB_INVENTORY_LOTS)
+        rows = ws.get_all_values()
+        next_row = len(rows) + 1
+
+        # Check if lot_id already exists to prevent duplicate entries
+        if len(rows) > 1:
+            hdr = rows[0]
+            lid_idx = hdr.index("Lot_ID") if "Lot_ID" in hdr else 0
+            for r_idx, r in enumerate(rows[1:], start=2):
+                if len(r) > lid_idx and r[lid_idx].strip().upper() == lot_id.strip().upper():
+                    return {"status": "exists", "row": r_idx, "lot_id": lot_id}
+
+        unit_cost_formula = f'=IF(A{next_row}="", "", IF(AND(ISNUMBER(E{next_row}), E{next_row}>0), D{next_row}/E{next_row}, ""))'
+        items_proc_formula = f'=IF(A{next_row}="", "", COUNTIF(Item_Listings!B:B, A{next_row}) + COUNTIF(Sold_Items!B:B, A{next_row}))'
+        status_formula = (
+            f'=IF(A{next_row}="", "", IF(AND(ISNUMBER(E{next_row}), E{next_row}>0, COUNTIF(Sold_Items!B:B, A{next_row})>=E{next_row}), '
+            f'"Completed", IF(COUNTIF(Item_Listings!B:B, A{next_row})+COUNTIF(Sold_Items!B:B, A{next_row})>0, '
+            f'"Active", "Pending")))'
+        )
+
+        row_data = [
+            lot_id.strip().upper(),
+            purchase_date.strip() if purchase_date else datetime.now().strftime("%Y-%m-%d"),
+            source_vendor.strip(),
+            total_cost,
+            total_articles,
+            unit_cost_formula,
+            items_proc_formula,
+            status_formula,
+            notes.strip(),
+        ]
+
+        ws.append_row(row_data, value_input_option="USER_ENTERED")
+        return {"status": "created", "row": next_row, "lot_id": lot_id.strip().upper()}
+
     def auto_assign_lots_by_date(self) -> int:
         """
         Scans Item_Listings and Sold_Items for rows with empty Lot_ID and auto-assigns
@@ -689,13 +772,14 @@ class SheetsSyncEngine:
             "moved_to_sold": moved_to_sold_count,
         }
 
-    def sync_orders(self, scraped_orders: List[SalesOrder]) -> Dict[str, int]:
+    def sync_orders(self, scraped_orders: List[SalesOrder], default_lot: str = "") -> Dict[str, int]:
         """
         Reconciles scraped completed orders directly with Sold_Items.
         Moves matching Item_Listings to Sold_Items, or appends directly if not currently in active listings.
         """
         sh = self.client.get_spreadsheet()
         ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+        date_to_lot_id = self.get_date_to_lot_map()
 
         sold_rows = ws_sold.get_all_values()
         existing_order_ids = set()
@@ -801,14 +885,15 @@ class SheetsSyncEngine:
             max_sku_num += 1
             new_sku = order.item_sku or f"SKU-{max_sku_num}"
             next_row = cur_sold_count + len(batch_new_rows) + 1
+            assigned_lot = default_lot or date_to_lot_id.get(sale_date_str, "")
 
             new_sold_data = [
                 new_sku,                                                      # A: Item_SKU
-                "",                                                           # B: Lot_ID
+                assigned_lot,                                                 # B: Lot_ID
                 order.item_title,                                             # C: Title
                 order.brand or "",                                            # D: Brand
                 order.category or "",                                         # E: Category
-                0.0,                                                          # F: Unit_Cost
+                f'=IFERROR(VLOOKUP(B{next_row}, Inventory_Lots!A:F, 6, FALSE), 0)', # F: Unit_Cost
                 order.sold_price,                                             # G: Posted_Price
                 order.sold_price,                                             # H: Current_Price
                 "NO",                                                         # I: Price_Lowered

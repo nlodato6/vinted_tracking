@@ -433,3 +433,46 @@ def test_sync_lots_marks_completed_when_all_sold(mock_sheets_env):
     # Check status formula for LOT-001
     lot_1_row = ws_lots.rows[1]
     assert "Completed" in lot_1_row[7]
+
+
+def test_get_all_lots_and_add_inventory_lot(mock_sheets_env):
+    engine, sh = mock_sheets_env
+    lots = engine.get_all_lots()
+    assert len(lots) == 2
+    assert lots[0]["Lot_ID"] == "LOT-001"
+    assert lots[1]["Lot_ID"] == "LOT-002"
+
+    # Test next lot ID generation
+    next_id = engine.get_next_lot_id()
+    assert next_id == "LOT-003"
+
+    # Add new inventory lot
+    res = engine.add_inventory_lot(
+        lot_id="LOT-003",
+        purchase_date="2026-10-21",
+        source_vendor="Goodwill Haul",
+        total_cost=75.0,
+        total_articles=30,
+        status="Active",
+        notes="30 graphic tees",
+    )
+    assert res["status"] == "created"
+    assert res["lot_id"] == "LOT-003"
+
+    # Verify lot was appended with formulas
+    ws_lots = sh.worksheet(TAB_INVENTORY_LOTS)
+    assert len(ws_lots.rows) == 4
+    lot_3_row = ws_lots.rows[3]
+    assert lot_3_row[0] == "LOT-003"
+    assert lot_3_row[2] == "Goodwill Haul"
+    assert lot_3_row[3] == 75.0
+    assert lot_3_row[4] == 30
+    assert "D4/E4" in lot_3_row[5]
+    assert "COUNTIF(Item_Listings!B:B, A4)" in lot_3_row[6]
+
+    # Verify duplicate creation protection
+    res_dup = engine.add_inventory_lot(lot_id="LOT-003")
+    assert res_dup["status"] == "exists"
+
+    # Verify next lot ID is now LOT-004
+    assert engine.get_next_lot_id() == "LOT-004"

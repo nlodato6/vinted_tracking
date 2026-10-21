@@ -2,6 +2,7 @@
 
 import os
 import time
+from datetime import datetime, date
 import streamlit as st
 import pandas as pd
 
@@ -98,13 +99,85 @@ def render_sync_page():
 
             st.dataframe(pd.DataFrame(files_info), width="stretch")
 
-            # Reconciliation Preview
+            # -----------------------------------------------------------------
+            # Lot Assignment Section
+            # -----------------------------------------------------------------
             if parsed_orders or parsed_closet:
                 st.divider()
+                st.markdown("#### 🏷️ Inventory Lot Assignment for New Items")
+                st.caption("Assign newly discovered inventory items to an existing lot or define a new purchase lot.")
+
+                engine = SheetsSyncEngine(client)
+                all_lots = engine.get_all_lots()
+
+                # Build lot options
+                lot_options = []
+                lot_id_map = {}
+
+                for l in all_lots:
+                    lid = l.get("Lot_ID", "")
+                    vendor = l.get("Source_Vendor", "Vendor")
+                    cost = l.get("Unit_Cost", "$0.00")
+                    label = f"{lid} — {vendor} ({cost}/ea)"
+                    lot_options.append(label)
+                    lot_id_map[label] = lid
+
+                lot_options.append("➕ Add New Lot...")
+
+                # Default selection index
+                default_idx = 0
+                for idx, opt in enumerate(lot_options):
+                    if opt.startswith(st.session_state.selected_lot):
+                        default_idx = idx
+                        break
+
+                with st.container(border=True):
+                    selected_option = st.selectbox(
+                        "Choose Inventory Lot for newly imported items:",
+                        options=lot_options,
+                        index=default_idx,
+                        help="Select an existing lot from your sheet or create a new lot.",
+                    )
+
+                    is_new_lot = (selected_option == "➕ Add New Lot...")
+
+                    if is_new_lot:
+                        st.markdown("##### ✨ Create New Inventory Lot")
+                        next_suggested_id = engine.get_next_lot_id()
+
+                        nl_c1, nl_c2, nl_c3 = st.columns(3)
+                        with nl_c1:
+                            new_lot_id = st.text_input("Lot ID", value=next_suggested_id, help="e.g. LOT-002")
+                            new_purchase_date = st.date_input("Purchase Date", value=date.today())
+                        with nl_c2:
+                            new_vendor = st.text_input("Source Vendor", placeholder="e.g. Goodwill, Plato's Closet, Thrift Haul")
+                            new_status = st.selectbox("Status", options=["Active", "Pending", "Completed"], index=0)
+                        with nl_c3:
+                            new_total_cost = st.number_input("Total Lot Cost ($)", min_value=0.0, value=50.0, step=5.0)
+                            new_total_articles = st.number_input("Total Articles in Lot", min_value=1, value=25, step=1)
+
+                        calculated_unit_cost = (new_total_cost / new_total_articles) if new_total_articles > 0 else 0.0
+                        st.caption(f"💡 Calculated Unit Cost per item: **${calculated_unit_cost:.2f}** (`${new_total_cost:.2f} ÷ {new_total_articles} items`)")
+
+                        new_notes = st.text_input("Notes", placeholder="e.g. 50 assorted fall sweaters and jeans")
+                        target_lot_id = new_lot_id.strip().upper() if new_lot_id else next_suggested_id
+                    else:
+                        target_lot_id = lot_id_map.get(selected_option, st.session_state.selected_lot)
+                        # Display selected lot info badge
+                        selected_lot_info = next((l for l in all_lots if l.get("Lot_ID") == target_lot_id), None)
+                        if selected_lot_info:
+                            c_info1, c_info2, c_info3, c_info4 = st.columns(4)
+                            c_info1.caption(f"**Vendor:** {selected_lot_info.get('Source_Vendor', 'N/A')}")
+                            c_info2.caption(f"**Unit Cost:** {selected_lot_info.get('Unit_Cost', 'N/A')}")
+                            c_info3.caption(f"**Processed:** {selected_lot_info.get('Items_Processed', '0')} / {selected_lot_info.get('Total_Articles', '0')} items")
+                            c_info4.caption(f"**Status:** {selected_lot_info.get('Status', 'Active')}")
+
+                # -------------------------------------------------------------
+                # Reconciliation Preview (Zero-Duplication)
+                # -------------------------------------------------------------
                 st.markdown("#### ⚡ Reconciliation Preview (Zero-Duplication)")
                 
                 try:
-                    engine = SheetsSyncEngine(client)
                     ws_list = sh.worksheet("Item_Listings")
                     ws_sold = sh.worksheet("Sold_Items")
                     curr_active_titles = {str(r[2]).strip().lower(): r for r in ws_list.get_all_values()[1:] if len(r) > 2}
@@ -114,8 +187,12 @@ def render_sync_page():
                     sold_transitions = [it for it in parsed_orders if it.item_title.strip().lower() in curr_active_titles]
                     already_sold = [it for it in parsed_orders if it.item_title.strip().lower() in curr_sold_titles]
 
+                    # Assign target lot ID to new items in preview
+                    for it in new_listings:
+                        it.lot_id = target_lot_id
+
                     p1, p2, p3 = st.columns(3)
-                    p1.metric("🟢 New Active to Add", len(new_listings), border=True)
+                    p1.metric("🟢 New Active to Add", len(new_listings), f"Assigned to {target_lot_id}", border=True)
                     p2.metric("🔵 Active Moving to Sold", len(sold_transitions), border=True)
                     p3.metric("⚪ Duplicates Skipped", len(already_sold) + (len(parsed_closet) - len(new_listings)), border=True)
 
@@ -124,18 +201,49 @@ def render_sync_page():
                             st.dataframe(pd.DataFrame([{"Title": o.item_title, "Price": f"${o.sold_price:.2f}", "Order ID": o.order_id} for o in sold_transitions]), width="stretch")
 
                     if new_listings:
-                        with st.expander("View New Listings to Add", expanded=False):
-                            st.dataframe(pd.DataFrame([{"Title": i.title, "Brand": i.brand, "Price": f"${i.posted_price:.2f}", "Category": i.category} for i in new_listings]), width="stretch")
+                        with st.expander(f"View New Listings to Add (Lot: {target_lot_id})", expanded=True):
+                            st.dataframe(pd.DataFrame([{
+                                "Title": i.title, 
+                                "Brand": i.brand, 
+                                "Price": f"${i.posted_price:.2f}", 
+                                "Category": i.category,
+                                "Assigned Lot": i.lot_id,
+                            } for i in new_listings]), width="stretch")
 
                     if st.button("🚀 Commit & Synchronize to Google Sheets", type="primary", width="stretch"):
                         with st.spinner("Synchronizing to Google Sheets..."):
-                            res_orders = engine.sync_orders(parsed_orders) if parsed_orders else {"synced_orders": 0}
+                            # 1. If new lot, create it in Inventory_Lots
+                            if is_new_lot:
+                                engine.add_inventory_lot(
+                                    lot_id=target_lot_id,
+                                    purchase_date=new_purchase_date.strftime("%Y-%m-%d"),
+                                    source_vendor=new_vendor,
+                                    total_cost=float(new_total_cost),
+                                    total_articles=int(new_total_articles),
+                                    status=new_status,
+                                    notes=new_notes,
+                                )
+                            
+                            st.session_state.selected_lot = target_lot_id
+
+                            # 2. Assign target lot to all parsed closet items
+                            for it in parsed_closet:
+                                if not it.lot_id or is_new_lot or it in new_listings:
+                                    it.lot_id = target_lot_id
+
+                            # 3. Synchronize listings and orders
+                            res_orders = engine.sync_orders(parsed_orders, default_lot=target_lot_id) if parsed_orders else {"synced_orders": 0}
                             res_closet = engine.sync_listings(parsed_closet) if parsed_closet else {"updated": 0, "created": 0}
+
+                            # 4. Synchronize lots formulas and metrics
                             engine.sync_lots()
-                            record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items)", client=client)
+
+                            # 5. Record event and clear cache
+                            record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id})", client=client)
                             st.cache_data.clear()
 
-                        st.success(f"✔ Sync Complete! {res_orders.get('synced_orders', 0)} orders synced, {res_closet.get('created', 0)} listings added, {res_closet.get('updated', 0)} listings refreshed.")
+                        lot_msg = f" (New lot {target_lot_id} created in Inventory_Lots)" if is_new_lot else f" (Assigned to {target_lot_id})"
+                        st.success(f"✔ Sync Complete! {res_orders.get('synced_orders', 0)} orders synced, {res_closet.get('created', 0)} listings added{lot_msg}, {res_closet.get('updated', 0)} listings refreshed.")
                         st.balloons()
                         time.sleep(1.5)
                         st.rerun()
