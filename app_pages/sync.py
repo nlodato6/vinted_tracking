@@ -420,7 +420,7 @@ def render_sync_page():
 
             folder_param = "ALL" if scan_location.startswith("All Mail") else "INBOX"
 
-            if st.button("🔄 Sync Vinted Emails Now", type="primary", width="stretch"):
+            if st.button("🔍 Scan & Preview Vinted Emails", type="primary", width="stretch"):
                 if not gmail_user_input or not gmail_pass_input:
                     st.error("Please provide your Gmail address and 16-character App Password.")
                 else:
@@ -438,29 +438,15 @@ def render_sync_page():
                                 search_query='(FROM "vinted")',
                             )
                             if not events:
+                                st.session_state.email_sync_preview = None
                                 st.info("ℹ️ No Vinted notification emails found. We scanned your entire mailbox (including archived emails) for messages from Vinted. Make sure Vinted notifications are sent to this address.")
                             else:
-                                st.success(f"Found {len(events)} Vinted notification emails! Updating sheet...")
-                                engine = SheetsSyncEngine(client)
-                                results = engine.process_email_batch(events)
-                                event_rows = []
-                                for ev, res in zip(events, results):
-                                    event_rows.append({
-                                        "Type": ev.event_type.upper(),
-                                        "Title / Ref": ev.item_title or ev.order_id,
-                                        "Status": res.get("status", "processed"),
-                                        "Timestamp": ev.timestamp.strftime("%Y-%m-%d %H:%M"),
-                                    })
-                                processed = len([r for r in results if r.get("status") not in ("ignored", "no_listings")])
-                                log_event(u_email, "email_sync", f"IMAP sync: {processed} events from {gmail_user_input}", spreadsheet_id=st.session_state.get("spreadsheet_id"))
-                                st.cache_data.clear()
-                                st.dataframe(pd.DataFrame(event_rows), width="stretch")
-                                st.balloons()
-                                time.sleep(1.5)
+                                st.session_state.email_sync_preview = events
+                                st.session_state.email_sync_user = gmail_user_input.strip()
                                 st.rerun()
                         except Exception as e:
-                            log_error(u_email, "sync.py:email_sync", e)
-                            st.error(f"IMAP Sync failed: {e}")
+                            log_error(u_email, "sync.py:email_scan", e)
+                            st.error(f"IMAP Connection failed: {e}")
 
         with e2:
             st.markdown("""
@@ -471,6 +457,67 @@ def render_sync_page():
             3. Copy the 16-character password into the box on the left.
             4. Reference the guide: [`GOOGLE_APP_PASSWORD_SETUP.md`](./GOOGLE_APP_PASSWORD_SETUP.md).
             """)
+
+        # -------------------------------------------------------------
+        # Email Sync Preview & Confirmation Block
+        # -------------------------------------------------------------
+        if st.session_state.get("email_sync_preview"):
+            preview_events = st.session_state.email_sync_preview
+            st.divider()
+            st.markdown(f"#### ⚡ Email Sync Preview ({len(preview_events)} Transactions Detected)")
+            st.caption("Review the transactions detected from your Vinted emails before committing them to your Google Sheet.")
+
+            sales_count = len([e for e in preview_events if e.event_type == "sale"])
+            offers_count = len([e for e in preview_events if e.event_type == "offer"])
+            favs_count = len([e for e in preview_events if e.event_type == "favorite"])
+
+            prev_c1, prev_c2, prev_c3 = st.columns(3)
+            prev_c1.metric("💰 Sales to Record", sales_count, border=True)
+            prev_c2.metric("💬 Offers Received", offers_count, border=True)
+            prev_c3.metric("❤️ Favorites to Increment", favs_count, border=True)
+
+            preview_table_data = []
+            for ev in preview_events:
+                price_str = f"${ev.sold_price:.2f}" if ev.event_type == "sale" else (f"${ev.offer_price:.2f}" if ev.event_type == "offer" else "-")
+                preview_table_data.append({
+                    "Type": ev.event_type.upper(),
+                    "Item / Reference": ev.item_title or ev.order_id,
+                    "Price": price_str,
+                    "Buyer": f"@{ev.buyer_username}" if ev.buyer_username else "-",
+                    "Order ID": ev.order_id or "-",
+                    "Date": ev.timestamp.strftime("%Y-%m-%d %H:%M"),
+                })
+
+            st.dataframe(pd.DataFrame(preview_table_data), width="stretch")
+
+            action_c1, action_c2 = st.columns([1.5, 1])
+            with action_c1:
+                if st.button("🚀 Confirm & Sync to Google Sheets", type="primary", width="stretch", key="btn_confirm_email_sync"):
+                    with st.spinner("Synchronizing email events to Google Sheets..."):
+                        try:
+                            engine = SheetsSyncEngine(client)
+                            results = engine.process_email_batch(preview_events)
+                            processed = len([r for r in results if r.get("status") not in ("ignored", "no_listings")])
+                            log_event(
+                                u_email,
+                                "email_sync",
+                                f"IMAP sync: {processed} events from {st.session_state.get('email_sync_user', gmail_user_input)}",
+                                spreadsheet_id=st.session_state.get("spreadsheet_id"),
+                            )
+                            st.cache_data.clear()
+                            st.session_state.email_sync_preview = None
+                            st.success(f"✔ Successfully synced {processed} email transactions to your Google Sheet!")
+                            st.balloons()
+                            time.sleep(1.5)
+                            st.rerun()
+                        except Exception as e:
+                            log_error(u_email, "sync.py:email_sync_confirm", e)
+                            st.error(f"Sync failed: {e}")
+
+            with action_c2:
+                if st.button("❌ Cancel / Clear Preview", type="secondary", width="stretch", key="btn_cancel_email_sync"):
+                    st.session_state.email_sync_preview = None
+                    st.rerun()
 
     # ---------------------------------------------------------
     # TAB 3: SHIPPING SUPPLIES

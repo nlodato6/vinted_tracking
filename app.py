@@ -39,6 +39,10 @@ if "selected_lot" not in st.session_state:
     st.session_state.selected_lot = "LOT-001"
 if "parsed_results" not in st.session_state:
     st.session_state.parsed_results = None
+if "email_sync_preview" not in st.session_state:
+    st.session_state.email_sync_preview = None
+if "email_sync_user" not in st.session_state:
+    st.session_state.email_sync_user = ""
 
 # -----------------------------------------------------------------------------
 # Legal & Compliance Dialogs
