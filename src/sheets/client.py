@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Tuple
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -129,3 +129,45 @@ class GoogleSheetsClient:
                     f"Ensure you shared the Google Sheet with editor permissions to: {email}\n"
                     f"Details: {e}"
                 )
+
+
+def auto_provision_user_sheet(
+    credentials: Any,
+    user_name: str = "Reseller",
+    master_template_id: str = "1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg",
+) -> Tuple[str, str, str]:
+    """Auto-detects an existing SpreadThrift sheet or clones/creates a new one in the user's Google Drive.
+
+    Returns:
+        (spreadsheet_id, spreadsheet_title, action_taken)
+        where action_taken is 'discovered', 'cloned', or 'initialized'
+    """
+    client = GoogleSheetsClient(credentials=credentials)
+    gc = client.authenticate()
+
+    # 1. Search user's Drive for an existing SpreadThrift or Vinted tracker
+    existing = client.find_sheet_by_title("SpreadThrift")
+    if not existing:
+        existing = client.find_sheet_by_title("Vinted Sales")
+    if existing:
+        return existing.id, existing.title, "discovered"
+
+    # 2. Try cloning the master template directly into their Google Drive
+    target_title = f"SpreadThrift - Vinted Sales & Inventory Tracker"
+    try:
+        cloned = gc.copy(master_template_id, title=target_title)
+        return cloned.id, cloned.title, "cloned"
+    except Exception as e:
+        print(f"[Provision Notice] Template copy not available ({e}), creating fresh sheet directly...")
+
+    # 3. Fallback: Create fresh spreadsheet and provision all worksheets & formulas
+    new_sheet = gc.create(target_title)
+    client.sheet_id = new_sheet.id
+    try:
+        from src.sheets.templates import initialize_all_tabs
+        initialize_all_tabs(client)
+    except Exception as e:
+        print(f"[Provision Warning] Tabs initialization error: {e}")
+
+    return new_sheet.id, new_sheet.title, "initialized"
+

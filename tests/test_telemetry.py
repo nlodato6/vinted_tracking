@@ -18,6 +18,8 @@ from src.telemetry import (
     resolve_all_errors,
     delete_error,
     clear_all_telemetry,
+    save_user_spreadsheet,
+    get_user_spreadsheet,
 )
 
 
@@ -128,4 +130,19 @@ def test_sync_feedback_to_google_sheet(monkeypatch):
 
     summary = get_feedback_summary()
     assert summary["unsynced_count"] == 0
+
+
+def test_user_preferences_spreadsheet():
+    # Initially None
+    assert get_user_spreadsheet("new_reseller@example.com") is None
+
+    # Save preference
+    save_user_spreadsheet("new_reseller@example.com", "sheet_xyz_789")
+    assert get_user_spreadsheet("new_reseller@example.com") == "sheet_xyz_789"
+    # Case insensitivity check
+    assert get_user_spreadsheet("NEW_RESELLER@EXAMPLE.COM") == "sheet_xyz_789"
+
+    # Update preference
+    save_user_spreadsheet("new_reseller@example.com", "sheet_updated_999")
+    assert get_user_spreadsheet("new_reseller@example.com") == "sheet_updated_999"
 

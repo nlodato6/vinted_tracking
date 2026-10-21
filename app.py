@@ -6,7 +6,8 @@ import streamlit as st
 
 from src.config import settings
 from src.auth import is_oauth_configured, get_authorization_url, exchange_code_for_credentials
-from src.telemetry import log_session, log_error, log_event, log_feedback
+from src.telemetry import log_session, log_error, log_event, log_feedback, save_user_spreadsheet, get_user_spreadsheet
+from src.sheets.client import auto_provision_user_sheet
 
 # Page Configuration
 LOGO_PATH = "assets/invintory.png"
@@ -83,6 +84,19 @@ if "code" in query_params and not st.session_state.authenticated:
         st.session_state.authenticated = True
         st.session_state.is_admin = u_email in settings.admin_email_list
         log_session(u_email, user_info.get("name", "Google User"), auth_provider="google")
+
+        # Auto-lookup or auto-provision spreadsheet in user's Google Drive
+        saved_sheet = get_user_spreadsheet(u_email)
+        if saved_sheet:
+            st.session_state.spreadsheet_id = saved_sheet
+        elif creds:
+            try:
+                s_id, s_title, _ = auto_provision_user_sheet(creds, user_name=user_info.get("name", "Reseller"))
+                st.session_state.spreadsheet_id = s_id
+                save_user_spreadsheet(u_email, s_id)
+            except Exception as e:
+                print(f"[Auto-provision Notice] {e}")
+
         st.query_params.clear()
         st.rerun()
     except Exception as e:
@@ -215,27 +229,87 @@ with st.sidebar:
     st.sidebar.divider()
     st.sidebar.markdown("### 📊 Google Sheet")
 
-    # Template Clone Button
-    master_template_id = "1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg"
-    template_copy_url = f"https://docs.google.com/spreadsheets/d/{master_template_id}/copy"
-    st.sidebar.link_button("📋 Copy Sheet Template", template_copy_url, width="stretch")
-
-    sheet_id_input = st.sidebar.text_input(
-        "Spreadsheet ID or URL",
-        value=st.session_state.spreadsheet_id,
-        help="Paste the ID from your Google Sheet URL (https://docs.google.com/spreadsheets/d/<ID>/edit)",
-    )
-    if sheet_id_input:
-        m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_id_input)
-        clean_id = m.group(1) if m else sheet_id_input.strip()
-        if clean_id != st.session_state.spreadsheet_id:
-            st.session_state.spreadsheet_id = clean_id
-            st.cache_data.clear()
-            st.rerun()
+    # If sheet is not in session state, check user preferences in database
+    if not st.session_state.spreadsheet_id and u_email:
+        saved_sheet = get_user_spreadsheet(u_email)
+        if saved_sheet:
+            st.session_state.spreadsheet_id = saved_sheet
 
     if st.session_state.spreadsheet_id:
+        st.sidebar.success("Sheet Connected", icon="✅")
         sheet_url = f"https://docs.google.com/spreadsheets/d/{st.session_state.spreadsheet_id}/edit"
-        st.sidebar.link_button("🔗 Open Live Sheet", sheet_url, width="stretch")
+        st.sidebar.link_button("🔗 Open Live Sheet", sheet_url, type="primary", width="stretch")
+
+        with st.sidebar.expander("⚙️ Manage or Switch Sheet", expanded=False):
+            sheet_id_input = st.text_input(
+                "Change Sheet ID / URL",
+                value=st.session_state.spreadsheet_id,
+                help="Paste a different Google Sheet ID or URL to switch tracker.",
+                key="sb_change_sheet_input",
+            )
+            if sheet_id_input:
+                m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_id_input)
+                clean_id = m.group(1) if m else sheet_id_input.strip()
+                if clean_id and clean_id != st.session_state.spreadsheet_id:
+                    st.session_state.spreadsheet_id = clean_id
+                    if u_email:
+                        save_user_spreadsheet(u_email, clean_id)
+                    st.cache_data.clear()
+                    st.rerun()
+
+            if st.session_state.user_credentials and st.button("✨ Auto-Recreate Fresh Sheet", width="stretch", key="sb_recreate_sheet_btn"):
+                with st.spinner("Provisioning new sheet in your Drive..."):
+                    try:
+                        s_id, s_title, _ = auto_provision_user_sheet(
+                            st.session_state.user_credentials,
+                            user_name=u_name,
+                        )
+                        st.session_state.spreadsheet_id = s_id
+                        if u_email:
+                            save_user_spreadsheet(u_email, s_id)
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to create: {e}")
+    else:
+        st.sidebar.warning("No Sheet Connected", icon="⚠️")
+        if st.session_state.user_credentials:
+            if st.sidebar.button("✨ Auto-Create & Connect Sheet", type="primary", width="stretch", icon=":material/magic_button:", key="sb_auto_create_btn"):
+                with st.spinner("Setting up your tracker in Google Drive..."):
+                    try:
+                        s_id, s_title, _ = auto_provision_user_sheet(
+                            st.session_state.user_credentials,
+                            user_name=u_name,
+                        )
+                        st.session_state.spreadsheet_id = s_id
+                        if u_email:
+                            save_user_spreadsheet(u_email, s_id)
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.sidebar.error(f"Setup error: {e}")
+
+        with st.sidebar.expander("Or Connect Existing Sheet", expanded=not bool(st.session_state.user_credentials)):
+            sheet_id_input = st.text_input(
+                "Spreadsheet ID or URL",
+                value="",
+                placeholder="Paste URL or ID here",
+                help="Paste the ID from your Google Sheet URL (https://docs.google.com/spreadsheets/d/<ID>/edit)",
+                key="sb_manual_new_sheet_input",
+            )
+            if sheet_id_input:
+                m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_id_input)
+                clean_id = m.group(1) if m else sheet_id_input.strip()
+                if clean_id:
+                    st.session_state.spreadsheet_id = clean_id
+                    if u_email:
+                        save_user_spreadsheet(u_email, clean_id)
+                    st.cache_data.clear()
+                    st.rerun()
+
+            master_template_id = "1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg"
+            template_copy_url = f"https://docs.google.com/spreadsheets/d/{master_template_id}/copy"
+            st.link_button("📋 Copy Template Manually", template_copy_url, width="stretch")
 
     st.sidebar.divider()
     # Documentation & User Guide

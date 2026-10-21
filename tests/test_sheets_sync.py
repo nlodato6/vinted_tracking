@@ -19,6 +19,7 @@ from src.sheets.schemas import (
     SUPPLIES_HEADERS,
 )
 from src.models import ItemListing, SalesOrder
+from src.sheets.client import auto_provision_user_sheet
 
 
 class MockWorksheet:
@@ -548,3 +549,59 @@ def test_get_all_supplies_and_save_shipping_supply(mock_sheets_env):
     assert row_3[0] == "SUP-03"
     assert "F4/E4" in row_3[6]
     assert "H$2" in row_3[7]
+
+
+def test_auto_provision_user_sheet_discovered(monkeypatch):
+    mock_existing = MagicMock()
+    mock_existing.id = "discovered_sheet_123"
+    mock_existing.title = "SpreadThrift - Personal Tracker"
+
+    mock_client = MagicMock()
+    mock_client.find_sheet_by_title.return_value = mock_existing
+
+    monkeypatch.setattr("src.sheets.client.GoogleSheetsClient", lambda credentials: mock_client)
+
+    s_id, s_title, action = auto_provision_user_sheet(MagicMock(), user_name="Alex")
+    assert s_id == "discovered_sheet_123"
+    assert s_title == "SpreadThrift - Personal Tracker"
+    assert action == "discovered"
+
+
+def test_auto_provision_user_sheet_cloned(monkeypatch):
+    mock_cloned = MagicMock()
+    mock_cloned.id = "cloned_sheet_456"
+    mock_cloned.title = "SpreadThrift - Vinted Sales & Inventory Tracker"
+
+    mock_gc = MagicMock()
+    mock_gc.copy.return_value = mock_cloned
+
+    mock_client = MagicMock()
+    mock_client.authenticate.return_value = mock_gc
+    mock_client.find_sheet_by_title.return_value = None
+
+    monkeypatch.setattr("src.sheets.client.GoogleSheetsClient", lambda credentials: mock_client)
+
+    s_id, s_title, action = auto_provision_user_sheet(MagicMock(), user_name="Alex")
+    assert s_id == "cloned_sheet_456"
+    assert action == "cloned"
+
+
+def test_auto_provision_user_sheet_fallback_create(monkeypatch):
+    mock_created = MagicMock()
+    mock_created.id = "new_created_sheet_789"
+    mock_created.title = "SpreadThrift - Vinted Sales & Inventory Tracker"
+
+    mock_gc = MagicMock()
+    mock_gc.copy.side_effect = RuntimeError("Drive quota or permission error")
+    mock_gc.create.return_value = mock_created
+
+    mock_client = MagicMock()
+    mock_client.authenticate.return_value = mock_gc
+    mock_client.find_sheet_by_title.return_value = None
+
+    monkeypatch.setattr("src.sheets.client.GoogleSheetsClient", lambda credentials: mock_client)
+    monkeypatch.setattr("src.sheets.templates.initialize_all_tabs", lambda c: None)
+
+    s_id, s_title, action = auto_provision_user_sheet(MagicMock(), user_name="Alex")
+    assert s_id == "new_created_sheet_789"
+    assert action == "initialized"

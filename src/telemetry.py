@@ -75,6 +75,14 @@ def init_telemetry_db():
                 synced_to_sheets INTEGER DEFAULT 0
             );
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                user_email TEXT PRIMARY KEY,
+                spreadsheet_id TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
         # Indexes for fast querying
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON user_events(timestamp);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON user_events(event_type);")
@@ -525,3 +533,35 @@ def get_feedback_summary() -> Dict[str, Any]:
         }
     finally:
         conn.close()
+
+
+def save_user_spreadsheet(user_email: str, spreadsheet_id: str):
+    """Saves the user's connected spreadsheet ID for automatic reconnects."""
+    try:
+        conn = _get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO user_preferences (user_email, spreadsheet_id, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_email) DO UPDATE SET spreadsheet_id = excluded.spreadsheet_id, updated_at = CURRENT_TIMESTAMP
+                """,
+                (user_email.strip().lower(), spreadsheet_id.strip()),
+            )
+        conn.close()
+    except Exception as e:
+        print(f"[Telemetry Warning] Failed to save user spreadsheet: {e}")
+
+
+def get_user_spreadsheet(user_email: str) -> Optional[str]:
+    """Retrieves the user's previously connected spreadsheet ID."""
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute("SELECT spreadsheet_id FROM user_preferences WHERE user_email = ?", (user_email.strip().lower(),))
+        row = c.fetchone()
+        conn.close()
+        return row[0] if row and row[0] else None
+    except Exception:
+        return None
+

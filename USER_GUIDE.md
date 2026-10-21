@@ -52,22 +52,21 @@ When you open SpreadThrift ([`http://localhost:8501`](http://localhost:8501)), y
 
 ## 📊 Connecting Your Google Sheet
 
-SpreadThrift reads and writes directly to a standardized Google Sheets template.
+SpreadThrift reads and writes directly to a standardized, formula-rich Google Sheets tracker stored securely in your own Google Drive.
 
-### 1. Copy the Master Template
-1. In the left sidebar, click the **"📋 Copy Sheet Template"** button.
-2. A new browser tab opens in Google Sheets. Click **Make a copy**.
-3. This creates a fresh, fully configured spreadsheet in your personal Google Drive with all formulas, conditional formatting, and dashboard views pre-built.
+### ✨ Zero-Friction 1-Click Provisioning (Recommended)
+When you log in using **Sign in with Google (OAuth 2.0)**, SpreadThrift takes care of everything behind the scenes:
+1. **Automatic Discovery**: It checks your Google Drive for any existing `SpreadThrift` or `Vinted Sales` sheet.
+2. **Instant Creation**: If you don't have one yet, it creates a fresh tracker with all 5 core worksheets, formulas, headers, and dashboard summaries pre-configured.
+3. **Session Memory**: SpreadThrift saves your connected sheet to your user account, so you are instantly reconnected every time you log in—**zero copy-pasting required**.
+4. **Live Access**: Simply click **"🔗 Open Live Sheet"** in the sidebar at any time to view or edit your live tracker in a new Google Sheets tab.
 
-### 2. Link Your Sheet ID
-1. Copy the Spreadsheet ID from your browser URL bar:
-   ```text
-   https://docs.google.com/spreadsheets/d/1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg/edit
-                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   ```
-2. Paste either the full URL or just the ID into the sidebar field: **"Spreadsheet ID or URL"**.
-3. SpreadThrift instantly verifies and connects to the sheet.
-4. Click **"🔗 Open Live Sheet"** in the sidebar at any time to open your spreadsheet in a new tab.
+### ⚙️ Optional: Connect or Switch Sheets Manually
+If you want to use a specific existing sheet or work with multiple accounts:
+1. Expand **"⚙️ Manage or Switch Sheet"** in the sidebar.
+2. Paste your Google Sheet URL or ID into the input field.
+3. SpreadThrift instantly switches to your specified sheet and remembers it for future logins.
+4. If needed, you can also click **"✨ Auto-Recreate Fresh Sheet"** to provision a brand-new tracker from scratch.
 
 ### The 5 Core Worksheets Inside Your Sheet
 | Worksheet Name | Purpose |
