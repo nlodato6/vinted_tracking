@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from src.sheets import GoogleSheetsClient
 from src.telemetry import log_event, log_error
 from src.analytics import (
+    clean_currency,
     parse_sold_dataframe,
     parse_active_dataframe,
     build_sales_trend_chart,
@@ -15,17 +16,41 @@ from src.analytics import (
     build_price_vs_profit_scatter,
     build_inventory_split_donuts,
     build_sale_types_chart,
+    compute_net_cash_profit,
+    build_cash_flow_waterfall,
 )
 
 
 @st.cache_data(ttl=60)
 def load_raw_sheet_data(sheet_id: str, _creds):
-    """Fetches raw rows from Google Sheets with a 60-second cache TTL."""
+    """Fetches raw rows and expense data from Google Sheets in a single batch get (1 API call)."""
     client = GoogleSheetsClient(sheet_id=sheet_id, credentials=_creds)
     sh = client.get_spreadsheet()
-    sold_rows = sh.worksheet("Sold_Items").get_all_values()
-    active_rows = sh.worksheet("Item_Listings").get_all_values()
-    return sold_rows, active_rows
+    try:
+        res = sh.values_batch_get([
+            "Sold_Items!A:Y",
+            "Item_Listings!A:R",
+            "Inventory_Lots!A:I",
+            "Shipping_Supplies!A:H",
+        ])
+        val_ranges = res.get("valueRanges", [])
+        sold_rows = val_ranges[0].get("values", []) if len(val_ranges) > 0 else []
+        active_rows = val_ranges[1].get("values", []) if len(val_ranges) > 1 else []
+        lot_rows = val_ranges[2].get("values", []) if len(val_ranges) > 2 else []
+        supply_rows = val_ranges[3].get("values", []) if len(val_ranges) > 3 else []
+        return sold_rows, active_rows, lot_rows, supply_rows
+    except Exception:
+        sold_rows = sh.worksheet("Sold_Items").get_all_values()
+        active_rows = sh.worksheet("Item_Listings").get_all_values()
+        try:
+            lot_rows = sh.worksheet("Inventory_Lots").get_all_values()
+        except Exception:
+            lot_rows = []
+        try:
+            supply_rows = sh.worksheet("Shipping_Supplies").get_all_values()
+        except Exception:
+            supply_rows = []
+        return sold_rows, active_rows, lot_rows, supply_rows
 
 
 def render_metrics_page():
@@ -43,7 +68,7 @@ def render_metrics_page():
     # Data fetch with spinner
     try:
         with st.spinner("Loading sales & inventory data from Google Sheets..."):
-            sold_rows, active_rows = load_raw_sheet_data(spreadsheet_id, user_creds)
+            sold_rows, active_rows, lot_rows, supply_rows = load_raw_sheet_data(spreadsheet_id, user_creds)
         log_event(u_email, "view_metrics", f"Loaded data for sheet {spreadsheet_id}", spreadsheet_id=spreadsheet_id)
     except Exception as e:
         log_error(u_email, "metrics.py:fetch_data", e)
@@ -102,7 +127,7 @@ def render_metrics_page():
             filtered_active = filtered_active[filtered_active["Category"].isin(selected_cats)]
 
     # -------------------------------------------------------------------------
-    # Financial KPI Cards
+    # Financial KPI Cards & Actual Net Cash Profit
     # -------------------------------------------------------------------------
     total_rev = filtered_sold["sold_price_num"].sum() if not filtered_sold.empty else 0.0
     total_profit = filtered_sold["net_profit_num"].sum() if not filtered_sold.empty else 0.0
@@ -115,14 +140,102 @@ def render_metrics_page():
     total_catalog = items_sold + active_items
     sell_through = ((items_sold / total_catalog) * 100) if total_catalog > 0 else 0.0
 
-    kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
+    # Calculate Total Invested Capital (Lots + Supplies) and Actual Net Cash Profit
+    lot_cost_idx = 3
+    if lot_rows and len(lot_rows) > 0 and "Total_Cost" in lot_rows[0]:
+        lot_cost_idx = lot_rows[0].index("Total_Cost")
+    total_lots_invested = sum(clean_currency(r[lot_cost_idx]) for r in lot_rows[1:] if len(r) > lot_cost_idx) if lot_rows and len(lot_rows) > 1 else 0.0
 
-    kpi1.metric("Gross Revenue", f"${total_rev:,.2f}", border=True)
-    kpi2.metric("Net Profit", f"${total_profit:,.2f}", border=True)
-    kpi3.metric("Profit Margin", f"{margin_pct:.1f}%", border=True)
-    kpi4.metric("Avg Sale Price", f"${avg_price:.2f}", border=True)
-    kpi5.metric("Items Sold", f"{items_sold:,}", border=True)
-    kpi6.metric("Active Catalog", f"${active_value:,.2f}", f"{active_items} items", border=True)
+    sup_cost_idx = 5
+    if supply_rows and len(supply_rows) > 0 and "Total_Cost" in supply_rows[0]:
+        sup_cost_idx = supply_rows[0].index("Total_Cost")
+    total_supplies_invested = sum(clean_currency(r[sup_cost_idx]) for r in supply_rows[1:] if len(r) > sup_cost_idx) if supply_rows and len(supply_rows) > 1 else 0.0
+
+    cash_summary = compute_net_cash_profit(total_rev, total_lots_invested, total_supplies_invested)
+    net_cash = cash_summary["actual_net_cash_profit"]
+    is_positive = cash_summary["is_positive"]
+    total_invested = cash_summary["total_invested"]
+
+    # Calculate unsold inventory acquisition cost
+    act_cost_idx = 5
+    if active_rows and len(active_rows) > 0 and "Unit_Cost" in active_rows[0]:
+        act_cost_idx = active_rows[0].index("Unit_Cost")
+    unsold_cost_basis = sum(clean_currency(r[act_cost_idx]) for r in active_rows[1:] if len(r) > act_cost_idx) if active_rows and len(active_rows) > 1 else 0.0
+
+    # Primary Row: 4 Core Financial Indicators
+    k1, k2, k3, k4 = st.columns(4)
+
+    if is_positive:
+        cash_delta = f"✅ Cash Flow Positive (+{cash_summary['cash_roi_pct']:.1f}% ROI)"
+    else:
+        cash_delta = f"⚠️ ${abs(net_cash):,.2f} to breakeven ({cash_summary['recovery_pct']:.1f}% recovered)"
+
+    k1.metric(
+        "Actual Net Cash Profit",
+        f"${net_cash:,.2f}",
+        delta=cash_delta,
+        delta_color="normal" if is_positive else "inverse",
+        help="Actual cash in your bank account today: Gross Revenue minus all upfront capital spent on Inventory Lots and Shipping Supplies.",
+        border=True,
+    )
+    k2.metric(
+        "Gross Revenue",
+        f"${total_rev:,.2f}",
+        help="Total gross payments received from all completed orders.",
+        border=True,
+    )
+    k3.metric(
+        "Realized Net Profit",
+        f"${total_profit:,.2f}",
+        f"{margin_pct:.1f}% margin",
+        help="Bookkeeping net profit: Revenue minus allocated unit cost and packaging deduction for items that have sold.",
+        border=True,
+    )
+    k4.metric(
+        "Total Capital Invested",
+        f"${total_invested:,.2f}",
+        f"Lots: ${total_lots_invested:,.2f} | Supplies: ${total_supplies_invested:,.2f}",
+        delta_color="off",
+        help="Total cash outlay spent to acquire bulk inventory hauls plus packaging supplies.",
+        border=True,
+    )
+
+    # Secondary Row: Volume & Catalog Metrics
+    v1, v2, v3, v4 = st.columns(4)
+    v1.metric("Items Sold", f"{items_sold:,} items", border=True)
+    v2.metric("Avg Sale Price", f"${avg_price:.2f}", border=True)
+    v3.metric("Active Catalog Value", f"${active_value:,.2f}", f"{active_items} listed", border=True)
+    v4.metric("Sell-Through Rate", f"{sell_through:.1f}%", f"{items_sold} of {total_catalog} items", border=True)
+
+    # -------------------------------------------------------------------------
+    # Cash Flow & Capital Recovery Section
+    # -------------------------------------------------------------------------
+    with st.container(border=True):
+        st.subheader("💵 Cash Flow & Capital Recovery")
+        st.caption("Track when your upfront haul and packaging investments are fully recouped into pure take-home profit.")
+
+        cf_col1, cf_col2 = st.columns([1.2, 1.8], vertical_alignment="center")
+
+        with cf_col1:
+            rec_pct = min(100.0, max(0.0, cash_summary["recovery_pct"]))
+            st.markdown(f"**Capital Recovery Progress: {cash_summary['recovery_pct']:.1f}%**")
+            st.progress(rec_pct / 100.0)
+
+            if is_positive:
+                st.success(f"🎉 **Hauls & Supplies 100% Paid Off!** You are in pure cash profit territory with **+${net_cash:,.2f}** in pocket.", icon="✅")
+            else:
+                st.info(f"⏳ **Breakeven Target**: You need **${abs(net_cash):,.2f}** more in sales revenue to fully recoup all inventory and packaging expenses.", icon="🎯")
+
+            st.markdown(f"""
+            - **Gross Cash Inflow**: `${total_rev:,.2f}`
+            - **Inventory Hauls Outflow**: `${total_lots_invested:,.2f}`
+            - **Shipping Supplies Outflow**: `${total_supplies_invested:,.2f}`
+            - **Unsold Closet Cost Basis**: `${unsold_cost_basis:,.2f}` *({active_items} active items ready to sell)*
+            """)
+
+        with cf_col2:
+            fig_waterfall = build_cash_flow_waterfall(cash_summary)
+            st.plotly_chart(fig_waterfall, width="stretch", alt="Cash flow waterfall breakdown")
 
     st.divider()
 

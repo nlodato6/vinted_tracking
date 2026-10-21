@@ -414,3 +414,61 @@ def build_sale_types_chart(df: pd.DataFrame) -> go.Figure:
     )
     fig.update_yaxes(title_text="Number of Orders")
     return fig
+
+
+def compute_net_cash_profit(
+    total_revenue: float,
+    total_lots_invested: float,
+    total_supplies_invested: float,
+) -> Dict[str, Any]:
+    """Calculates actual net cash profit and cash flow recovery metrics."""
+    total_invested = total_lots_invested + total_supplies_invested
+    net_cash = total_revenue - total_invested
+    is_positive = net_cash >= 0
+    cash_roi = ((net_cash / total_invested) * 100) if total_invested > 0 else 0.0
+    recovery_pct = ((total_revenue / total_invested) * 100) if total_invested > 0 else (100.0 if total_revenue > 0 else 0.0)
+
+    return {
+        "total_revenue": total_revenue,
+        "total_lots_invested": total_lots_invested,
+        "total_supplies_invested": total_supplies_invested,
+        "total_invested": total_invested,
+        "actual_net_cash_profit": net_cash,
+        "is_positive": is_positive,
+        "cash_roi_pct": cash_roi,
+        "recovery_pct": recovery_pct,
+    }
+
+
+def build_cash_flow_waterfall(cash_summary: Dict[str, Any]) -> go.Figure:
+    """Builds a Plotly waterfall chart visualizing cash outflows (lots + supplies), gross revenue, and net cash profit."""
+    rev = cash_summary.get("total_revenue", 0.0)
+    lots = cash_summary.get("total_lots_invested", 0.0)
+    supplies = cash_summary.get("total_supplies_invested", 0.0)
+    net_cash = cash_summary.get("actual_net_cash_profit", 0.0)
+
+    fig = go.Figure(
+        go.Waterfall(
+            name="Cash Flow",
+            orientation="v",
+            measure=["relative", "relative", "relative", "total"],
+            x=["Gross Revenue", "Inventory Lots Spend", "Supplies Spend", "Actual Net Cash Profit"],
+            textposition="outside",
+            text=[f"+${rev:,.2f}", f"-${lots:,.2f}", f"-${supplies:,.2f}", f"${net_cash:,.2f}"],
+            y=[rev, -lots, -supplies, net_cash],
+            connector={"line": {"color": "rgb(63, 63, 63)"}},
+            decreasing={"marker": {"color": "#ef4444"}},
+            increasing={"marker": {"color": "#10b981"}},
+            totals={"marker": {"color": "#0ea5e9" if net_cash >= 0 else "#f59e0b"}},
+        )
+    )
+
+    fig.update_layout(
+        title=dict(text="💵 Cash Flow & Capital Recovery Breakdown", x=0.01),
+        showlegend=False,
+        height=320,
+        margin=dict(l=10, r=10, t=45, b=20),
+        yaxis=dict(title="Cash Amount ($)", tickformat="$,.0f"),
+    )
+    return fig
+

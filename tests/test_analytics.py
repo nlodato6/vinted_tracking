@@ -13,6 +13,8 @@ from src.analytics import (
     build_price_vs_profit_scatter,
     build_inventory_split_donuts,
     build_sale_types_chart,
+    compute_net_cash_profit,
+    build_cash_flow_waterfall,
 )
 
 
@@ -106,3 +108,35 @@ def test_empty_dataframe_handling():
     assert fig5 is not None
     assert fig6 is not None
     assert fig7 is not None
+
+
+def test_compute_net_cash_profit():
+    # Case 1: Positive Cash Flow
+    res_pos = compute_net_cash_profit(
+        total_revenue=250.0,
+        total_lots_invested=100.0,
+        total_supplies_invested=20.0,
+    )
+    assert res_pos["total_revenue"] == 250.0
+    assert res_pos["total_invested"] == 120.0
+    assert res_pos["actual_net_cash_profit"] == 130.0
+    assert res_pos["is_positive"] is True
+    assert res_pos["cash_roi_pct"] > 100.0
+
+    # Case 2: Negative Cash Flow (Recovering upfront spend)
+    res_neg = compute_net_cash_profit(
+        total_revenue=50.0,
+        total_lots_invested=100.0,
+        total_supplies_invested=20.0,
+    )
+    assert res_neg["actual_net_cash_profit"] == -70.0
+    assert res_neg["is_positive"] is False
+    assert round(res_neg["recovery_pct"], 1) == 41.7
+
+    # Case 3: Waterfall figure generation
+    fig_pos = build_cash_flow_waterfall(res_pos)
+    assert fig_pos is not None
+    assert len(fig_pos.data) == 1
+
+    fig_neg = build_cash_flow_waterfall(res_neg)
+    assert fig_neg is not None

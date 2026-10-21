@@ -151,20 +151,24 @@ Hands-free sale tracking directly from your email notifications.
 
 Navigate to **"Metrics & Analytics"** in the sidebar. This dashboard computes real-time business performance analytics using Plotly charts:
 
-* **Top KPI Metric Cards**:
-  * **Gross Sales**: Total revenue generated from all completed transactions.
-  * **Realized Net Profit**: True cash profit after subtracting item COGS, packaging supplies, and seller fees.
-  * **Average Profit Margin %**: Overall margin efficiency across your closet.
-  * **Active Inventory Value**: Total retail value of items currently listed in your closet.
-  * **Items Sold vs. Active**: Turnover ratio of sold merchandise.
+* **Top Financial & Cash Flow Indicators**:
+  * **Actual Net Cash Profit**: **Real cash in your bank account today**. Calculated as: `Total Gross Revenue ($) - Total Bulk Lots Invested ($) - Total Shipping Supplies Invested ($)`. Features dynamic ROI badges (`+X% Cash ROI`) and breakeven indicators (`$X to breakeven`).
+  * **Gross Revenue**: Total gross buyer spend across all completed sales.
+  * **Realized Net Profit**: Bookkeeping / accrual net profit for items that have already sold (`Sold Price - Allocated Lot COGS - Packaging Deduction`).
+  * **Total Capital Invested**: Total cash outlay spent on bulk inventory hauls plus packaging supplies.
+  * **Active Catalog Value**: Total asking price of active listings, including acquisition cost basis.
+  * **Sell-Through Rate & Volume**: Units sold, average transaction price, and percentage of inventory cleared.
+* **💵 Cash Flow & Capital Recovery Section**:
+  * **Capital Recovery Progress Bar**: Live percentage of your upfront haul & supplies spend recouped.
+  * **Interactive Waterfall Chart**: Visualizes cash outflows (lots & packaging), cash inflows (sales revenue), and your net cash profit in pocket.
 * **Visual Analytics Charts**:
-  * **Sales & Profit Timeline**: Area chart tracking daily/monthly sales volume and net income trends.
-  * **Margin Distribution**: Histogram identifying your highest-margin clothing categories.
-  * **Top Performing Brands**: Ranked bar chart showing which brands sell fastest and net the highest profit.
-  * **Price vs. Profit Scatter Plot**: Helps spot underpriced gems or slow-moving high-ticket items.
+  * **Sales & Profit Timeline**: Interactive timeline tracking sales volume and net income trends (Daily, Weekly, Monthly).
+  * **Margin Distribution**: Breakdown of profitability across clothing categories.
+  * **Top Performing Brands**: Ranked leaderboard showing which brands generate the highest margin and revenue.
+  * **Price vs. Profit Scatter Plot**: Analyzes pricing sweet-spots and markdown discounts.
 * **Interactive Filters**:
-  * Filter analytics by Date Range (Last 7 Days, Last 30 Days, Year-to-Date, or All Time).
-  * Filter by specific Inventory Lot or Brand.
+  * Filter analytics by Timeframe (All Time, Last 30 Days, Last 90 Days, This Year).
+  * Filter by specific Clothing Categories.
 
 ---
 
