@@ -85,41 +85,54 @@ Rather than performing slow, rate-limited, row-by-row queries against Google She
 
 ## 3. User Interface & Feature Design
 
-### Visual Structure
-1. **Header & Status Banner**:
-   - Displays live Google Sheets connection status (`🟢 Connected`).
-   - Shows last HTML import timestamp and email parser timestamp.
-   - Clickable direct link to open the Google Spreadsheet.
-2. **Smart Upload Zone**:
+The Streamlit interface will feature a streamlined, tabbed layout:
+
+### Tab 1: 📦 HTML Batch Import & Reconciliation
+1. **Smart Upload Zone**:
    - Supports uploading 1, 2, or all 3 HTML files at once.
    - Automatically detects whether each uploaded file is:
      - `Active Closet` (contains `data-testid="product-item-id-"` without sold badges)
      - `Sold Closet` (contains sold badges)
      - `My Orders` (contains `data-testid="my-orders-item"` or `/inbox/` links)
-3. **Reconciliation Summary**:
+2. **Reconciliation Summary**:
    - 🟢 **New Listings**: Number of brand new items to be added.
    - 🔵 **Sold Transitions**: Number of active items transitioning to sold.
    - ⚪ **Duplicates Skipped**: Number of items already tracked and unchanged.
    - 🟡 **Metrics Updated**: Number of existing listings with updated stats.
-4. **Detailed Expandable Diffs**:
+3. **Detailed Expandable Diffs**:
    - Collapsible dataframes displaying item titles, prices, brands, and categories before committing.
-5. **Run Sync Button**:
+4. **Run Sync Button**:
    - Triggers the atomic batch update with a progress bar and celebratory notification (`🎈 Sync Complete!`).
+
+---
+
+### Tab 2: 📬 Direct Email Sync (`tsavoie90@gmail.com`)
+1. **One-Click Email Fetcher**:
+   - "Sync Vinted Emails" button that connects to `tsavoie90@gmail.com` via IMAP using secure app credentials.
+   - Scans for recent transactional notifications from `no-reply@vinted.com`.
+2. **Live Event Stream & Log**:
+   - Displays real-time breakdown of parsed email events:
+     - 💰 **Sales**: Item titles, sold prices, order IDs moved directly to `Sold_Items`.
+     - 🏷️ **Offers**: Buyer offers logged into garment `Price_History` without changing asking price.
+     - ❤️ **Favorites**: Favorite counts incremented automatically in `Item_Listings`.
+3. **Instant Status Refresh**:
+   - Automatically updates `Last Email Parsed` in Google Sheets [`Analytics_Dashboard`](https://docs.google.com/spreadsheets/d/1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg/edit) row 2 banner upon completion.
 
 ---
 
 ## 4. Implementation Steps & Task Breakdown
 
 ### Phase 1: Core Streamlit Application (`app.py`)
-- Create `app.py` in the workspace root.
+- Create `app.py` in the workspace root with Tab 1 (HTML Upload) and Tab 2 (Email Sync).
 - Build `detect_html_type(file_bytes: bytes) -> str` to auto-categorize uploaded files.
 - Integrate `parse_closet_html` and `parse_orders_html` to accept `io.BytesIO` / strings directly.
 - Implement the in-memory reconciliation logic that compares parsed items against the Google Sheet state.
+- Wire `fetch_vinted_emails_via_imap` to the "Sync Vinted Emails" action.
 
 ### Phase 2: Credentials & Secrets Adaptation
-- Update `src/sheets/client.py` to support dual authentication:
-  - If running locally: loads `credentials.json` or `.env`.
-  - If running on Streamlit Cloud: loads credentials directly from `st.secrets["gcp_service_account"]`.
+- Update `src/sheets/client.py` and `app.py` to support dual authentication:
+  - If running locally: loads `credentials.json`, `GMAIL_USER`, and `GMAIL_APP_PASSWORD` from `.env`.
+  - If running on Streamlit Cloud: loads credentials directly from `st.secrets` (`gcp_service_account`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`).
 
 ### Phase 3: UI Polishing & Styling
 - Clean dark/light theme responsive styling.
@@ -130,13 +143,14 @@ Rather than performing slow, rate-limited, row-by-row queries against Google She
 - Run `streamlit run app.py` locally and verify:
   - File upload of the 3 HTML files.
   - Zero duplicate rows created.
+  - Email sync button connects and logs events.
   - Dashboard row 2 timestamp updates accurately.
 
 ### Phase 5: Streamlit Community Cloud Deployment
 - Add `streamlit` to `requirements.txt`.
 - Push repository to GitHub.
 - Open [share.streamlit.io](https://share.streamlit.io), connect repository `nlodato6/vinted_tracking`, branch `master`, file `app.py`.
-- Paste Google Service Account JSON into **App Settings → Secrets**.
+- Paste Google Service Account JSON and Gmail credentials into **App Settings → Secrets**.
 - Deploy and verify live operation on mobile and desktop.
 
 ---

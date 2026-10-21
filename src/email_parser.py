@@ -1,8 +1,12 @@
 """Parses transactional emails from Vinted (no-reply@vinted.com) for real-time tracking."""
 
 import re
+import email
+from email.header import decode_header
+import email.utils
+import imaplib
 from datetime import datetime, date
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 
 
@@ -176,4 +180,91 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
         raw_subject=sub_clean,
         timestamp=dt,
     )
+
+
+def decode_mime_words(s: Optional[str]) -> str:
+    """Safely decodes RFC 2047 MIME-encoded headers."""
+    if not s:
+        return ""
+    decoded = []
+    for part, enc in decode_header(s):
+        if isinstance(part, bytes):
+            try:
+                decoded.append(part.decode(enc or "utf-8", errors="ignore"))
+            except Exception:
+                decoded.append(part.decode("latin-1", errors="ignore"))
+        else:
+            decoded.append(str(part))
+    return "".join(decoded)
+
+
+def extract_email_body(msg: email.message.Message) -> str:
+    """Extracts plain text or HTML body from an email Message object."""
+    body = ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            cdispo = str(part.get("Content-Disposition") or "")
+            if "attachment" not in cdispo and ctype in ("text/plain", "text/html"):
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or "utf-8"
+                    try:
+                        body += payload.decode(charset, errors="ignore") + "\n"
+                    except Exception:
+                        body += payload.decode("latin-1", errors="ignore") + "\n"
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            charset = msg.get_content_charset() or "utf-8"
+            try:
+                body = payload.decode(charset, errors="ignore")
+            except Exception:
+                body = payload.decode("latin-1", errors="ignore")
+    return body
+
+
+def fetch_vinted_emails_via_imap(
+    username: str,
+    password: str,
+    folder: str = "INBOX",
+    max_emails: int = 50,
+    search_query: str = '(FROM "no-reply@vinted.com")',
+) -> List[ParsedEmailEvent]:
+    """
+    Connects to Gmail via IMAP and parses recent transactional emails from Vinted.
+    Returns list of ParsedEmailEvent objects.
+    """
+    if not username or not password:
+        return []
+
+    mail = imaplib.IMAP4_SSL("imap.gmail.com")
+    mail.login(username, password)
+    mail.select(folder)
+
+    status, search_data = mail.search(None, search_query)
+    if status != "OK" or not search_data or not search_data[0]:
+        mail.logout()
+        return []
+
+    msg_ids = search_data[0].split()
+    events: List[ParsedEmailEvent] = []
+
+    for m_id in msg_ids[-max_emails:]:
+        res, data = mail.fetch(m_id, "(RFC822)")
+        if res != "OK" or not data:
+            continue
+        for response_part in data:
+            if isinstance(response_part, tuple):
+                msg = email.message_from_bytes(response_part[1])
+                subject = decode_mime_words(msg.get("Subject", ""))
+                date_header = msg.get("Date")
+                dt = email.utils.parsedate_to_datetime(date_header) if date_header else datetime.now()
+                body = extract_email_body(msg)
+                event = parse_vinted_email(subject, body, email_date=dt)
+                if event.event_type != "unknown":
+                    events.append(event)
+
+    mail.logout()
+    return events
 

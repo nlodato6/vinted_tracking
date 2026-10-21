@@ -61,3 +61,15 @@ def test_parse_unknown_email():
     event = parse_vinted_email(subject, body)
     assert event.event_type == "unknown"
 
+
+def test_decode_mime_words():
+    from src.email_parser import decode_mime_words
+    assert decode_mime_words("Plain Subject") == "Plain Subject"
+    assert decode_mime_words(None) == ""
+
+
+def test_fetch_vinted_emails_empty_credentials():
+    from src.email_parser import fetch_vinted_emails_via_imap
+    assert fetch_vinted_emails_via_imap("", "") == []
+
+

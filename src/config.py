@@ -41,6 +41,16 @@ class Settings(BaseSettings):
     webhook_port: int = 8000
     webhook_secret: str = ""
 
+    # Gmail IMAP Automation
+    gmail_user: str = Field(
+        default="",
+        description="Gmail address where Vinted emails are sent (e.g. tsavoie90@gmail.com)",
+    )
+    gmail_app_password: str = Field(
+        default="",
+        description="Google 16-character App Password for IMAP access",
+    )
+
     @property
     def vinted_base_url(self) -> str:
         return f"https://www.{self.vinted_domain}"

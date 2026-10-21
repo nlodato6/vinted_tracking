@@ -168,6 +168,61 @@ def sync_lots():
 
 
 @app.command()
+def sync_emails(
+    user: Optional[str] = typer.Option(None, "--user", "-u", help="Gmail address (defaults to GMAIL_USER in .env)"),
+    password: Optional[str] = typer.Option(None, "--password", "-p", help="Google App Password (defaults to GMAIL_APP_PASSWORD in .env)"),
+    max_emails: int = typer.Option(25, "--max", "-m", help="Max emails to check"),
+):
+    """
+    Connects to Gmail via IMAP, fetches recent Vinted transactional emails,
+    and synchronizes sales, offers, and favorites directly into Google Sheets.
+    """
+    from src.email_parser import fetch_vinted_emails_via_imap
+    from src.notifications import record_email_parse_event
+
+    gmail_user = user or settings.gmail_user
+    gmail_pwd = password or settings.gmail_app_password
+
+    if not gmail_user or not gmail_pwd:
+        console.print(
+            "[bold red]❌ Gmail credentials missing.[/bold red]\n"
+            "Set [cyan]GMAIL_USER[/cyan] and [cyan]GMAIL_APP_PASSWORD[/cyan] in your [bold].env[/bold] file,\n"
+            "or provide them with flags: [dim]--user tsavoie90@gmail.com --password <app-password>[/dim]\n\n"
+            "[dim]Tip: Generate a 16-character App Password at: https://myaccount.google.com/apppasswords[/dim]"
+        )
+        raise typer.Exit(code=1)
+
+    console.print(f"\n[bold cyan]📬 Connecting to Gmail ({gmail_user}) via IMAP...[/bold cyan]")
+    try:
+        events = fetch_vinted_emails_via_imap(
+            username=gmail_user,
+            password=gmail_pwd,
+            max_emails=max_emails,
+        )
+    except Exception as e:
+        console.print(f"[bold red]❌ IMAP connection failed: {e}[/bold red]")
+        raise typer.Exit(code=1)
+
+    if not events:
+        console.print("[yellow]No Vinted transactional emails found in inbox.[/yellow]\n")
+        return
+
+    console.print(f"[green]Found {len(events)} Vinted notification emails! Syncing to Google Sheets...[/green]")
+    client = GoogleSheetsClient()
+    engine = SheetsSyncEngine(client)
+
+    synced = 0
+    for ev in events:
+        res = engine.process_email_event(ev)
+        console.print(f"  • [bold]{ev.event_type.upper()}[/bold]: {ev.item_title or ev.order_id} -> {res.get('status', 'processed')}")
+        synced += 1
+
+    engine.sync_lots()
+    record_email_parse_event(details=f"IMAP: {synced} events from {gmail_user}", client=client)
+    console.print(f"[bold green]✔ Done! {synced} email events processed and synced to Google Sheets.[/bold green]\n")
+
+
+@app.command()
 def serve(
     host: str = typer.Option(settings.webhook_host, "--host", "-h", help="Bind host"),
     port: int = typer.Option(settings.webhook_port, "--port", "-p", help="Bind port"),
