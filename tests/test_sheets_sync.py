@@ -648,3 +648,74 @@ def test_process_email_batch(mock_sheets_env):
     assert results[1]["status"] == "offer_logged"
     assert results[2]["status"] in ("moved_to_sold", "appended_to_sold")
 
+
+def test_sync_listings_with_unassigned_lot(mock_sheets_env):
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+
+    item = ItemListing(
+        item_sku="",
+        title="Unassigned Brand New Hoodie",
+        brand="Nike",
+        category="Sweatshirts",
+        current_price=45.00,
+        lot_id="",
+        status="Listed",
+        date_listed=date(2026, 10, 19),  # Same date as LOT-001 in mock
+    )
+
+    # When auto_assign_lot=False, should NOT assign LOT-001 from date match
+    res = engine.sync_listings([item], auto_assign_lot=False)
+    assert res["created"] == 1
+
+    matched = [r for r in ws_listings.rows[1:] if "Unassigned Brand New Hoodie" in r[2]]
+    assert len(matched) == 1
+    # Column 1 is Lot_ID -> must be empty
+    assert matched[0][1] == ""
+
+
+def test_sync_listings_preserves_edited_title_and_lot(mock_sheets_env):
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+
+    # Simulates an item edited in st.data_editor
+    item = ItemListing(
+        item_sku="",
+        title="Corrected Vintage Leather Jacket",
+        brand="Wilson's",
+        category="Outerwear",
+        current_price=120.00,
+        lot_id="LOT-CUSTOM-99",
+        status="Listed",
+        date_listed=date(2026, 10, 19),
+    )
+
+    res = engine.sync_listings([item], auto_assign_lot=False)
+    assert res["created"] == 1
+
+    matched = [r for r in ws_listings.rows[1:] if r[2] == "Corrected Vintage Leather Jacket"]
+    assert len(matched) == 1
+    assert matched[0][1] == "LOT-CUSTOM-99"
+
+
+def test_sync_orders_with_unassigned_lot(mock_sheets_env):
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    order = SalesOrder(
+        order_id="ORD-UNASSIGNED-1",
+        item_title="Standalone Direct Sale Sweater",
+        sale_date=date(2026, 10, 19),  # Same date as LOT-001 in mock
+        sold_price=40.00,
+        vinted_status="Completed",
+    )
+
+    # When auto_assign_lot=False and default_lot="", should NOT assign LOT-001
+    res = engine.sync_orders([order], default_lot="", auto_assign_lot=False)
+    assert res["synced_orders"] == 1
+
+    matched = [r for r in ws_sold.rows[1:] if r[2] == "Standalone Direct Sale Sweater"]
+    assert len(matched) == 1
+    assert matched[0][1] == ""
+
+

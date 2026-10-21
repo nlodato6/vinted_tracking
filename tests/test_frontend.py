@@ -53,3 +53,19 @@ def test_spreadthrift_assets_and_branding():
     assert "SpreadThrift" in readme_md
     assert "Third-Party Trademarks & Legal Disclaimer" in readme_md
 
+
+def test_sync_page_html_parser_data_editor_and_lot_options():
+    from pathlib import Path
+    sync_code = Path("app_pages/sync.py").read_text()
+
+    # Verify optional unassigned lot selection
+    assert "None / No Lot (Unassigned)" in sync_code
+    assert "is_none_lot" in sync_code
+
+    # Verify interactive st.data_editor replaces static dataframe
+    assert "st.data_editor(" in sync_code
+    assert "html_new_listings_editor" in sync_code
+    assert "Assigned Lot (Editable)" in sync_code or '"Assigned Lot": lot_column_config' in sync_code
+    assert "auto_assign_lot=False" in sync_code
+
+

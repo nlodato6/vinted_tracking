@@ -151,13 +151,16 @@ def render_sync_page():
         # -----------------------------------------------------------------
         with st.container(border=True):
             st.markdown("### 🏷️ Inventory Lot Assignment")
-            st.caption("Choose which inventory lot new items should be assigned to, or add a brand new lot to your spreadsheet.")
+            st.caption("Choose which inventory lot new items should be assigned to, leave unassigned, or register a new lot.")
 
-            lot_options = []
-            lot_id_map = {}
+            NO_LOT_OPTION = "⚪ None / No Lot (Unassigned)"
+            lot_options = [NO_LOT_OPTION]
+            lot_id_map = {NO_LOT_OPTION: ""}
 
             for l in all_lots:
                 lid = l.get("Lot_ID", "")
+                if not lid:
+                    continue
                 vendor = l.get("Source_Vendor", "Vendor")
                 cost = l.get("Unit_Cost", "$0.00")
                 label = f"{lid} — {vendor} ({cost}/ea)"
@@ -168,21 +171,25 @@ def render_sync_page():
 
             # Determine default index based on current session lot
             default_idx = 0
-            cur_selected = st.session_state.get("selected_lot", "LOT-001")
-            for idx, opt in enumerate(lot_options):
-                if opt.startswith(cur_selected):
-                    default_idx = idx
-                    break
+            cur_selected = st.session_state.get("selected_lot", "")
+            if cur_selected:
+                for idx, opt in enumerate(lot_options):
+                    if opt != NO_LOT_OPTION and opt.startswith(cur_selected):
+                        default_idx = idx
+                        break
+            else:
+                default_idx = 0
 
             selected_option = st.selectbox(
                 "Select Inventory Lot for New Listings:",
                 options=lot_options,
                 index=default_idx,
-                help="Select an existing lot from your sheet or choose '➕ Add New Lot...' to register a new haul.",
+                help="Select an existing lot from your sheet, choose '⚪ None / No Lot' to leave unassigned, or '➕ Add New Lot...' to register a new haul.",
                 key="sync_lot_selectbox",
             )
 
             is_new_lot = (selected_option == "➕ Add New Lot...")
+            is_none_lot = (selected_option == NO_LOT_OPTION)
 
             if is_new_lot:
                 with st.container(border=True):
@@ -208,7 +215,7 @@ def render_sync_page():
                     target_lot_id = new_lot_id.strip().upper() if new_lot_id else next_suggested_id
 
                     def on_cancel_new_lot():
-                        st.session_state["sync_lot_selectbox"] = lot_options[0]
+                        st.session_state["sync_lot_selectbox"] = NO_LOT_OPTION
 
                     btn_c1, btn_c2 = st.columns([2, 1], vertical_alignment="bottom")
                     with btn_c1:
@@ -235,8 +242,12 @@ def render_sync_page():
                             st.rerun()
                     with btn_c2:
                         st.button("Cancel", on_click=on_cancel_new_lot, type="tertiary", icon=":material/close:", width="stretch")
+            elif is_none_lot:
+                target_lot_id = ""
+                st.session_state.selected_lot = ""
+                st.info("ℹ️ **No Lot Selected**: New items will be imported without an assigned inventory lot (Unit Cost = $0.00). You can choose lots individually in the preview editor below or assign them later in Google Sheets.")
             else:
-                target_lot_id = lot_id_map.get(selected_option, st.session_state.get("selected_lot", "LOT-001"))
+                target_lot_id = lot_id_map.get(selected_option, "")
                 st.session_state.selected_lot = target_lot_id
                 selected_lot_info = next((l for l in all_lots if l.get("Lot_ID") == target_lot_id), None)
                 if selected_lot_info:
@@ -251,8 +262,9 @@ def render_sync_page():
         # -----------------------------------------------------------------
         # 2. HTML Batch File Uploader
         # -----------------------------------------------------------------
+        lot_display_str = f"**{target_lot_id}**" if target_lot_id else "*No Lot (Unassigned)*"
         st.markdown("### Upload Saved Vinted HTML Files")
-        st.caption(f"Drag and drop your saved HTML files (`Active Listings`, `Sold Listings`, `My Orders`). Newly detected items will be assigned to **{target_lot_id}**.")
+        st.caption(f"Drag and drop your saved HTML files (`Active Listings`, `Sold Listings`, `My Orders`). Newly detected items will default to {lot_display_str}.")
 
         uploaded_files = st.file_uploader(
             "Drop Vinted HTML files here",
@@ -286,11 +298,12 @@ def render_sync_page():
             st.dataframe(pd.DataFrame(files_info), width="stretch")
 
             # -------------------------------------------------------------
-            # 3. Reconciliation Preview (Zero-Duplication)
+            # 3. Reconciliation Preview (Zero-Duplication & Interactive Editing)
             # -------------------------------------------------------------
             if parsed_orders or parsed_closet:
                 st.divider()
-                st.markdown(f"#### ⚡ Reconciliation Preview (Assigned to {target_lot_id})")
+                lot_preview_header = f" (Default Lot: {target_lot_id})" if target_lot_id else " (Default Lot: None)"
+                st.markdown(f"#### ⚡ Reconciliation Preview{lot_preview_header}")
                 
                 try:
                     curr_active_titles, curr_sold_titles = get_cached_titles(sheet_id, user_creds)
@@ -299,12 +312,13 @@ def render_sync_page():
                     sold_transitions = [it for it in parsed_orders if it.item_title.strip().lower() in curr_active_titles]
                     already_sold = [it for it in parsed_orders if it.item_title.strip().lower() in curr_sold_titles]
 
-                    # Assign target lot ID to new items in preview
+                    # Assign target lot ID to new items in preview if not already populated
                     for it in new_listings:
-                        it.lot_id = target_lot_id
+                        if not it.lot_id and target_lot_id:
+                            it.lot_id = target_lot_id
 
                     p1, p2, p3 = st.columns(3)
-                    p1.metric("🟢 New Active to Add", len(new_listings), f"Lot: {target_lot_id}", border=True)
+                    p1.metric("🟢 New Active to Add", len(new_listings), f"Default Lot: {target_lot_id or 'None'}", border=True)
                     p2.metric("🔵 Active Moving to Sold", len(sold_transitions), border=True)
                     p3.metric("⚪ Duplicates Skipped", len(already_sold) + (len(parsed_closet) - len(new_listings)), border=True)
 
@@ -312,21 +326,83 @@ def render_sync_page():
                         with st.expander("View Items Moving to Sold", expanded=False):
                             st.dataframe(pd.DataFrame([{"Title": o.item_title, "Price": f"${o.sold_price:.2f}", "Order ID": o.order_id} for o in sold_transitions]), width="stretch")
 
+                    edited_listings_df = None
                     if new_listings:
-                        with st.expander(f"View New Listings to Add (Assigned to {target_lot_id})", expanded=True):
-                            st.dataframe(pd.DataFrame([{
-                                "Title": i.title, 
-                                "Brand": i.brand, 
-                                "Price": f"${i.posted_price:.2f}", 
-                                "Category": i.category,
-                                "Assigned Lot": i.lot_id,
-                            } for i in new_listings]), width="stretch")
+                        with st.expander(f"View New Listings to Add ({len(new_listings)} items — Editable)", expanded=True):
+                            st.caption("✏️ You can edit any item's **Title** or **Assigned Lot** directly in the table below before committing to Google Sheets.")
+                            
+                            # Prepare lot options for the editor dropdown
+                            available_lot_ids = [l.get("Lot_ID", "") for l in all_lots if l.get("Lot_ID")]
+                            if target_lot_id and target_lot_id not in available_lot_ids:
+                                available_lot_ids.append(target_lot_id)
+                            
+                            preview_rows = []
+                            for i in new_listings:
+                                preview_rows.append({
+                                    "Title": i.title, 
+                                    "Brand": i.brand or "", 
+                                    "Price": f"${i.posted_price:.2f}" if i.posted_price else "$0.00", 
+                                    "Category": i.category or "",
+                                    "Assigned Lot": i.lot_id or "",
+                                })
+                            preview_df = pd.DataFrame(preview_rows)
+
+                            lot_editor_options = [""] + available_lot_ids
+                            if available_lot_ids:
+                                lot_column_config = st.column_config.SelectboxColumn(
+                                    "Assigned Lot",
+                                    help="Select an inventory lot or choose None to leave unassigned.",
+                                    options=lot_editor_options,
+                                    format_func=lambda x: "⚪ None (Unassigned)" if not x else x,
+                                    required=False,
+                                    width="medium",
+                                )
+                            else:
+                                lot_column_config = st.column_config.TextColumn(
+                                    "Assigned Lot",
+                                    help="Enter a Lot ID (e.g. LOT-001) or leave blank for none.",
+                                    required=False,
+                                    width="medium",
+                                )
+
+                            edited_listings_df = st.data_editor(
+                                preview_df,
+                                column_config={
+                                    "Title": st.column_config.TextColumn(
+                                        "Title",
+                                        help="Double-click to edit the title if there was an extraction error or typo.",
+                                        required=True,
+                                        width="large",
+                                    ),
+                                    "Brand": st.column_config.TextColumn(
+                                        "Brand",
+                                        disabled=True,
+                                        width="small",
+                                    ),
+                                    "Price": st.column_config.TextColumn(
+                                        "Price",
+                                        disabled=True,
+                                        width="small",
+                                    ),
+                                    "Category": st.column_config.TextColumn(
+                                        "Category",
+                                        disabled=True,
+                                        width="medium",
+                                    ),
+                                    "Assigned Lot": lot_column_config,
+                                },
+                                disabled=["Brand", "Price", "Category"],
+                                hide_index=True,
+                                num_rows="fixed",
+                                width="stretch",
+                                key="html_new_listings_editor",
+                            )
 
                     if st.button("🚀 Commit & Synchronize to Google Sheets", type="primary", width="stretch"):
                         try:
                             with st.spinner("Synchronizing to Google Sheets..."):
                                 # 1. If new lot, create it in Inventory_Lots if not already created
-                                if is_new_lot:
+                                if is_new_lot and target_lot_id:
                                     engine.add_inventory_lot(
                                         lot_id=target_lot_id,
                                         purchase_date=new_purchase_date.strftime("%Y-%m-%d"),
@@ -339,21 +415,33 @@ def render_sync_page():
                                 
                                 st.session_state.selected_lot = target_lot_id
 
-                                # 2. Assign target lot to all parsed closet items
+                                # 2. Apply user edits from st.data_editor to new_listings and parsed_closet
+                                if edited_listings_df is not None and not edited_listings_df.empty:
+                                    for idx, row in edited_listings_df.iterrows():
+                                        if idx < len(new_listings):
+                                            edited_title = str(row.get("Title", "")).strip()
+                                            raw_lot = row.get("Assigned Lot")
+                                            edited_lot = "" if (pd.isna(raw_lot) or str(raw_lot).strip() in ("", "None", "⚪ None (Unassigned)", "nan")) else str(raw_lot).strip()
+                                            if edited_title:
+                                                new_listings[idx].title = edited_title
+                                            new_listings[idx].lot_id = edited_lot
+
+                                # 3. For any other items in parsed_closet, set target_lot_id only if unassigned and target_lot_id is non-empty
                                 for it in parsed_closet:
-                                    if not it.lot_id or is_new_lot or it in new_listings:
-                                        it.lot_id = target_lot_id
+                                    if it not in new_listings:
+                                        if not it.lot_id and target_lot_id:
+                                            it.lot_id = target_lot_id
 
-                                # 3. Synchronize listings and orders
-                                res_orders = engine.sync_orders(parsed_orders, default_lot=target_lot_id) if parsed_orders else {"synced_orders": 0}
-                                res_closet = engine.sync_listings(parsed_closet) if parsed_closet else {"updated": 0, "created": 0}
+                                # 4. Synchronize listings and orders
+                                res_orders = engine.sync_orders(parsed_orders, default_lot=target_lot_id, auto_assign_lot=False) if parsed_orders else {"synced_orders": 0}
+                                res_closet = engine.sync_listings(parsed_closet, auto_assign_lot=False) if parsed_closet else {"updated": 0, "created": 0}
 
-                                # 4. Record event and clear cache
-                                record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id})", client=client)
-                                log_event(u_email, "html_import", f"HTML import: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id})", spreadsheet_id=st.session_state.get("spreadsheet_id"))
+                                # 5. Record event and clear cache
+                                record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id or 'None'})", client=client)
+                                log_event(u_email, "html_import", f"HTML import: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id or 'None'})", spreadsheet_id=st.session_state.get("spreadsheet_id"))
                                 st.cache_data.clear()
 
-                            lot_msg = f" (New lot {target_lot_id} created in Inventory_Lots)" if is_new_lot else f" (Assigned to {target_lot_id})"
+                            lot_msg = f" (New lot {target_lot_id} created in Inventory_Lots)" if is_new_lot else (f" (Assigned to {target_lot_id})" if target_lot_id else " (No lot assigned)")
                             st.success(f"✔ Sync Complete! {res_orders.get('synced_orders', 0)} orders synced, {res_closet.get('created', 0)} listings added{lot_msg}, {res_closet.get('updated', 0)} listings refreshed.")
                             st.balloons()
                             time.sleep(1.5)

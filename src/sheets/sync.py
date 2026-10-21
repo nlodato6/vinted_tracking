@@ -635,7 +635,7 @@ class SheetsSyncEngine:
 
         return moved_count
 
-    def sync_listings(self, scraped_items: List[ItemListing]) -> Dict[str, int]:
+    def sync_listings(self, scraped_items: List[ItemListing], auto_assign_lot: bool = True) -> Dict[str, int]:
         """
         Updates live prices, price drop tracking, and statuses of active listings in Item_Listings.
         When an item sells or has sold status, it moves/appends to Sold_Items.
@@ -765,7 +765,7 @@ class SheetsSyncEngine:
                     max_sku_num += 1
                     new_sku = f"SKU-{max_sku_num}"
                     next_sold_row_idx = len(sold_rows) + len(new_sold_rows) + 1
-                    assigned_lot = item.lot_id or date_to_lot_id.get(item_date_str, "")
+                    assigned_lot = item.lot_id or (date_to_lot_id.get(item_date_str, "") if auto_assign_lot else "")
                     col_lot = chr(ord('A') + lot_id_col_idx)
 
                     hist_str = ""
@@ -836,7 +836,7 @@ class SheetsSyncEngine:
                     cur_lot = existing_data[lot_id_col_idx].strip() if len(existing_data) > lot_id_col_idx else ""
                     cur_date = existing_data[date_col_idx].strip() if len(existing_data) > date_col_idx else ""
                     row_dt = normalize_date_str(cur_date) or item_date_str
-                    if not cur_lot and row_dt in date_to_lot_id:
+                    if auto_assign_lot and not cur_lot and row_dt in date_to_lot_id:
                         col_lot = chr(ord('A') + lot_id_col_idx)
                         listing_updates.append({"range": f"{col_lot}{in_active_row}", "values": [[date_to_lot_id[row_dt]]]})
 
@@ -852,7 +852,7 @@ class SheetsSyncEngine:
                     max_sku_num += 1
                     new_sku = f"SKU-{max_sku_num}"
                     new_active_idx = len(listings_rows) + len(new_active_rows) + 1
-                    assigned_lot = item.lot_id or date_to_lot_id.get(item_date_str, "")
+                    assigned_lot = item.lot_id or (date_to_lot_id.get(item_date_str, "") if auto_assign_lot else "")
                     col_lot = chr(ord('A') + lot_id_col_idx)
 
                     hist_str = ""
@@ -896,7 +896,8 @@ class SheetsSyncEngine:
         moved_to_sold_count += reconciled
 
         # Backfill lot IDs by purchase date
-        self.auto_assign_lots_by_date()
+        if auto_assign_lot:
+            self.auto_assign_lots_by_date()
 
         # Update Inventory_Lots: unit costs, items processed, status (Completed when all sold)
         self.sync_lots()
@@ -907,7 +908,7 @@ class SheetsSyncEngine:
             "moved_to_sold": moved_to_sold_count,
         }
 
-    def sync_orders(self, scraped_orders: List[SalesOrder], default_lot: str = "") -> Dict[str, int]:
+    def sync_orders(self, scraped_orders: List[SalesOrder], default_lot: str = "", auto_assign_lot: bool = True) -> Dict[str, int]:
         """
         Reconciles scraped completed orders directly with Sold_Items.
         Moves matching Item_Listings to Sold_Items, or appends directly if not currently in active listings.
@@ -1021,7 +1022,7 @@ class SheetsSyncEngine:
             max_sku_num += 1
             new_sku = order.item_sku or f"SKU-{max_sku_num}"
             next_row = cur_sold_count + len(batch_new_rows) + 1
-            assigned_lot = default_lot or date_to_lot_id.get(sale_date_str, "")
+            assigned_lot = default_lot or (date_to_lot_id.get(sale_date_str, "") if auto_assign_lot else "")
 
             new_sold_data = [
                 new_sku,                                                      # A: Item_SKU
@@ -1058,8 +1059,6 @@ class SheetsSyncEngine:
             ws_sold.batch_update(batch_cell_updates, value_input_option="USER_ENTERED")
         if batch_new_rows:
             ws_sold.append_rows(batch_new_rows, value_input_option="USER_ENTERED")
-            synced_count += 1
-            existing_order_ids.add(order.order_id.strip())
 
         # Also sweep any listings marked Sold
         self.reconcile_sold_listings()
