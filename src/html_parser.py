@@ -66,12 +66,39 @@ def infer_brand(title: str, card_text: str = "") -> str:
     return ""
 
 
-def parse_closet_html(html_content_or_path: Union[str, Path], default_lot: str = "") -> List[ItemListing]:
+def detect_html_type(content: Union[str, bytes]) -> str:
     """
-    Parses a saved Vinted closet/profile HTML file or string.
+    Detects whether uploaded Vinted HTML content is:
+    - 'orders': My orders / sales transaction history
+    - 'sold_closet': Public or member profile sold items tab
+    - 'active_closet': Public or member profile active listings tab
+    - 'unknown': Unrecognized HTML
+    """
+    text = content.decode("utf-8", errors="ignore") if isinstance(content, bytes) else str(content)
+
+    if "my-orders-item" in text or 'data-testid="my-orders-item"' in text or "/inbox/01" in text:
+        return "orders"
+
+    has_items = bool(re.search(r"/items/\d+", text) or "product-item-id-" in text)
+    if not has_items:
+        return "unknown"
+
+    sold_count = len(re.findall(r"\b(?:Sold|Closed)\b", text, re.IGNORECASE))
+    bump_count = len(re.findall(r"\bBump\b", text, re.IGNORECASE))
+
+    if "member profile _ Vinted_sold" in text or (sold_count > 10 and bump_count == 0):
+        return "sold_closet"
+    return "active_closet"
+
+
+def parse_closet_html(html_content_or_path: Union[str, Path, bytes], default_lot: str = "") -> List[ItemListing]:
+    """
+    Parses a saved Vinted closet/profile HTML file, string, or bytes.
     Extracts all listings with title, asking price, Vinted ID, favorites, views, and status.
     """
-    if isinstance(html_content_or_path, Path) or (isinstance(html_content_or_path, str) and "\n" not in html_content_or_path and Path(html_content_or_path).exists()):
+    if isinstance(html_content_or_path, bytes):
+        html = html_content_or_path.decode("utf-8", errors="ignore")
+    elif isinstance(html_content_or_path, Path) or (isinstance(html_content_or_path, str) and "\n" not in html_content_or_path and Path(html_content_or_path).exists()):
         with open(html_content_or_path, "r", encoding="utf-8", errors="ignore") as f:
             html = f.read()
     else:
@@ -165,12 +192,14 @@ def parse_closet_html(html_content_or_path: Union[str, Path], default_lot: str =
     return items
 
 
-def parse_orders_html(html_content_or_path: Union[str, Path]) -> List[SalesOrder]:
+def parse_orders_html(html_content_or_path: Union[str, Path, bytes]) -> List[SalesOrder]:
     """
     Parses a saved Vinted 'My orders' / sales history HTML page.
     Extracts Order IDs, item titles, sold prices, and sale dates.
     """
-    if isinstance(html_content_or_path, Path) or (isinstance(html_content_or_path, str) and "\n" not in html_content_or_path and Path(html_content_or_path).exists()):
+    if isinstance(html_content_or_path, bytes):
+        html = html_content_or_path.decode("utf-8", errors="ignore")
+    elif isinstance(html_content_or_path, Path) or (isinstance(html_content_or_path, str) and "\n" not in html_content_or_path and Path(html_content_or_path).exists()):
         with open(html_content_or_path, "r", encoding="utf-8", errors="ignore") as f:
             html = f.read()
     else:
