@@ -147,12 +147,6 @@ with st.sidebar:
         sheet_url = f"https://docs.google.com/spreadsheets/d/{st.session_state.spreadsheet_id}/edit"
         st.sidebar.link_button("🔗 Open Live Sheet", sheet_url, width="stretch")
 
-    st.sidebar.divider()
-    st.sidebar.markdown("### 🏷️ Inventory Lot")
-    lot_input = st.sidebar.text_input("Default Lot ID", value=st.session_state.selected_lot)
-    if lot_input:
-        st.session_state.selected_lot = lot_input.strip()
-
 # -----------------------------------------------------------------------------
 # Multi-Page Navigation
 # -----------------------------------------------------------------------------
