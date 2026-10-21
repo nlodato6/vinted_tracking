@@ -140,8 +140,7 @@ if not st.session_state.authenticated:
         st.divider()
 
         # 2. Manual Login (Fallback for Streamlit Cloud & Testing)
-        with st.container(border=True):
-            st.markdown("#### 🔐 Manual Login (Fallback)")
+        with st.expander("🔐 Manual Login (Fallback)", expanded=False):
             st.caption("Sign in with email and password for manual access, testing, or if Google OAuth is unconfigured.")
             manual_email = st.text_input("Email", value="nicashlod@gmail.com", key="manual_login_email")
             manual_pass = st.text_input("Password", type="password", key="manual_login_pass")
