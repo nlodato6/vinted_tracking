@@ -7,6 +7,12 @@ from src.telemetry import (
     log_session,
     log_event,
     log_error,
+    log_feedback,
+    get_feedback_summary,
+    get_feedback_list,
+    update_feedback_status,
+    delete_feedback,
+    sync_feedback_to_google_sheet,
     get_telemetry_summary,
     resolve_error,
     resolve_all_errors,
@@ -62,3 +68,64 @@ def test_admin_config_email_list():
     assert "tsavoie90@gmail.com" in settings.admin_email_list
     assert "nicashlod@gmail.com" in settings.admin_email_list
     assert len(settings.admin_email_list) >= 2
+
+
+def test_log_feedback_and_summary():
+    fid1 = log_feedback("seller1@vinted.com", "Feature Request", 5, "Add automated label printing", sync_to_sheets=False)
+    fid2 = log_feedback("seller2@vinted.com", "Bug Report", 3, "Image upload took two clicks", sync_to_sheets=False)
+
+    summary = get_feedback_summary()
+    assert summary["total_feedback"] == 2
+    assert summary["new_feedback"] == 2
+    assert summary["avg_rating"] == 4.0
+    assert summary["by_category"]["Feature Request"] == 1
+    assert summary["by_category"]["Bug Report"] == 1
+    assert summary["unsynced_count"] == 2
+
+    telemetry_summary = get_telemetry_summary()
+    assert telemetry_summary["new_feedback"] == 2
+    assert telemetry_summary["total_feedback"] == 2
+
+
+def test_feedback_status_filtering_and_notes():
+    fid = log_feedback("user@example.com", "General Feedback", 5, "Loving the new SpreadThrift branding!", sync_to_sheets=False)
+    items = get_feedback_list(status_filter="new")
+    assert len(items) == 1
+    assert items[0]["id"] == fid
+
+    # Update status to reviewed with note
+    update_feedback_status(fid, "reviewed", admin_notes="Included in monthly newsletter shoutout")
+
+    reviewed_items = get_feedback_list(status_filter="reviewed")
+    assert len(reviewed_items) == 1
+    assert reviewed_items[0]["admin_notes"] == "Included in monthly newsletter shoutout"
+
+    # Category filter
+    feat_items = get_feedback_list(category_filter="Feature Request")
+    assert len(feat_items) == 0
+
+    gen_items = get_feedback_list(category_filter="General Feedback")
+    assert len(gen_items) == 1
+
+    # Delete
+    delete_feedback(fid)
+    assert len(get_feedback_list()) == 0
+
+
+def test_sync_feedback_to_google_sheet(monkeypatch):
+    log_feedback("offline_user@vinted.com", "Feature Request", 4, "Sync while offline", sync_to_sheets=False)
+    
+    # Mock Google Sheets append to avoid network calls in unit tests
+    def mock_append(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr("src.telemetry.append_feedback_to_google_sheet", mock_append)
+
+    res = sync_feedback_to_google_sheet()
+    assert res["success"] is True
+    assert res["synced"] == 1
+    assert res["total_pending"] == 1
+
+    summary = get_feedback_summary()
+    assert summary["unsynced_count"] == 0
+

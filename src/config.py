@@ -60,6 +60,10 @@ class Settings(BaseSettings):
         default="spreadthrift-admin-2026",
         description="Master passcode for direct Admin portal login",
     )
+    admin_sheet_id: str = Field(
+        default="1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg",
+        description="Google Spreadsheet ID for admin metrics, error logs, and user feedback",
+    )
 
     @property
     def admin_email_list(self) -> list[str]:

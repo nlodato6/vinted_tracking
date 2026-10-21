@@ -61,10 +61,26 @@ def init_telemetry_db():
                 status TEXT DEFAULT 'unresolved'
             );
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                user_email TEXT NOT NULL,
+                category TEXT NOT NULL,
+                rating INTEGER DEFAULT 5,
+                message TEXT NOT NULL,
+                spreadsheet_id TEXT,
+                status TEXT DEFAULT 'new',
+                admin_notes TEXT DEFAULT '',
+                synced_to_sheets INTEGER DEFAULT 0
+            );
+        """)
         # Indexes for fast querying
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON user_events(timestamp);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON user_events(event_type);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_errors_status ON app_errors(status);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_ts ON user_feedback(timestamp);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_status ON user_feedback(status);")
     conn.close()
 
 
@@ -191,12 +207,19 @@ def get_telemetry_summary() -> Dict[str, Any]:
             LIMIT 50
         """)
         users_list = [dict(row) for row in c.fetchall()]
+        # 10. Feedback metrics
+        c.execute("SELECT COUNT(*) FROM user_feedback WHERE status = 'new'")
+        new_feedback = c.fetchone()[0] or 0
+        c.execute("SELECT COUNT(*) FROM user_feedback")
+        total_feedback = c.fetchone()[0] or 0
 
         return {
             "total_users": total_users,
             "active_today": active_today,
             "total_events": total_events,
             "unresolved_errors": unresolved_errors,
+            "new_feedback": new_feedback,
+            "total_feedback": total_feedback,
             "event_breakdown": event_breakdown,
             "daily_timeline": daily_timeline,
             "recent_events": recent_events,
@@ -238,4 +261,267 @@ def clear_all_telemetry():
         conn.execute("DELETE FROM user_sessions")
         conn.execute("DELETE FROM user_events")
         conn.execute("DELETE FROM app_errors")
+        conn.execute("DELETE FROM user_feedback")
     conn.close()
+
+
+# -----------------------------------------------------------------------------
+# User Feedback & Google Sheets Storage Module
+# -----------------------------------------------------------------------------
+FEEDBACK_SHEET_TITLE = "User_Feedback"
+FEEDBACK_HEADERS = [
+    "Feedback ID",
+    "Timestamp",
+    "User Email",
+    "Category",
+    "Rating",
+    "Message",
+    "User Spreadsheet ID",
+    "Status",
+    "Admin Notes",
+]
+
+
+def append_feedback_to_google_sheet(
+    feedback_id: int,
+    timestamp: str,
+    user_email: str,
+    category: str,
+    rating: int,
+    message: str,
+    spreadsheet_id: Optional[str] = None,
+    status: str = "new",
+    admin_notes: str = "",
+    target_sheet_id: Optional[str] = None,
+) -> bool:
+    """Appends a feedback entry to the User_Feedback worksheet in Google Sheets."""
+    try:
+        from src.sheets.client import GoogleSheetsClient
+        sheet_id = target_sheet_id or settings.admin_sheet_id or settings.google_sheet_id
+        if not sheet_id:
+            return False
+
+        client = GoogleSheetsClient(sheet_id=sheet_id)
+        spreadsheet = client.get_spreadsheet()
+
+        # Check if User_Feedback worksheet exists; if not create it with headers
+        try:
+            worksheet = spreadsheet.worksheet(FEEDBACK_SHEET_TITLE)
+        except Exception:
+            worksheet = spreadsheet.add_worksheet(title=FEEDBACK_SHEET_TITLE, rows=500, cols=len(FEEDBACK_HEADERS))
+            worksheet.append_row(FEEDBACK_HEADERS, value_input_option="USER_ENTERED")
+            try:
+                worksheet.format("A1:I1", {"textFormat": {"bold": True}})
+            except Exception:
+                pass
+
+        # Ensure headers exist if sheet was blank
+        try:
+            existing_vals = worksheet.get_all_values()
+            if not existing_vals:
+                worksheet.append_row(FEEDBACK_HEADERS, value_input_option="USER_ENTERED")
+        except Exception:
+            pass
+
+        row_values = [
+            int(feedback_id),
+            str(timestamp),
+            str(user_email),
+            str(category),
+            f"{rating} / 5",
+            str(message),
+            str(spreadsheet_id or ""),
+            str(status),
+            str(admin_notes or ""),
+        ]
+        worksheet.append_row(row_values, value_input_option="USER_ENTERED")
+        return True
+    except Exception as e:
+        print(f"[Telemetry Warning] Failed to append feedback to Google Sheet: {e}")
+        return False
+
+
+def sync_feedback_to_google_sheet(target_sheet_id: Optional[str] = None) -> Dict[str, Any]:
+    """Syncs any un-synced feedback items to Google Sheets."""
+    conn = _get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM user_feedback WHERE synced_to_sheets = 0 ORDER BY id ASC")
+    unsynced = [dict(row) for row in c.fetchall()]
+    conn.close()
+
+    if not unsynced:
+        return {
+            "synced": 0,
+            "total_pending": 0,
+            "success": True,
+            "message": "All feedback entries are already synced to Google Sheets.",
+        }
+
+    success_count = 0
+    for item in unsynced:
+        ok = append_feedback_to_google_sheet(
+            feedback_id=item["id"],
+            timestamp=item["timestamp"],
+            user_email=item["user_email"],
+            category=item["category"],
+            rating=item["rating"],
+            message=item["message"],
+            spreadsheet_id=item.get("spreadsheet_id"),
+            status=item.get("status", "new"),
+            admin_notes=item.get("admin_notes", ""),
+            target_sheet_id=target_sheet_id,
+        )
+        if ok:
+            conn = _get_connection()
+            with conn:
+                conn.execute("UPDATE user_feedback SET synced_to_sheets = 1 WHERE id = ?", (item["id"],))
+            conn.close()
+            success_count += 1
+        else:
+            break
+
+    return {
+        "synced": success_count,
+        "total_pending": len(unsynced),
+        "success": success_count == len(unsynced),
+        "message": f"Successfully synced {success_count} of {len(unsynced)} feedback entries to Google Sheets.",
+    }
+
+
+def log_feedback(
+    user_email: str,
+    category: str,
+    rating: int,
+    message: str,
+    spreadsheet_id: Optional[str] = None,
+    sync_to_sheets: bool = True,
+) -> int:
+    """Logs a user feedback entry to SQLite and attempts to append to Google Sheets."""
+    conn = _get_connection()
+    try:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO user_feedback (timestamp, user_email, category, rating, message, spreadsheet_id, status, synced_to_sheets)
+                VALUES (?, ?, ?, ?, ?, ?, 'new', 0)
+                """,
+                (ts, user_email.strip().lower(), category.strip(), rating, message.strip(), spreadsheet_id or ""),
+            )
+            feedback_id = cursor.lastrowid
+
+            # Also log as a user event for telemetry feed
+            conn.execute(
+                """
+                INSERT INTO user_events (timestamp, user_email, event_type, event_details, spreadsheet_id)
+                VALUES (?, ?, 'feedback_submitted', ?, ?)
+                """,
+                (ts, user_email.strip().lower(), f"{category} ({rating}★): {message[:60]}", spreadsheet_id or ""),
+            )
+
+        # Attempt immediate Google Sheets append
+        if sync_to_sheets:
+            ok = append_feedback_to_google_sheet(
+                feedback_id=feedback_id,
+                timestamp=ts,
+                user_email=user_email,
+                category=category,
+                rating=rating,
+                message=message,
+                spreadsheet_id=spreadsheet_id,
+                status="new",
+            )
+            if ok:
+                with conn:
+                    conn.execute("UPDATE user_feedback SET synced_to_sheets = 1 WHERE id = ?", (feedback_id,))
+
+        return feedback_id
+    finally:
+        conn.close()
+
+
+def update_feedback_status(feedback_id: int, new_status: str, admin_notes: Optional[str] = None):
+    """Updates status and optional notes for a feedback item."""
+    conn = _get_connection()
+    with conn:
+        if admin_notes is not None:
+            conn.execute(
+                "UPDATE user_feedback SET status = ?, admin_notes = ? WHERE id = ?",
+                (new_status, admin_notes, feedback_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE user_feedback SET status = ? WHERE id = ?",
+                (new_status, feedback_id),
+            )
+    conn.close()
+
+
+def delete_feedback(feedback_id: int):
+    """Deletes a feedback record from the database."""
+    conn = _get_connection()
+    with conn:
+        conn.execute("DELETE FROM user_feedback WHERE id = ?", (feedback_id,))
+    conn.close()
+
+
+def get_feedback_list(
+    status_filter: Optional[str] = None,
+    category_filter: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """Retrieves feedback items filtered by status or category."""
+    conn = _get_connection()
+    try:
+        c = conn.cursor()
+        query = "SELECT * FROM user_feedback WHERE 1=1"
+        params = []
+        if status_filter and status_filter.lower() != "all":
+            query += " AND status = ?"
+            params.append(status_filter.lower())
+        if category_filter and category_filter.lower() != "all":
+            query += " AND category = ?"
+            params.append(category_filter)
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        c.execute(query, tuple(params))
+        return [dict(row) for row in c.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_feedback_summary() -> Dict[str, Any]:
+    """Computes feedback KPIs for the Admin Dashboard."""
+    conn = _get_connection()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM user_feedback")
+        total_feedback = c.fetchone()[0] or 0
+
+        c.execute("SELECT COUNT(*) FROM user_feedback WHERE status = 'new'")
+        new_feedback = c.fetchone()[0] or 0
+
+        c.execute("SELECT AVG(rating) FROM user_feedback")
+        avg_rating_raw = c.fetchone()[0]
+        avg_rating = round(float(avg_rating_raw), 1) if avg_rating_raw is not None else 0.0
+
+        c.execute("SELECT category, COUNT(*) as cnt FROM user_feedback GROUP BY category")
+        by_category = {row["category"]: row["cnt"] for row in c.fetchall()}
+
+        c.execute("SELECT rating, COUNT(*) as cnt FROM user_feedback GROUP BY rating ORDER BY rating DESC")
+        rating_dist = {row["rating"]: row["cnt"] for row in c.fetchall()}
+
+        c.execute("SELECT COUNT(*) FROM user_feedback WHERE synced_to_sheets = 0")
+        unsynced_count = c.fetchone()[0] or 0
+
+        return {
+            "total_feedback": total_feedback,
+            "new_feedback": new_feedback,
+            "avg_rating": avg_rating,
+            "by_category": by_category,
+            "rating_dist": rating_dist,
+            "unsynced_count": unsynced_count,
+        }
+    finally:
+        conn.close()

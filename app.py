@@ -6,7 +6,7 @@ import streamlit as st
 
 from src.config import settings
 from src.auth import is_oauth_configured, get_authorization_url, exchange_code_for_credentials
-from src.telemetry import log_session, log_error, log_event
+from src.telemetry import log_session, log_error, log_event, log_feedback
 
 # Page Configuration
 LOGO_PATH = "assets/invintory.png"
@@ -197,6 +197,49 @@ with st.sidebar:
     if st.session_state.spreadsheet_id:
         sheet_url = f"https://docs.google.com/spreadsheets/d/{st.session_state.spreadsheet_id}/edit"
         st.sidebar.link_button("🔗 Open Live Sheet", sheet_url, width="stretch")
+
+    st.sidebar.divider()
+    # Feedback & User Voice Module
+    with st.sidebar.popover("💬 Feedback & Requests", icon=":material/rate_review:", width="stretch"):
+        st.markdown("#### 💬 Share Your Feedback")
+        st.caption("Suggest features, report bugs, or share thoughts directly with the SpreadThrift team.")
+
+        fb_category = st.selectbox(
+            "Feedback Type",
+            ["Feature Request", "Bug Report", "General Feedback", "Other"],
+            key="sb_fb_category",
+        )
+
+        st.markdown("**Your Rating**")
+        fb_stars = st.feedback("stars", key="sb_fb_stars")
+        rating_val = (fb_stars + 1) if fb_stars is not None else 5
+
+        fb_message = st.text_area(
+            "Your Message",
+            placeholder="Tell us what you'd like added or what needs fixing...",
+            height=90,
+            key="sb_fb_message",
+        )
+
+        st.caption(f"Submitting as: `{u_email}`")
+
+        if st.button("Send Feedback", icon=":material/send:", type="primary", width="stretch", key="sb_fb_submit_btn"):
+            if not fb_message.strip():
+                st.warning("Please type a short message before sending.")
+            else:
+                try:
+                    log_feedback(
+                        user_email=u_email,
+                        category=fb_category,
+                        rating=rating_val,
+                        message=fb_message.strip(),
+                        spreadsheet_id=st.session_state.spreadsheet_id,
+                        sync_to_sheets=True,
+                    )
+                    st.toast("🎉 Thank you! Your feedback has been received.", icon=":material/favorite:")
+                    st.success("✔ Feedback submitted! Recorded in Admin Hub & Google Sheets.")
+                except Exception as e:
+                    st.error(f"Could not submit feedback: {e}")
 
     st.sidebar.divider()
     with st.sidebar.expander("⚖️ Legal & Trademarks"):
