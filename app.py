@@ -59,6 +59,15 @@ def show_terms_dialog():
     else:
         st.info("Terms of Service document is available at TERMS_OF_SERVICE.md")
 
+
+@st.dialog("📖 SpreadThrift User & Feature Guide", width="large")
+def show_user_guide_dialog():
+    guide_file = settings.base_dir / "USER_GUIDE.md"
+    if guide_file.exists():
+        st.markdown(guide_file.read_text(encoding="utf-8"))
+    else:
+        st.info("User Guide document is available at USER_GUIDE.md")
+
 # -----------------------------------------------------------------------------
 # OAuth Callback Handler
 # -----------------------------------------------------------------------------
@@ -161,16 +170,19 @@ if not st.session_state.authenticated:
         """)
 
     st.divider()
-    leg_col1, leg_col2, leg_col3 = st.columns([2.5, 1, 1], vertical_alignment="center")
+    leg_col1, leg_col2, leg_col3, leg_col4 = st.columns([2.2, 1, 1, 1], vertical_alignment="center")
     with leg_col1:
         st.caption(
             "⚖️ **Third-Party Trademark & Legal Disclaimer**: Independent tool. Not affiliated with, authorized, or endorsed by "
             "Vinted, Google LLC, or Meta Platforms, Inc. All trademarks belong to their respective owners."
         )
     with leg_col2:
+        if st.button("📖 User Guide", width="stretch", key="login_guide_btn", icon=":material/menu_book:"):
+            show_user_guide_dialog()
+    with leg_col3:
         if st.button("🛡️ Privacy Policy", width="stretch", key="login_privacy_btn"):
             show_privacy_dialog()
-    with leg_col3:
+    with leg_col4:
         if st.button("📜 Terms of Service", width="stretch", key="login_terms_btn"):
             show_terms_dialog()
 
@@ -226,6 +238,10 @@ with st.sidebar:
         st.sidebar.link_button("🔗 Open Live Sheet", sheet_url, width="stretch")
 
     st.sidebar.divider()
+    # Documentation & User Guide
+    if st.sidebar.button("📖 User Guide & Manual", icon=":material/menu_book:", width="stretch", key="sb_user_guide_btn"):
+        show_user_guide_dialog()
+
     # Feedback & User Voice Module
     with st.sidebar.popover("💬 Feedback & Requests", icon=":material/rate_review:", width="stretch"):
         st.markdown("#### 💬 Share Your Feedback")
