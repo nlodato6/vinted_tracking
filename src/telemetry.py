@@ -8,7 +8,7 @@ import sqlite3
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from src.config import settings
 
@@ -79,10 +79,22 @@ def init_telemetry_db():
             CREATE TABLE IF NOT EXISTS user_preferences (
                 user_email TEXT PRIMARY KEY,
                 spreadsheet_id TEXT,
+                gmail_user TEXT,
+                gmail_app_password TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        # Ensure migration columns if table previously created without them
+        try:
+            conn.execute("ALTER TABLE user_preferences ADD COLUMN gmail_user TEXT;")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE user_preferences ADD COLUMN gmail_app_password TEXT;")
+        except Exception:
+            pass
+
         # Indexes for fast querying
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON user_events(timestamp);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON user_events(event_type);")
@@ -565,4 +577,92 @@ def get_user_spreadsheet(user_email: str) -> Optional[str]:
         return row[0] if row and row[0] else None
     except Exception:
         return None
+
+
+def save_user_email_credentials(user_email: str, gmail_user: str, gmail_app_password: str):
+    """Persists user email credentials in local preferences for automatic reuse."""
+    try:
+        conn = _get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO user_preferences (user_email, gmail_user, gmail_app_password, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_email) DO UPDATE SET 
+                    gmail_user = excluded.gmail_user,
+                    gmail_app_password = excluded.gmail_app_password,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (user_email.strip().lower(), gmail_user.strip(), gmail_app_password.strip()),
+            )
+        conn.close()
+    except Exception as e:
+        print(f"[Telemetry Warning] Failed to save user email credentials: {e}")
+
+
+def get_user_email_credentials(user_email: str) -> Tuple[Optional[str], Optional[str]]:
+    """Retrieves saved Gmail address and App Password for a user."""
+    try:
+        conn = _get_connection()
+        c = conn.cursor()
+        c.execute(
+            "SELECT gmail_user, gmail_app_password FROM user_preferences WHERE user_email = ?",
+            (user_email.strip().lower(),),
+        )
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return (row[0] or None, row[1] or None)
+        return (None, None)
+    except Exception:
+        return (None, None)
+
+
+def clear_user_email_credentials(user_email: str):
+    """Clears saved Gmail credentials for a user."""
+    try:
+        conn = _get_connection()
+        with conn:
+            conn.execute(
+                "UPDATE user_preferences SET gmail_user = NULL, gmail_app_password = NULL, updated_at = CURRENT_TIMESTAMP WHERE user_email = ?",
+                (user_email.strip().lower(),),
+            )
+        conn.close()
+    except Exception as e:
+        print(f"[Telemetry Warning] Failed to clear user email credentials: {e}")
+
+
+def save_email_credentials_to_env(gmail_user: str, gmail_app_password: str):
+    """Updates or adds GMAIL_USER and GMAIL_APP_PASSWORD in the local .env file."""
+    env_path = settings.base_dir / ".env"
+    try:
+        lines = []
+        if env_path.exists():
+            lines = env_path.read_text(encoding="utf-8").splitlines()
+
+        found_user = False
+        found_pwd = False
+        new_lines = []
+
+        for line in lines:
+            if line.startswith("GMAIL_USER="):
+                new_lines.append(f"GMAIL_USER={gmail_user.strip()}")
+                found_user = True
+            elif line.startswith("GMAIL_APP_PASSWORD="):
+                new_lines.append(f"GMAIL_APP_PASSWORD={gmail_app_password.strip()}")
+                found_pwd = True
+            else:
+                new_lines.append(line)
+
+        if not found_user:
+            new_lines.append(f"GMAIL_USER={gmail_user.strip()}")
+        if not found_pwd:
+            new_lines.append(f"GMAIL_APP_PASSWORD={gmail_app_password.strip()}")
+
+        env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        os.environ["GMAIL_USER"] = gmail_user.strip()
+        os.environ["GMAIL_APP_PASSWORD"] = gmail_app_password.strip()
+    except Exception as e:
+        print(f"[Warning] Failed to update .env: {e}")
+
 

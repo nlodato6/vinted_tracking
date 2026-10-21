@@ -12,7 +12,14 @@ from src.sheets.sync import parse_price
 from src.html_parser import parse_closet_html, parse_orders_html, detect_html_type
 from src.email_parser import fetch_vinted_emails_via_imap
 from src.notifications import record_html_parse_event, record_email_parse_event, get_sync_status
-from src.telemetry import log_event, log_error
+from src.telemetry import (
+    log_event,
+    log_error,
+    get_user_email_credentials,
+    save_user_email_credentials,
+    clear_user_email_credentials,
+    save_email_credentials_to_env,
+)
 
 
 def get_sheets_client() -> GoogleSheetsClient:
@@ -372,8 +379,34 @@ def render_sync_page():
         e1, e2 = st.columns([1, 1])
 
         with e1:
-            gmail_user_input = st.text_input("Gmail Address", value=os.getenv("GMAIL_USER", "tsavoie90@gmail.com"))
-            gmail_pass_input = st.text_input("Google App Password (16 characters)", type="password", value=os.getenv("GMAIL_APP_PASSWORD", ""), help="16-character passcode generated at myaccount.google.com/apppasswords")
+            saved_u, saved_p = get_user_email_credentials(u_email)
+            default_user = saved_u or os.getenv("GMAIL_USER", "tsavoie90@gmail.com")
+            default_pwd = saved_p or os.getenv("GMAIL_APP_PASSWORD", "")
+
+            gmail_user_input = st.text_input("Gmail Address", value=default_user)
+            gmail_pass_input = st.text_input(
+                "Google App Password (16 characters)",
+                type="password",
+                value=default_pwd,
+                help="16-character passcode generated at myaccount.google.com/apppasswords"
+            )
+
+            col_rem1, col_rem2 = st.columns([1.5, 1], vertical_alignment="center")
+            with col_rem1:
+                remember_creds = st.checkbox(
+                    "💾 Remember password on this machine",
+                    value=True,
+                    help="Saves your password in local preferences so you don't have to enter it again."
+                )
+            with col_rem2:
+                if saved_p or (os.getenv("GMAIL_APP_PASSWORD") and os.getenv("GMAIL_APP_PASSWORD") == default_pwd):
+                    if st.button("🗑️ Forget Password", help="Removes your saved password from local storage"):
+                        clear_user_email_credentials(u_email)
+                        save_email_credentials_to_env(gmail_user_input, "")
+                        st.success("Saved password removed!")
+                        time.sleep(1)
+                        st.rerun()
+
             col_m1, col_m2 = st.columns(2)
             with col_m1:
                 scan_location = st.selectbox(
@@ -391,6 +424,10 @@ def render_sync_page():
                 if not gmail_user_input or not gmail_pass_input:
                     st.error("Please provide your Gmail address and 16-character App Password.")
                 else:
+                    if remember_creds:
+                        save_user_email_credentials(u_email, gmail_user_input.strip(), gmail_pass_input.strip())
+                        save_email_credentials_to_env(gmail_user_input.strip(), gmail_pass_input.strip())
+
                     with st.spinner(f"Connecting to {gmail_user_input} via IMAP ({scan_location})..."):
                         try:
                             events = fetch_vinted_emails_via_imap(

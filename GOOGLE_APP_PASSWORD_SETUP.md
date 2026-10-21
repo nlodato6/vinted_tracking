@@ -18,8 +18,8 @@ Google requires **2-Step Verification (2FA)** to be enabled on your account befo
 
 ## 🛠️ Step-by-Step: Generate the 16-Character App Password
 
-1. Go directly to the App Passwords page:
-   👉 **[https://myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)**
+1. Go directly to the App Passwords page:   👉 **[https://myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+**
    *(Or type **"App passwords"** into the search bar at the very top of your Google Account page).*
 
 2. Enter your account password if prompted to verify your identity.

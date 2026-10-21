@@ -146,3 +146,27 @@ def test_user_preferences_spreadsheet():
     save_user_spreadsheet("new_reseller@example.com", "sheet_updated_999")
     assert get_user_spreadsheet("new_reseller@example.com") == "sheet_updated_999"
 
+
+def test_user_email_credentials_persistence():
+    from src.telemetry import (
+        save_user_email_credentials,
+        get_user_email_credentials,
+        clear_user_email_credentials,
+    )
+    user = "email_user@example.com"
+    # Initially None
+    u, p = get_user_email_credentials(user)
+    assert u is None and p is None
+
+    # Save
+    save_user_email_credentials(user, "tsavoie90@gmail.com", "1234 5678 9012 3456")
+    u, p = get_user_email_credentials(user)
+    assert u == "tsavoie90@gmail.com"
+    assert p == "1234 5678 9012 3456"
+
+    # Clear
+    clear_user_email_credentials(user)
+    u_after, p_after = get_user_email_credentials(user)
+    assert u_after is None and p_after is None
+
+
