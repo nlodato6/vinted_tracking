@@ -6,10 +6,11 @@ from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 import requests
 
+from src.config import settings
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive",
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
@@ -17,9 +18,9 @@ SCOPES = [
 
 
 def get_oauth_config() -> Optional[Dict[str, Any]]:
-    """Retrieves Google OAuth Client ID and Secret from Streamlit secrets or environment."""
-    client_id = os.getenv("GOOGLE_CLIENT_ID", "")
-    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    """Retrieves Google OAuth Client ID and Secret from Streamlit secrets, environment, or settings."""
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "") or settings.google_client_id
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "") or settings.google_client_secret
 
     try:
         import streamlit as st

@@ -26,6 +26,14 @@ class Settings(BaseSettings):
         default="Vinted Sales & Inventory Tracker",
         description="Title of spreadsheet if sheet ID is not given",
     )
+    google_client_id: str = Field(
+        default="",
+        description="Google OAuth 2.0 Web Client ID",
+    )
+    google_client_secret: str = Field(
+        default="",
+        description="Google OAuth 2.0 Web Client Secret",
+    )
 
     # Vinted Settings
     vinted_domain: str = Field(
