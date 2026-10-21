@@ -67,6 +67,7 @@ In V2, the application separates into a **stateless REST backend** and a **cross
                      │  • /api/v1/supplies     (Shipping Supplies & Cost Avg) │
                      │  • /api/v1/sync/html    (Closet & Orders HTML Parser)  │
                      │  • /api/v1/sync/email   (Gmail IMAP & Webhook Sync)    │
+                     │  • /api/v1/scheduler    (Background Sync Cron Worker)  │
                      │  • /api/v1/analytics    (Plotly/JSON Metrics Engine)   │
                      └───────────────────────────┬────────────────────────────┘
                                                  │
@@ -76,6 +77,7 @@ In V2, the application separates into a **stateless REST backend** and a **cross
                      │                                                        │
                      │  1. Primary User Store: Google Sheets (User's Drive)   │
                      │  2. Fast Cache / Auth: Redis or SQLite / Supabase      │
+                     │  3. Job Scheduler: APScheduler / Celery Cloud Worker   │
                      └────────────────────────────────────────────────────────┘
 ```
 
@@ -93,6 +95,10 @@ In V2, the application separates into a **stateless REST backend** and a **cross
    - View recent inventory counts, lots, and sales metrics even without an active internet connection, syncing when connectivity resumes.
 5. **App Store Subscriptions (StoreKit / Google Play Billing)**:
    - Monetize with recurring monthly/annual subscriptions or tiered tracking limits.
+6. **Custom Background Email Sync Scheduler (24/7 Offline Sync)**:
+   - Resellers can configure an automated background schedule right from the React Native UI (`Every 15 minutes`, `Hourly`, `Every 6 Hours`, `Daily at a specific time` e.g. 8:00 AM).
+   - The backend worker runs 24/7 independently in the cloud while the user is logged out, asleep, or has closed the app.
+   - Automatically syncs newly detected Vinted sales directly into their Google Sheet and fires an instant iOS/Android push notification with realized profit.
 
 ---
 
@@ -113,6 +119,7 @@ Resellers can start for free immediately to track their closet performance, whil
 | **Category & Brand Breakdown** | Category performance leaderboards & top brand rankings | ✅ **Included** | ✅ **Included** |
 | **Scatter Analytics** | Price vs. profit margin distribution charts | ✅ **Included** | ✅ **Included** |
 | **Direct Email Sync** | Automated IMAP Gmail sync for incoming sale alerts & accepted offers | ❌ Paywalled | ✅ **Included (Automated)** |
+| **Background Sync Scheduler** | 24/7 automated offline sync at user-defined frequency & custom time | ❌ Manual Only | ✅ **Full Cloud Scheduler (Hourly/Daily/Custom)** |
 | **Email Webhook Ingestion** | Instant real-time sale capture via inbound email webhooks | ❌ Paywalled | ✅ **Included** |
 | **In-App Lot Creation** | Define and save new `Inventory_Lots` directly from the app UI | ❌ Paywalled | ✅ **Included** |
 | **Live Lot Re-Assignment** | Assign and update inventory hauls to new listings from UI | ❌ Paywalled | ✅ **Included** |
@@ -228,19 +235,23 @@ To ensure approval by Apple App Review and Google Play without delays or rejecti
 * **Deliverable**: Live web product generating user feedback while V2 mobile is designed.
 
 ### Phase 2: Decouple Backend into REST API
-* **Goal**: Expand [`src/server.py`](file:///Users/nicol/Desktop/vinted_tracking/src/server.py) into a complete FastAPI REST backend.
+* **Goal**: Expand [`src/server.py`](file:///Users/nicol/Desktop/vinted_tracking/src/server.py) into a complete FastAPI REST backend with automated background scheduling.
 * **Endpoints to Expose**:
   - `POST /api/auth/google`: Exchange auth codes for JWT session tokens.
   - `GET /api/sheets/lots` & `POST /api/sheets/lots`: Retrieve and create inventory hauls.
   - `GET /api/sheets/supplies` & `POST /api/sheets/supplies`: Manage shipping supplies and packaging cost deductions.
   - `POST /api/parse/html`: Upload closet/order HTML documents and return parsed listing JSON.
+  - `GET /api/v1/scheduler/config` & `POST /api/v1/scheduler/config`: Manage user's automated 24/7 background sync schedule (frequency, time-of-day, enabled toggle).
+  - `POST /api/v1/scheduler/trigger`: Manually trigger an immediate background sync run.
   - `GET /api/analytics/summary`: Return structured KPIs, category breakdowns, and sales timelines.
+* **Background Worker**: Integrate `APScheduler` or Celery daemon to execute user-configured sync jobs in the cloud even when users are logged out.
 * **Deliverable**: Fully documented Swagger/OpenAPI documentation at `/docs`.
 
-### Phase 3: Expo Cross-Platform Frontend Build
+### Phase 3: Expo Cross-Platform Frontend Build (React Native)
 * **Goal**: Build modern cross-platform UI with React Native (Expo).
 * **Key Components**:
   - Bottom Tab Navigation (`Home / Metrics`, `Inventory & Lots`, `Sync Operations`, `Supplies`, `Settings`).
+  - **Background Sync Scheduler Settings**: TimePicker modal, frequency segmented control (`Hourly`, `Every 6 Hours`, `Daily at 8:00 AM`), and push notification preferences.
   - Native file picker and iOS Share Extension target.
   - Native charts via Victory Native or React Native Skia.
 * **Deliverable**: Single app running simultaneously on iOS Simulator, Android Emulator, and Web browser.
