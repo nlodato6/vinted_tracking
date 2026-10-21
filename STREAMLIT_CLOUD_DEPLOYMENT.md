@@ -30,7 +30,7 @@ Once your app is created in Streamlit Cloud:
 ```toml
 # Google OAuth 2.0 Web Client Credentials
 GOOGLE_CLIENT_ID = "162785904429-j2pd34jjgb00n50au5j0uiuds9nc1od3.apps.googleusercontent.com"
-GOOGLE_CLIENT_SECRET = "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"
+GOOGLE_CLIENT_SECRET = "your_google_client_secret_here"
 GOOGLE_REDIRECT_URI = "https://your-app-name.streamlit.app"
 
 # Administrator Access & Manual Fallback Login
