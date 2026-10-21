@@ -114,9 +114,9 @@ class SheetsSyncEngine:
                 lots.append(lot_dict)
         return lots
 
-    def get_next_lot_id(self) -> str:
-        """Determines the next sequential Lot ID (e.g. LOT-002 if LOT-001 exists)."""
-        lots = self.get_all_lots()
+    def get_next_lot_id(self, cached_lots: Optional[List[Dict[str, Any]]] = None) -> str:
+        """Determines the next sequential Lot ID without network calls when cached_lots is provided."""
+        lots = cached_lots if cached_lots is not None else self.get_all_lots()
         max_num = 0
         for l in lots:
             lid = l.get("Lot_ID", "")
@@ -205,8 +205,22 @@ class SheetsSyncEngine:
         avg_cost = parse_price(avg_cost_str) or 0.24
         return {"supplies": supplies, "avg_cost_per_shipment": avg_cost, "total_rows": len(rows)}
 
-    def get_next_supply_id(self) -> str:
-        """Finds next supply ID (or first empty placeholder ID)."""
+    def get_next_supply_id(self, cached_supplies: Optional[List[Dict[str, Any]]] = None) -> str:
+        """Finds next supply ID without network calls when cached_supplies is provided."""
+        if cached_supplies is not None:
+            max_num = 0
+            for s in cached_supplies:
+                s_id = s.get("Supply_ID", "")
+                m = re.search(r"SUP-(\d+)", s_id, re.IGNORECASE)
+                if m:
+                    try:
+                        num = int(m.group(1))
+                        if num > max_num:
+                            max_num = num
+                    except ValueError:
+                        pass
+            return f"SUP-{max_num + 1:02d}"
+
         ws_sup = self.get_worksheet(TAB_SHIPPING_SUPPLIES)
         rows = ws_sup.get_all_values()
         if len(rows) <= 1:

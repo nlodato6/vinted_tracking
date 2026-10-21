@@ -181,7 +181,7 @@ def render_sync_page():
                 with st.container(border=True):
                     st.markdown("#### ✨ Define New Inventory Lot")
                     st.caption("Fill out the lot details below. You can save it immediately or have it automatically created when syncing HTML files.")
-                    next_suggested_id = engine.get_next_lot_id()
+                    next_suggested_id = engine.get_next_lot_id(cached_lots=all_lots)
 
                     nl_c1, nl_c2, nl_c3 = st.columns(3)
                     with nl_c1:
@@ -316,43 +316,47 @@ def render_sync_page():
                             } for i in new_listings]), width="stretch")
 
                     if st.button("🚀 Commit & Synchronize to Google Sheets", type="primary", width="stretch"):
-                        with st.spinner("Synchronizing to Google Sheets..."):
-                            # 1. If new lot, create it in Inventory_Lots if not already created
-                            if is_new_lot:
-                                engine.add_inventory_lot(
-                                    lot_id=target_lot_id,
-                                    purchase_date=new_purchase_date.strftime("%Y-%m-%d"),
-                                    source_vendor=new_vendor,
-                                    total_cost=float(new_total_cost),
-                                    total_articles=int(new_total_articles),
-                                    status=new_status,
-                                    notes=new_notes,
-                                )
-                            
-                            st.session_state.selected_lot = target_lot_id
+                        try:
+                            with st.spinner("Synchronizing to Google Sheets..."):
+                                # 1. If new lot, create it in Inventory_Lots if not already created
+                                if is_new_lot:
+                                    engine.add_inventory_lot(
+                                        lot_id=target_lot_id,
+                                        purchase_date=new_purchase_date.strftime("%Y-%m-%d"),
+                                        source_vendor=new_vendor,
+                                        total_cost=float(new_total_cost),
+                                        total_articles=int(new_total_articles),
+                                        status=new_status,
+                                        notes=new_notes,
+                                    )
+                                
+                                st.session_state.selected_lot = target_lot_id
 
-                            # 2. Assign target lot to all parsed closet items
-                            for it in parsed_closet:
-                                if not it.lot_id or is_new_lot or it in new_listings:
-                                    it.lot_id = target_lot_id
+                                # 2. Assign target lot to all parsed closet items
+                                for it in parsed_closet:
+                                    if not it.lot_id or is_new_lot or it in new_listings:
+                                        it.lot_id = target_lot_id
 
-                            # 3. Synchronize listings and orders
-                            res_orders = engine.sync_orders(parsed_orders, default_lot=target_lot_id) if parsed_orders else {"synced_orders": 0}
-                            res_closet = engine.sync_listings(parsed_closet) if parsed_closet else {"updated": 0, "created": 0}
+                                # 3. Synchronize listings and orders
+                                res_orders = engine.sync_orders(parsed_orders, default_lot=target_lot_id) if parsed_orders else {"synced_orders": 0}
+                                res_closet = engine.sync_listings(parsed_closet) if parsed_closet else {"updated": 0, "created": 0}
 
-                            # 4. Synchronize lots formulas and metrics
-                            engine.sync_lots()
+                                # 4. Record event and clear cache
+                                record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id})", client=client)
+                                log_event(u_email, "html_import", f"HTML import: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id})", spreadsheet_id=st.session_state.get("spreadsheet_id"))
+                                st.cache_data.clear()
 
-                            # 5. Record event and clear cache
-                            record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id})", client=client)
-                            log_event(u_email, "html_import", f"HTML import: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id})", spreadsheet_id=st.session_state.get("spreadsheet_id"))
-                            st.cache_data.clear()
-
-                        lot_msg = f" (New lot {target_lot_id} created in Inventory_Lots)" if is_new_lot else f" (Assigned to {target_lot_id})"
-                        st.success(f"✔ Sync Complete! {res_orders.get('synced_orders', 0)} orders synced, {res_closet.get('created', 0)} listings added{lot_msg}, {res_closet.get('updated', 0)} listings refreshed.")
-                        st.balloons()
-                        time.sleep(1.5)
-                        st.rerun()
+                            lot_msg = f" (New lot {target_lot_id} created in Inventory_Lots)" if is_new_lot else f" (Assigned to {target_lot_id})"
+                            st.success(f"✔ Sync Complete! {res_orders.get('synced_orders', 0)} orders synced, {res_closet.get('created', 0)} listings added{lot_msg}, {res_closet.get('updated', 0)} listings refreshed.")
+                            st.balloons()
+                            time.sleep(1.5)
+                            st.rerun()
+                        except Exception as e:
+                            log_error(u_email, "sync.py:commit", e)
+                            if "429" in str(e):
+                                st.warning("⏳ Google Sheets rate limit reached (60 read requests/min). Please wait 30 seconds for Google's quota to reset, then click 'Commit & Synchronize' again.")
+                            else:
+                                st.error(f"Synchronization failed: {e}")
 
                 except Exception as e:
                     log_error(u_email, "sync.py:html_import", e)
@@ -459,7 +463,7 @@ def render_sync_page():
         with st.container(border=True):
             st.markdown("#### ➕ Add or Update Shipping Supply")
 
-            next_sup_id = sup_engine.get_next_supply_id()
+            next_sup_id = sup_engine.get_next_supply_id(cached_supplies=active_supplies)
             sup_mode_options = [f"➕ New Supply ({next_sup_id})"] + [
                 f"{s['Supply_ID']} — {s.get('Item_Description') or 'Supply'} ({s.get('Vendor') or 'Vendor'})"
                 for s in active_supplies
