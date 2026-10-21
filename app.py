@@ -129,9 +129,14 @@ if not st.session_state.authenticated:
         # 1. Sign in with Google (OAuth)
         if is_oauth_configured():
             try:
-                auth_url, _ = get_authorization_url()
+                from src.auth import get_redirect_uri
+                active_redirect = get_redirect_uri()
+                auth_url, _ = get_authorization_url(active_redirect)
                 st.link_button("🔑 Sign in with Google", auth_url, type="primary", width="stretch")
                 st.caption("Sign in with your Google account to connect directly to your personal Google Sheets.")
+                with st.expander("ℹ️ Google OAuth Redirect URI details", expanded=False):
+                    st.markdown(f"**App Redirect URI:** `{active_redirect}`")
+                    st.caption("Ensure this exact URL is added under **Authorized redirect URIs** in your Google Cloud Console Credentials.")
             except Exception as e:
                 st.warning(f"OAuth configuration notice: {e}")
         else:

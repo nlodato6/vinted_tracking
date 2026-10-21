@@ -51,14 +51,33 @@ def is_oauth_configured() -> bool:
 
 
 def get_redirect_uri() -> str:
-    """Returns the configured OAuth redirect URI (defaults to http://localhost:8501)."""
-    uri = os.getenv("GOOGLE_REDIRECT_URI", "")
+    """Returns the configured OAuth redirect URI (defaults to http://localhost:8501).
+
+    Priority:
+    1. Explicit GOOGLE_REDIRECT_URI in Streamlit secrets or env (if not a placeholder)
+    2. Auto-detected from browser context (st.context.url) on Streamlit Cloud
+    3. Fallback to http://localhost:8501
+    """
+    uri = ""
     try:
         import streamlit as st
-        if hasattr(st, "secrets"):
-            uri = st.secrets.get("GOOGLE_REDIRECT_URI", uri)
+        if hasattr(st, "secrets") and "GOOGLE_REDIRECT_URI" in st.secrets:
+            val = str(st.secrets["GOOGLE_REDIRECT_URI"]).strip().rstrip("/")
+            if val and "your-app-name" not in val and "example.com" not in val:
+                uri = val
+
+        if not uri and hasattr(st, "context") and hasattr(st.context, "url") and st.context.url:
+            ctx_val = str(st.context.url).strip().rstrip("/")
+            if ctx_val and ctx_val.startswith(("http://", "https://")):
+                uri = ctx_val
     except Exception:
         pass
+
+    if not uri:
+        env_val = os.getenv("GOOGLE_REDIRECT_URI", "").strip().rstrip("/")
+        if env_val and "your-app-name" not in env_val:
+            uri = env_val
+
     return uri or "http://localhost:8501"
 
 
