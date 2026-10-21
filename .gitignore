@@ -42,3 +42,7 @@ test-results/
 *.swp
 *.swo
 .DS_Store
+
+# Streamlit agent skills (environment symlinks)
+.agents/
+.claude/
