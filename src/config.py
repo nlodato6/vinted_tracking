@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     # Gmail IMAP Automation
     gmail_user: str = Field(
         default="",
-        description="Gmail address where Vinted emails are sent (e.g. tsavoie90@gmail.com)",
+        description="Gmail address where Vinted emails are sent (e.g. your-email@gmail.com)",
     )
     gmail_app_password: str = Field(
         default="",
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     # Admin Dashboard & Access
     admin_emails: str = Field(
-        default="nicashlod@gmail.com,tsavoie90@gmail.com,admin@spreadthrift.com",
+        default="nicashlod@gmail.com,admin@spreadthrift.com",
         description="Comma-separated emails authorized to view Admin telemetry and error alerts",
     )
     admin_password: str = Field(

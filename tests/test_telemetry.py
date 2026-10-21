@@ -67,8 +67,8 @@ def test_log_and_resolve_errors():
 
 
 def test_admin_config_email_list():
-    assert "tsavoie90@gmail.com" in settings.admin_email_list
     assert "nicashlod@gmail.com" in settings.admin_email_list
+    assert "admin@spreadthrift.com" in settings.admin_email_list
     assert len(settings.admin_email_list) >= 2
 
 

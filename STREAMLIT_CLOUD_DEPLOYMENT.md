@@ -34,7 +34,7 @@ GOOGLE_CLIENT_SECRET = "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"
 GOOGLE_REDIRECT_URI = "https://your-app-name.streamlit.app"
 
 # Administrator Access & Manual Fallback Login
-ADMIN_EMAILS = "nicashlod@gmail.com,tsavoie90@gmail.com,admin@spreadthrift.com"
+ADMIN_EMAILS = "nicashlod@gmail.com,admin@spreadthrift.com"
 ADMIN_PASSWORD = "PassWord123!@#"
 
 # Default Google Spreadsheet Tracker

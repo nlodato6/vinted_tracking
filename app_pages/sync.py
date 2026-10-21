@@ -461,17 +461,18 @@ def render_sync_page():
     # TAB 2: EMAIL SYNC
     # ---------------------------------------------------------
     with tab_email:
-        st.markdown("### 📬 Direct Gmail Sync (`tsavoie90@gmail.com`)")
-        st.caption("Pull incoming sales, buyer offers, and favorites directly from Gmail via secure IMAP.")
+        st.markdown("### 📬 Direct Gmail Sync")
+        st.caption("Pull incoming sales, buyer offers, and favorites directly from your Gmail account via secure IMAP.")
 
         e1, e2 = st.columns([1, 1])
 
         with e1:
             saved_u, saved_p = get_user_email_credentials(u_email)
-            default_user = saved_u or os.getenv("GMAIL_USER", "tsavoie90@gmail.com")
+            fallback_email = u_email if (u_email and "@" in u_email and "local" not in u_email) else ""
+            default_user = saved_u or os.getenv("GMAIL_USER", "") or fallback_email
             default_pwd = saved_p or os.getenv("GMAIL_APP_PASSWORD", "")
 
-            gmail_user_input = st.text_input("Gmail Address", value=default_user)
+            gmail_user_input = st.text_input("Gmail Address", value=default_user, placeholder="your-email@gmail.com")
             gmail_pass_input = st.text_input(
                 "Google App Password (16 characters)",
                 type="password",
