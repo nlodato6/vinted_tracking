@@ -6,7 +6,9 @@ from datetime import datetime, date
 import streamlit as st
 import pandas as pd
 
-from src.sheets import GoogleSheetsClient, SheetsSyncEngine, parse_price
+from src.config import settings
+from src.sheets import GoogleSheetsClient, SheetsSyncEngine
+from src.sheets.sync import parse_price
 from src.html_parser import parse_closet_html, parse_orders_html, detect_html_type
 from src.email_parser import fetch_vinted_emails_via_imap
 from src.notifications import record_html_parse_event, record_email_parse_event, get_sync_status
@@ -15,8 +17,8 @@ from src.notifications import record_html_parse_event, record_email_parse_event,
 def get_sheets_client() -> GoogleSheetsClient:
     """Returns a GoogleSheetsClient configured for the current session user."""
     return GoogleSheetsClient(
-        sheet_id=st.session_state.spreadsheet_id,
-        credentials=st.session_state.user_credentials,
+        sheet_id=st.session_state.get("spreadsheet_id", settings.google_sheet_id),
+        credentials=st.session_state.get("user_credentials"),
     )
 
 
@@ -161,7 +163,7 @@ def render_sync_page():
                     with btn_c2:
                         st.button("Cancel", on_click=on_cancel_new_lot, type="tertiary", icon=":material/close:", width="stretch")
             else:
-                target_lot_id = lot_id_map.get(selected_option, st.session_state.selected_lot)
+                target_lot_id = lot_id_map.get(selected_option, st.session_state.get("selected_lot", "LOT-001"))
                 st.session_state.selected_lot = target_lot_id
                 selected_lot_info = next((l for l in all_lots if l.get("Lot_ID") == target_lot_id), None)
                 if selected_lot_info:
