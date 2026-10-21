@@ -61,7 +61,7 @@ class Settings(BaseSettings):
 
     # Admin Dashboard & Access
     admin_emails: str = Field(
-        default="nicashlod@gmail.com,admin@spreadthrift.com",
+        default="nicashlod@gmail.com,admin@threadcount.com,admin@spreadthrift.com",
         description="Comma-separated emails authorized to view Admin telemetry and error alerts",
     )
     admin_password: str = Field(

@@ -1,4 +1,4 @@
-"""Telemetry and error tracking module for SpreadThrift Admin Dashboard.
+"""Telemetry and error tracking module for Thread Count Admin Dashboard.
 
 Stores user activity metrics, session logins, and runtime errors in a local SQLite database.
 """

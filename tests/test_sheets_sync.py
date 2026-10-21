@@ -570,7 +570,7 @@ def test_auto_provision_user_sheet_discovered(monkeypatch):
 def test_auto_provision_user_sheet_cloned(monkeypatch):
     mock_cloned = MagicMock()
     mock_cloned.id = "cloned_sheet_456"
-    mock_cloned.title = "SpreadThrift - Vinted Sales & Inventory Tracker"
+    mock_cloned.title = "Thread Count - Vinted Sales & Inventory Tracker"
 
     mock_gc = MagicMock()
     mock_gc.copy.return_value = mock_cloned
@@ -589,7 +589,7 @@ def test_auto_provision_user_sheet_cloned(monkeypatch):
 def test_auto_provision_user_sheet_fallback_create(monkeypatch):
     mock_created = MagicMock()
     mock_created.id = "new_created_sheet_789"
-    mock_created.title = "SpreadThrift - Vinted Sales & Inventory Tracker"
+    mock_created.title = "Thread Count - Vinted Sales & Inventory Tracker"
 
     mock_gc = MagicMock()
     mock_gc.copy.side_effect = RuntimeError("Drive quota or permission error")

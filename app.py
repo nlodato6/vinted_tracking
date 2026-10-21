@@ -1,4 +1,4 @@
-"""SpreadThrift - Streamlit Multi-Tenant Web App for Vinted Inventory, Sales & Analytics."""
+"""Thread Count - Streamlit Multi-Tenant Web App for Vinted Inventory, Sales & Analytics."""
 
 import os
 import re
@@ -114,9 +114,9 @@ if not st.session_state.authenticated:
     header_col1, header_col2 = st.columns([0.12, 0.88], vertical_alignment="center")
     with header_col1:
         if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, width=80, alt="SpreadThrift Logo")
+            st.image(LOGO_PATH, width=80, alt="Thread Count Logo")
     with header_col2:
-        st.title("SpreadThrift")
+        st.title("Thread Count")
         st.markdown("**From inbox alerts to bottom-line gains.**")
 
     st.markdown("Automate your Vinted inventory tracking, net profits, and performance metrics directly with Google Sheets.")
@@ -142,7 +142,7 @@ if not st.session_state.authenticated:
         # 2. Manual Login (Fallback for Streamlit Cloud & Testing)
         with st.expander("🔐 Manual Login (Fallback)", expanded=False):
             st.caption("Sign in with email and password for manual access, testing, or if Google OAuth is unconfigured.")
-            manual_email = st.text_input("Email", placeholder="user@sheetcount.com", key="manual_login_email")
+            manual_email = st.text_input("Email", placeholder="user@threadcount.com", key="manual_login_email")
             manual_pass = st.text_input("Password", type="password", placeholder="Enter your password", key="manual_login_pass")
 
             if st.button("Sign In with Email & Password", type="primary" if not is_oauth_configured() else "secondary", width="stretch", key="btn_manual_login"):
@@ -323,7 +323,7 @@ with st.sidebar:
     # Feedback & User Voice Module
     with st.sidebar.popover("💬 Feedback & Requests", icon=":material/rate_review:", width="stretch"):
         st.markdown("#### 💬 Share Your Feedback")
-        st.caption("Suggest features, report bugs, or share thoughts directly with the SpreadThrift team.")
+        st.caption("Suggest features, report bugs, or share thoughts directly with the Thread Count team.")
 
         fb_category = st.selectbox(
             "Feedback Type",
@@ -365,7 +365,7 @@ with st.sidebar:
     st.sidebar.divider()
     with st.sidebar.expander("⚖️ Legal & Compliance"):
         st.caption(
-            "**SpreadThrift** is an independent third-party tool and is not affiliated with, authorized, or endorsed by "
+            "**Thread Count** is an independent third-party tool and is not affiliated with, authorized, or endorsed by "
             "Vinted, Google LLC, or Meta Platforms, Inc. All trademarks belong to their respective owners."
         )
         col_sp, col_st = st.columns(2)

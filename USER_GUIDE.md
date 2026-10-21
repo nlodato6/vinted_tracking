@@ -1,4 +1,4 @@
-# 👕 SpreadThrift — Complete User & Feature Guide
+# 👕 Thread Count — Complete User & Feature Guide
 > **"From inbox alerts to bottom-line gains."**  
 > An automated bookkeeping, inventory tracking, and net profit analytics suite for Vinted resellers and thrift flippers.
 
@@ -23,21 +23,21 @@
 
 ## 🎯 Overview & Core Architecture
 
-SpreadThrift eliminates messy manual spreadsheets and expensive subscription databases for clothing resellers.
+Thread Count eliminates messy manual spreadsheets and expensive subscription databases for clothing resellers.
 
-* **100% Private Cloud Storage**: SpreadThrift operates on a decentralized architecture. Your sales data, inventory records, and financial analytics live inside **your own personal Google Drive** via Google Sheets.
-* **Zero Middleman Databases**: We do not store or monetize your sales data. If you ever leave SpreadThrift, your spreadsheet remains fully functional and accessible in your Google Drive.
+* **100% Private Cloud Storage**: Thread Count operates on a decentralized architecture. Your sales data, inventory records, and financial analytics live inside **your own personal Google Drive** via Google Sheets.
+* **Zero Middleman Databases**: We do not store or monetize your sales data. If you ever leave Thread Count, your spreadsheet remains fully functional and accessible in your Google Drive.
 * **Instant Automation**: Parses Vinted HTML pages and Gmail notifications to extract real transaction prices, platform fees, shipping costs, and unit costs automatically.
 
 ---
 
 ## 🔑 Getting Started & Authentication
 
-When you open SpreadThrift ([`http://localhost:8501`](http://localhost:8501)), you are greeted with the login portal:
+When you open Thread Count ([`http://localhost:8501`](http://localhost:8501)), you are greeted with the login portal:
 
 ### 1. Sign in with Google (OAuth 2.0)
 * **Who it's for**: All regular users and resellers.
-* **How it works**: Click the blue **"🔑 Sign in with Google"** button. Authenticate with your Google Account to automatically grant SpreadThrift permission to read and update your personal Google Sheets.
+* **How it works**: Click the blue **"🔑 Sign in with Google"** button. Authenticate with your Google Account to automatically grant Thread Count permission to read and update your personal Google Sheets.
 * **Privacy**: Only accesses the spreadsheets you specifically choose to connect or create.
 
 ### 2. Local / Development Access
@@ -46,26 +46,26 @@ When you open SpreadThrift ([`http://localhost:8501`](http://localhost:8501)), y
 
 ### 3. Administrator Direct Unlock
 * **Who it's for**: The application owner / administrator.
-* **How it works**: Expand the **Administrator Verification** container, enter your admin master passcode (default: `spreadthrift-admin-2026`), and unlock the **Admin & Telemetry Hub**.
+* **How it works**: Expand the **Administrator Verification** container, enter your admin master passcode (default: `PassWord123!@#`), and unlock the **Admin & Telemetry Hub**.
 
 ---
 
 ## 📊 Connecting Your Google Sheet
 
-SpreadThrift reads and writes directly to a standardized, formula-rich Google Sheets tracker stored securely in your own Google Drive.
+Thread Count reads and writes directly to a standardized, formula-rich Google Sheets tracker stored securely in your own Google Drive.
 
 ### ✨ Zero-Friction 1-Click Provisioning (Recommended)
-When you log in using **Sign in with Google (OAuth 2.0)**, SpreadThrift takes care of everything behind the scenes:
-1. **Automatic Discovery**: It checks your Google Drive for any existing `SpreadThrift` or `Vinted Sales` sheet.
+When you log in using **Sign in with Google (OAuth 2.0)**, Thread Count takes care of everything behind the scenes:
+1. **Automatic Discovery**: It checks your Google Drive for any existing `Thread Count` or `Vinted Sales` sheet.
 2. **Instant Creation**: If you don't have one yet, it creates a fresh tracker with all 5 core worksheets, formulas, headers, and dashboard summaries pre-configured.
-3. **Session Memory**: SpreadThrift saves your connected sheet to your user account, so you are instantly reconnected every time you log in—**zero copy-pasting required**.
+3. **Session Memory**: Thread Count saves your connected sheet to your user account, so you are instantly reconnected every time you log in—**zero copy-pasting required**.
 4. **Live Access**: Simply click **"🔗 Open Live Sheet"** in the sidebar at any time to view or edit your live tracker in a new Google Sheets tab.
 
 ### ⚙️ Optional: Connect or Switch Sheets Manually
 If you want to use a specific existing sheet or work with multiple accounts:
 1. Expand **"⚙️ Manage or Switch Sheet"** in the sidebar.
 2. Paste your Google Sheet URL or ID into the input field.
-3. SpreadThrift instantly switches to your specified sheet and remembers it for future logins.
+3. Thread Count instantly switches to your specified sheet and remembers it for future logins.
 4. If needed, you can also click **"✨ Auto-Recreate Fresh Sheet"** to provision a brand-new tracker from scratch.
 
 ### The 5 Core Worksheets Inside Your Sheet
@@ -92,9 +92,9 @@ The fastest way to ingest your existing Vinted history without typing anything m
    * On your computer, open Google Chrome or Safari and go to **vinted.com**.
    * Go to **"My Orders"** (for sold items) or your **Public Profile / Wardrobe** (for active listings).
    * Press `Ctrl + S` (Windows) or `Cmd + S` (Mac) $\rightarrow$ save format as **"Webpage, Complete"** or **"HTML Only"**.
-2. **Uploading to SpreadThrift**:
+2. **Uploading to Thread Count**:
    * Drag and drop the `.html` file into the upload zone.
-   * SpreadThrift automatically parses the document, extracting:
+   * Thread Count automatically parses the document, extracting:
      * Item Title & Brand
      * Listed Price or Final Sale Price
      * Buyer Protection Fee & Shipping Cost
@@ -103,7 +103,7 @@ The fastest way to ingest your existing Vinted history without typing anything m
 3. **Review & Reconcile**:
    * Inspect the preview table.
    * Choose your target inventory lot (e.g. `LOT-001`).
-   * Click **"Commit to Google Sheets"**. SpreadThrift guarantees **zero duplicates** by cross-referencing existing item IDs.
+   * Click **"Commit to Google Sheets"**. Thread Count guarantees **zero duplicates** by cross-referencing existing item IDs.
 
 ---
 
@@ -116,9 +116,9 @@ Accurate net profit requires knowing your true Cost of Goods Sold (COGS). The **
    * Enter the **Total Cost Paid** (e.g., `$85.00`).
    * Enter the **Total Number of Items** acquired (e.g., `17 items`).
 2. **Automatic Cost Allocation**:
-   * SpreadThrift calculates your uniform cost: `$85.00 ÷ 17 = $5.00 / item`.
+   * Thread Count calculates your uniform cost: `$85.00 ÷ 17 = $5.00 / item`.
 3. **Profit Tracking**:
-   * When items assigned to this lot are sold, SpreadThrift automatically deducts `$5.00` COGS, ensuring your realized profit calculations are 100% accurate.
+   * When items assigned to this lot are sold, Thread Count automatically deducts `$5.00` COGS, ensuring your realized profit calculations are 100% accurate.
 
 ---
 
@@ -129,7 +129,7 @@ Never let packaging costs eat into your margins unnoticed.
    * Add common materials: Poly Mailers (10x13), Bubble Wrap, Shipping Tape, Thermal Labels, Tissue Paper.
    * Input the bulk purchase price and quantity (e.g. 100 poly mailers for `$14.00` = `$0.14` per mailer).
 2. **Automated Deductions**:
-   * SpreadThrift sums your supply costs per order (e.g. `$0.14` mailer + `$0.05` label + `$0.06` tape = `$0.25` packaging cost).
+   * Thread Count sums your supply costs per order (e.g. `$0.14` mailer + `$0.05` label + `$0.06` tape = `$0.25` packaging cost).
    * Automatically deducts packaging expenses on every sale in the `Sold_Items` worksheet.
 
 ---
@@ -219,9 +219,9 @@ Accessible to authorized administrators by clicking **"Admin Dashboard"** in the
 ## ⚖️ Data Privacy, Security & Disclaimers
 
 ### Decentralized Data Philosophy
-* **SpreadThrift has no middleman database storing your sales.** Your data is stored directly in your own Google Drive spreadsheet.
-* **No AI Training on Your Data**: SpreadThrift complies strictly with the Google API Services User Data Policy. Your spreadsheets and emails are never used to train machine learning models.
-* **Third-Party Trademark Disclaimer**: SpreadThrift is an independent software tool and is **not affiliated with, authorized, maintained, sponsored, or endorsed by Vinted, Google LLC, or Meta Platforms, Inc.** All trademarks belong to their respective owners.
+* **Thread Count has no middleman database storing your sales.** Your data is stored directly in your own Google Drive spreadsheet.
+* **No AI Training on Your Data**: Thread Count complies strictly with the Google API Services User Data Policy. Your spreadsheets and emails are never used to train machine learning models.
+* **Third-Party Trademark Disclaimer**: Thread Count is an independent software tool and is **not affiliated with, authorized, maintained, sponsored, or endorsed by Vinted, Google LLC, or Meta Platforms, Inc.** All trademarks belong to their respective owners.
 
 ### Built-in Legal Modals
 * Click **"🛡️ Privacy Policy"** or **"📜 Terms of Service"** on the login screen or in the sidebar expander (`⚖️ Legal & Compliance`) to read the full agreements directly inside the app.
@@ -233,15 +233,15 @@ Accessible to authorized administrators by clicking **"Admin Dashboard"** in the
 ### Q: Google shows "Error 400: redirect_uri_mismatch" when signing in.
 * **Fix**: In Google Cloud Console $\rightarrow$ **APIs & Services $\rightarrow$ Credentials**, click your OAuth Client ID $\rightarrow$ scroll to **Authorized redirect URIs** $\rightarrow$ add `http://localhost:8501` (ensure there is no trailing slash) $\rightarrow$ click **Save**.
 
-### Q: Google shows "SpreadThrift has not completed the Google verification process" (Error 403).
+### Q: Google shows "Thread Count has not completed the Google verification process" (Error 403).
 * **Fix**: In Google Cloud Console $\rightarrow$ **OAuth consent screen** $\rightarrow$ scroll to **Test users** $\rightarrow$ add the Google email address you are trying to sign in with $\rightarrow$ click **Save**.
 
-### Q: Why does SpreadThrift say "Spreadsheet not found or permission denied"?
+### Q: Why does Thread Count say "Spreadsheet not found or permission denied"?
 * **Fix**: If using a Service Account (`credentials.json`), ensure you shared your Google Sheet with the service account email (found in `credentials.json` under `client_email`) with **Editor** permissions. If using "Sign in with Google", ensure your account has edit permissions on the spreadsheet.
 
-### Q: Will updating my spreadsheet manually in Google Sheets break SpreadThrift?
-* **Answer**: No! You can add custom columns, format colors, or edit notes directly in Google Sheets. As long as you do not delete or rename the standard column headers, SpreadThrift will seamlessly sync.
+### Q: Will updating my spreadsheet manually in Google Sheets break Thread Count?
+* **Answer**: No! You can add custom columns, format colors, or edit notes directly in Google Sheets. As long as you do not delete or rename the standard column headers, Thread Count will seamlessly sync.
 
 ---
 
-*Need support or want to request a feature? Use the in-app **💬 Feedback & Requests** button in the sidebar or email [support@spreadthrift.com](mailto:support@spreadthrift.com).*
+*Need support or want to request a feature? Use the in-app **💬 Feedback & Requests** button in the sidebar or email [support@threadcount.com](mailto:support@threadcount.com).*

@@ -29,7 +29,7 @@ def test_is_oauth_configured():
     assert isinstance(is_oauth_configured(), bool)
 
 
-def test_spreadthrift_assets_and_branding():
+def test_thread_count_assets_and_branding():
     from pathlib import Path
 
     logo_path = Path("assets/invintory.png")
@@ -37,20 +37,20 @@ def test_spreadthrift_assets_and_branding():
     assert logo_path.stat().st_size > 1000, "assets/invintory.png should be non-empty"
 
     app_py = Path("app.py").read_text()
-    assert "SpreadThrift" in app_py
+    assert "Thread Count" in app_py
     assert "From inbox alerts to bottom-line gains." in app_py
-    assert "Third-Party Trademark & Legal Disclaimer" in app_py
+    assert "Legal & Compliance" in app_py
 
     metrics_py = Path("app_pages/metrics.py").read_text()
-    assert "SpreadThrift" in metrics_py
+    assert "Thread Count" in metrics_py
     assert "From inbox alerts to bottom-line gains." in metrics_py
 
     sync_py = Path("app_pages/sync.py").read_text()
-    assert "SpreadThrift" in sync_py
+    assert "Thread Count" in sync_py
     assert "From inbox alerts to bottom-line gains." in sync_py
 
     readme_md = Path("README.md").read_text()
-    assert "SpreadThrift" in readme_md
+    assert "Thread Count" in readme_md
     assert "Third-Party Trademarks & Legal Disclaimer" in readme_md
 
 
@@ -87,7 +87,7 @@ def test_cloud_ready_auth_and_manual_login():
     assert "Manual Login (Fallback)" in app_code
     assert "PassWord123!@#" in app_code or "settings.fallback_admin_password" in app_code
     assert "manual_login_email" in app_code
-    assert 'placeholder="user@sheetcount.com"' in app_code
+    assert 'placeholder="user@threadcount.com"' in app_code or 'placeholder="user@sheetcount.com"' in app_code
 
 
 

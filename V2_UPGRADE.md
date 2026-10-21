@@ -1,11 +1,11 @@
-# 🚀 SpreadThrift V2 Architecture & Mobile App Store Roadmap
+# 🚀 Thread Count V2 Architecture & Mobile App Store Roadmap
 > *"From inbox alerts to bottom-line gains."*
 
 ---
 
 ## 📌 Executive Summary
 
-**SpreadThrift** is currently built as a multi-tenant Streamlit web application backed by Python data engines (`src/html_parser.py`, `src/sheets/`, `src/email_parser.py`, and `src/analytics.py`) that sync directly into user-owned Google Sheets.
+**Thread Count** is currently built as a multi-tenant Streamlit web application backed by Python data engines (`src/html_parser.py`, `src/sheets/`, `src/email_parser.py`, and `src/analytics.py`) that sync directly into user-owned Google Sheets.
 
 This document outlines the strategic transition from the current **V1 Streamlit prototype** to a commercial **V2 production architecture** that can be published to the **Apple App Store**, **Google Play Store**, and deployed on the **Web**.
 
@@ -48,7 +48,7 @@ In V2, the application separates into a **stateless REST backend** and a **cross
 
 ```
                      ┌────────────────────────────────────────────────────────┐
-                     │                  SpreadThrift Clients                  │
+                     │                  Thread Count Clients                  │
                      │                                                        │
                      │   📱 iOS App (App Store)      • Native camera          │
                      │   🤖 Android (Google Play)    • Push notifications     │
@@ -59,7 +59,7 @@ In V2, the application separates into a **stateless REST backend** and a **cross
                                                  │ HTTPS / JSON Web Tokens
                                                  ▼
                      ┌────────────────────────────────────────────────────────┐
-                     │                SpreadThrift Backend API                │
+                     │                Thread Count Backend API                │
                      │              FastAPI (`src/server.py`)                 │
                      │                                                        │
                      │  • /api/v1/auth         (Google OAuth2 / JWT Sessions) │
@@ -86,7 +86,7 @@ In V2, the application separates into a **stateless REST backend** and a **cross
 ## 📱 Mobile-First Features Unlocked in V2
 
 1. **iOS Share Sheet Integration**:
-   - Resellers can open Vinted, view an order confirmation, tap **Share**, and send the order directly to **SpreadThrift** without ever manually saving or moving HTML files.
+   - Resellers can open Vinted, view an order confirmation, tap **Share**, and send the order directly to **Thread Count** without ever manually saving or moving HTML files.
 2. **Instant Push Notifications**:
    - Receive native push alerts the moment a Vinted sale email or accepted offer arrives, showing realized net profit instantly.
 3. **Camera & Receipt Tag Scanning**:
@@ -104,13 +104,13 @@ In V2, the application separates into a **stateless REST backend** and a **cross
 
 ## 💎 Monetization & Feature Tiering (Free vs. Paid)
 
-SpreadThrift V2 implements a **Freemium** business model tailored for both the Apple App Store / Google Play and the Web SaaS. 
+Thread Count V2 implements a **Freemium** business model tailored for both the Apple App Store / Google Play and the Web SaaS. 
 
 Resellers can start for free immediately to track their closet performance, while active sellers pay for automated background syncing and direct spreadsheet manipulation.
 
 ### Feature Tier Comparison Matrix
 
-| Feature Category | Feature Description | 🆓 Free Tier | ⚡ Paid (SpreadThrift Pro) |
+| Feature Category | Feature Description | 🆓 Free Tier | ⚡ Paid (Thread Count Pro) |
 | :--- | :--- | :---: | :---: |
 | **HTML Batch Import** | Upload & parse saved Vinted closet HTML files (`active` & `sold`) | ✅ **Unlimited** | ✅ **Unlimited** |
 | **Order History Import** | Upload & parse saved Vinted orders HTML files | ✅ **Unlimited** | ✅ **Unlimited** |
@@ -133,7 +133,7 @@ Resellers can start for free immediately to track their closet performance, whil
 
 During beta testing, pre-launch, and for VIP power sellers, testers **must have unrestricted access to all Paid/Pro features without being charged**.
 
-SpreadThrift V2 implements a **4-tier entitlement bypass system** to ensure seamless zero-cost access across iOS, Android, and Web:
+Thread Count V2 implements a **4-tier entitlement bypass system** to ensure seamless zero-cost access across iOS, Android, and Web:
 
 ### 1. Server-Side Email Whitelist (`BETA_TESTER_EMAILS`)
 * **How it works**: The backend maintains a configuration list of authenticated Google emails granted automatic lifetime Pro status.
@@ -156,7 +156,7 @@ SpreadThrift V2 implements a **4-tier entitlement bypass system** to ensure seam
           
       return "free"
   ```
-* **User Experience**: The user logs in via Google OAuth. The app immediately displays a **"SpreadThrift Pro — Beta Tester VIP"** badge and unlocks Email Sync and direct Spreadsheet updates.
+* **User Experience**: The user logs in via Google OAuth. The app immediately displays a **"Thread Count Pro — Beta Tester VIP"** badge and unlocks Email Sync and direct Spreadsheet updates.
 
 ### 2. Apple TestFlight Automatic Zero-Cost Purchases
 * **How it works**: When distributing beta builds via **Apple TestFlight**, Apple automatically routes all In-App Purchases through the Apple Sandbox environment.
@@ -168,7 +168,7 @@ SpreadThrift V2 implements a **4-tier entitlement bypass system** to ensure seam
 * **Cost to Tester**: **$0.00**. Google Play Billing presents a test card that approves instantly with no real charge.
 
 ### 4. Secret In-App Redemption / Promo Codes
-* **How it works**: Under **Settings $\rightarrow$ Redeem Beta Code**, testers can enter a secret promo phrase (e.g. `SPREADTHRIFT-VIP`) to immediately elevate their account to Pro.
+* **How it works**: Under **Settings $\rightarrow$ Redeem Beta Code**, testers can enter a secret promo phrase (e.g. `THREADCOUNT-VIP`) to immediately elevate their account to Pro.
 * **Benefit**: Allows you to invite testers on the Web SaaS or outside of TestFlight without modifying server configuration files every time.
 * **App Store Promo Codes**: Apple also provides developers with up to **1,000 free App Store promotional codes** per app version that redeem subscriptions for free directly through the App Store.
 
@@ -181,27 +181,27 @@ For handling cross-platform subscriptions cleanly between iOS, Android, and Web:
 1. **Recommended Subscription Engine: [RevenueCat](https://www.revenuecat.com/)**:
    * Official SDK for React Native (Expo) and Web.
    * Single API handling Apple StoreKit 2, Google Play Billing, and Stripe (Web).
-   * Synchronizes user entitlements: if a user subscribes on their iPhone, their SpreadThrift Pro features are automatically unlocked when they log into the Web app.
+   * Synchronizes user entitlements: if a user subscribes on their iPhone, their Thread Count Pro features are automatically unlocked when they log into the Web app.
 2. **Pricing Structure**:
    * **Free**: $0/month (unlimited HTML imports, complete analytics & metrics).
-   * **SpreadThrift Pro Monthly**: $4.99 – $9.99/month (automated email sync, direct 2-way Google Sheets editing, shipping supplies calculator, push notifications).
-   * **SpreadThrift Pro Annual**: $49.99 – $79.99/year (with 7-day free trial).
+   * **Thread Count Pro Monthly**: $4.99 – $9.99/month (automated email sync, direct 2-way Google Sheets editing, shipping supplies calculator, push notifications).
+   * **Thread Count Pro Annual**: $49.99 – $79.99/year (with 7-day free trial).
 
 ---
 
 ## 🛡️ App Store & Legal Compliance Checklist
 
-To ensure approval by Apple App Review and Google Play without delays or rejections, SpreadThrift must fulfill this compliance checklist prior to store submission:
+To ensure approval by Apple App Review and Google Play without delays or rejections, Thread Count must fulfill this compliance checklist prior to store submission:
 
 ### 1. Intellectual Property & Third-Party Trademark Compliance
-- [x] **Distinct Brand Name**: The app is named **SpreadThrift** rather than *Vinted Assistant* or *Vinted Tracker* (complying with Apple Guideline 5.2.1 and Google Play Impersonation Policy).
-- [x] **Descriptive Subtitle Format**: Any store subtitle must use nominative fair use (e.g., `SpreadThrift: Reseller Hub` or `SpreadThrift: Inventory for Vinted`), never implying official affiliation.
+- [x] **Distinct Brand Name**: The app is named **Thread Count** rather than *Vinted Assistant* or *Vinted Tracker* (complying with Apple Guideline 5.2.1 and Google Play Impersonation Policy).
+- [x] **Descriptive Subtitle Format**: Any store subtitle must use nominative fair use (e.g., `Thread Count: Reseller Hub` or `Thread Count: Inventory for Vinted`), never implying official affiliation.
 - [x] **Prominent Third-Party Disclaimers**: Displayed prominently in:
   - App Store / Google Play long description
   - App Login & Onboarding screens
   - App Settings / Legal & Trademarks expander
   - Public website & repository footer
-- [x] **Original App Icon & Graphic Assets**: App icon and marketing screenshots must use original SpreadThrift artwork with no trademarked logos (no Vinted cyan 'V', no Google Sheets logo) without explicit written licensing.
+- [x] **Original App Icon & Graphic Assets**: App icon and marketing screenshots must use original Thread Count artwork with no trademarked logos (no Vinted cyan 'V', no Google Sheets logo) without explicit written licensing.
 - [x] **Nominative Fair Use Language**: All references to Vinted, Google Sheets, Gmail, and Facebook Marketplace are strictly factual and descriptive.
 
 ### 2. Apple App Store Review Guidelines Checklist
@@ -219,18 +219,18 @@ To ensure approval by Apple App Review and Google Play without delays or rejecti
 - [ ] **Target API Level**: Built against the latest Android SDK (Android 14 / API level 34+).
 
 ### 4. Legal Documents & Policies Checklist
-- [ ] **Privacy Policy**: Hosted at a publicly accessible URL (e.g. `https://spreadthrift.com/privacy`).
-- [ ] **Terms of Service (ToS) / End User License Agreement (EULA)**: Hosted at `https://spreadthrift.com/terms` and linked on the purchase screen (standard Apple EULA or custom terms).
-- [ ] **Support Contact URL**: Working support email or contact portal (`support@spreadthrift.com`).
+- [ ] **Privacy Policy**: Hosted at a publicly accessible URL (e.g. `https://threadcount.com/privacy`).
+- [ ] **Terms of Service (ToS) / End User License Agreement (EULA)**: Hosted at `https://threadcount.com/terms` and linked on the purchase screen (standard Apple EULA or custom terms).
+- [ ] **Support Contact URL**: Working support email or contact portal (`support@threadcount.com`).
 
 ---
 
 ## 📋 Phased Rollout Plan
 
 ### Phase 1: Web MVP Launch (Immediate)
-* **Goal**: Launch SpreadThrift on the web using the existing Streamlit app to validate product-market fit and onboard real Vinted resellers immediately.
+* **Goal**: Launch Thread Count on the web using the existing Streamlit app to validate product-market fit and onboard real Vinted resellers immediately.
 * **Hosting Options**:
-  * **Render / Railway / GCP Cloud Run**: Run via Docker container with a custom domain (`app.spreadthrift.com`).
+  * **Render / Railway / GCP Cloud Run**: Run via Docker container with a custom domain (`app.threadcount.com`).
   * **Streamlit Community Cloud**: Free hosting directly from the GitHub repository.
 * **Deliverable**: Live web product generating user feedback while V2 mobile is designed.
 

@@ -155,7 +155,7 @@ def auto_provision_user_sheet(
     user_name: str = "Reseller",
     master_template_id: str = "1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg",
 ) -> Tuple[str, str, str]:
-    """Auto-detects an existing SpreadThrift sheet or clones/creates a new one in the user's Google Drive.
+    """Auto-detects an existing Thread Count or Vinted sheet or clones/creates a new one in the user's Google Drive.
 
     Returns:
         (spreadsheet_id, spreadsheet_title, action_taken)
@@ -164,15 +164,17 @@ def auto_provision_user_sheet(
     client = GoogleSheetsClient(credentials=credentials)
     gc = client.authenticate()
 
-    # 1. Search user's Drive for an existing SpreadThrift or Vinted tracker
-    existing = client.find_sheet_by_title("SpreadThrift")
+    # 1. Search user's Drive for an existing Thread Count, SpreadThrift or Vinted tracker
+    existing = client.find_sheet_by_title("Thread Count")
+    if not existing:
+        existing = client.find_sheet_by_title("SpreadThrift")
     if not existing:
         existing = client.find_sheet_by_title("Vinted Sales")
     if existing:
         return existing.id, existing.title, "discovered"
 
     # 2. Try cloning the master template directly into their Google Drive
-    target_title = f"SpreadThrift - Vinted Sales & Inventory Tracker"
+    target_title = f"Thread Count - Vinted Sales & Inventory Tracker"
     try:
         cloned = gc.copy(master_template_id, title=target_title)
         return cloned.id, cloned.title, "cloned"

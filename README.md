@@ -1,4 +1,4 @@
-# 🏷️ SpreadThrift
+# 🏷️ Thread Count
 > *"From inbox alerts to bottom-line gains."*
 
 A modern, multi-tenant sales, inventory, and analytics platform connecting **Vinted (`vinted.com`)** directly to **Google Sheets**. Tracks clothing inventory lots, unit cost allocations, live listing prices, realized sold amounts, shipping supplies, and net profit margins with interactive Plotly analytics.
@@ -194,11 +194,11 @@ All 53 unit and integration tests validate cost allocation formulas, price parsi
 
 ## ⚖️ Third-Party Trademarks & Legal Disclaimer
 
-**SpreadThrift** is an independent, third-party software utility developed for resellers and inventory management.
+**Thread Count** is an independent, third-party software utility developed for resellers and inventory management.
 
 * **Vinted** is a registered trademark of Vinted, UAB.
 * **Google Sheets**, **Google Drive**, and **Gmail** are registered trademarks of Google LLC.
 * **Facebook Marketplace** is a registered trademark of Meta Platforms, Inc.
 
-SpreadThrift is **not** affiliated with, endorsed by, sponsored by, authorized by, or in any way officially associated with Vinted, UAB, Google LLC, Meta Platforms, Inc., or any of their subsidiaries or affiliates. All product names, logos, brands, trademarks, and registered trademarks mentioned are the property of their respective owners and are used solely for descriptive and identification purposes under nominative fair use.
+Thread Count is **not** affiliated with, endorsed by, sponsored by, authorized by, or in any way officially associated with Vinted, UAB, Google LLC, Meta Platforms, Inc., or any of their subsidiaries or affiliates. All product names, logos, brands, trademarks, and registered trademarks mentioned are the property of their respective owners and are used solely for descriptive and identification purposes under nominative fair use.
 

@@ -1,25 +1,25 @@
-# 📜 SpreadThrift Terms of Service
+# 📜 Thread Count Terms of Service
 
 **Effective Date:** October 21, 2026  
 **Last Updated:** October 21, 2026  
 
-Please read these Terms of Service ("Terms," "Terms of Service") carefully before using the **SpreadThrift** application and related services (the "Service") operated by SpreadThrift ("us," "we," or "our").
+Please read these Terms of Service ("Terms," "Terms of Service") carefully before using the **Thread Count** application and related services (the "Service") operated by Thread Count ("us," "we," or "our").
 
-By accessing or using SpreadThrift, you agree to be bound by these Terms. If you disagree with any part of these Terms, you may not access or use the Service.
+By accessing or using Thread Count, you agree to be bound by these Terms. If you disagree with any part of these Terms, you may not access or use the Service.
 
 ---
 
 ## 1. Description of Service
 
-SpreadThrift provides reseller inventory management, sales tracking, packaging expense calculation, and net profit analytics designed for clothing resellers and online merchants. The Service integrates with **Google Sheets** and parses user-provided order history to generate automated financial summaries and reports.
+Thread Count provides reseller inventory management, sales tracking, packaging expense calculation, and net profit analytics designed for clothing resellers and online merchants. The Service integrates with **Google Sheets** and parses user-provided order history to generate automated financial summaries and reports.
 
 ---
 
 ## 2. License and Intellectual Property
 
-Subject to these Terms, SpreadThrift grants you a limited, non-exclusive, non-transferable, revocable license to access and use the Service for personal or commercial resale management purposes.
+Subject to these Terms, Thread Count grants you a limited, non-exclusive, non-transferable, revocable license to access and use the Service for personal or commercial resale management purposes.
 
-* **Ownership**: All right, title, and interest in and to the Service (including source code, user interface designs, logos, and documentation) remain the exclusive property of SpreadThrift.
+* **Ownership**: All right, title, and interest in and to the Service (including source code, user interface designs, logos, and documentation) remain the exclusive property of Thread Count.
 * **Restrictions**: You agree not to decompile, reverse-engineer, modify, rent, sell, or distribute any part of the Service without our prior written authorization.
 
 ---
@@ -34,7 +34,7 @@ Subject to these Terms, SpreadThrift grants you a limited, non-exclusive, non-tr
 
 ## 4. User Responsibilities & Acceptable Use
 
-You agree not to use SpreadThrift to:
+You agree not to use Thread Count to:
 - Violate any local, state, national, or international law or regulation.
 - Infringe upon or violate our intellectual property rights or the rights of others.
 - Upload corrupt files, viruses, worms, or malicious code designed to disrupt the operation of the Service.
@@ -47,7 +47,7 @@ You agree not to use SpreadThrift to:
 
 > [!IMPORTANT]
 > **Independent Product Notice**:  
-> **SpreadThrift** is an independent third-party tool and is **NOT** affiliated with, authorized, maintained, sponsored, or endorsed by **Vinted**, **Google LLC**, or **Meta Platforms, Inc.**  
+> **Thread Count** is an independent third-party tool and is **NOT** affiliated with, authorized, maintained, sponsored, or endorsed by **Vinted**, **Google LLC**, or **Meta Platforms, Inc.**  
 > * "Vinted" is a registered trademark of Vinted, UAB.  
 > * "Google," "Google Sheets," and "Google Drive" are trademarks of Google LLC.  
 > All other trademarks, trade names, and brand names referenced in the application are the property of their respective owners and are used solely for descriptive and identification purposes.
@@ -56,7 +56,7 @@ You agree not to use SpreadThrift to:
 
 ## 6. Financial and Tax Disclaimer
 
-SpreadThrift is an automated bookkeeping and analytics utility designed for tracking resale numbers. **SpreadThrift does not provide professional financial, accounting, tax, or legal advice.**
+Thread Count is an automated bookkeeping and analytics utility designed for tracking resale numbers. **Thread Count does not provide professional financial, accounting, tax, or legal advice.**
 - Calculation models (including net profit formulas, fee deductions, and supply averages) are provided for estimation and operational tracking purposes only.
 - You are solely responsible for reviewing your figures, reporting taxable income, and complying with all applicable tax laws and filing requirements in your jurisdiction.
 
@@ -75,9 +75,9 @@ WE DO NOT WARRANT THAT:
 
 ## 8. Limitation of Liability
 
-TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL SPREADTHRIFT, ITS DEVELOPERS, OR CONTRIBUTORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING WITHOUT LIMITATION, LOSS OF PROFITS, DATA, USE, GOODWILL, OR OTHER INTANGIBLE LOSSES, ARISING OUT OF OR IN CONNECTION WITH YOUR USE OR INABILITY TO USE THE SERVICE.
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THREAD COUNT, ITS DEVELOPERS, OR CONTRIBUTORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING WITHOUT LIMITATION, LOSS OF PROFITS, DATA, USE, GOODWILL, OR OTHER INTANGIBLE LOSSES, ARISING OUT OF OR IN CONNECTION WITH YOUR USE OR INABILITY TO USE THE SERVICE.
 
-OUR MAXIMUM AGGREGATE LIABILITY FOR ALL CLAIMS UNDER THESE TERMS SHALL NOT EXCEED THE TOTAL AMOUNT PAID BY YOU TO SPREADTHRIFT IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM, OR $50.00 USD, WHICHEVER IS LESS.
+OUR MAXIMUM AGGREGATE LIABILITY FOR ALL CLAIMS UNDER THESE TERMS SHALL NOT EXCEED THE TOTAL AMOUNT PAID BY YOU TO THREAD COUNT IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM, OR $50.00 USD, WHICHEVER IS LESS.
 
 ---
 
@@ -89,7 +89,7 @@ We reserve the right to suspend or terminate your access to the Service at our s
 
 ## 10. Modifications to Terms
 
-We reserve the right to modify or replace these Terms at any time. Material changes will be indicated with an updated "Last Updated" date at the top of this document. Continued use of SpreadThrift following the posting of any changes constitutes acceptance of those revisions.
+We reserve the right to modify or replace these Terms at any time. Material changes will be indicated with an updated "Last Updated" date at the top of this document. Continued use of Thread Count following the posting of any changes constitutes acceptance of those revisions.
 
 ---
 
@@ -97,6 +97,6 @@ We reserve the right to modify or replace these Terms at any time. Material chan
 
 For any questions, legal notices, or feedback regarding these Terms, please contact:
 
-* **Email:** [nicashlod@gmail.com](mailto:nicashlod@gmail.com) / [legal@spreadthrift.com](mailto:legal@spreadthrift.com)  
-* **Application:** SpreadThrift  
+* **Email:** [nicashlod@gmail.com](mailto:nicashlod@gmail.com) / [legal@threadcount.com](mailto:legal@threadcount.com)  
+* **Application:** Thread Count  
 * **Repository:** [https://github.com/nlodato6/vinted_tracking](https://github.com/nlodato6/vinted_tracking)

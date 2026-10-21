@@ -32,9 +32,9 @@ def clean_telemetry():
 
 
 def test_log_session_and_events():
-    log_session("tester@spreadthrift.com", "Test User", auth_provider="google")
-    log_event("tester@spreadthrift.com", "html_import", "Uploaded 25 items", spreadsheet_id="test_sheet_123")
-    log_event("tester@spreadthrift.com", "lot_created", "Created LOT-001", spreadsheet_id="test_sheet_123")
+    log_session("tester@threadcount.com", "Test User", auth_provider="google")
+    log_event("tester@threadcount.com", "html_import", "Uploaded 25 items", spreadsheet_id="test_sheet_123")
+    log_event("tester@threadcount.com", "lot_created", "Created LOT-001", spreadsheet_id="test_sheet_123")
 
     summary = get_telemetry_summary()
     assert summary["total_users"] == 1
@@ -68,7 +68,7 @@ def test_log_and_resolve_errors():
 
 def test_admin_config_email_list():
     assert "nicashlod@gmail.com" in settings.admin_email_list
-    assert "admin@spreadthrift.com" in settings.admin_email_list
+    assert "admin@threadcount.com" in settings.admin_email_list
     assert len(settings.admin_email_list) >= 2
 
 
@@ -90,7 +90,7 @@ def test_log_feedback_and_summary():
 
 
 def test_feedback_status_filtering_and_notes():
-    fid = log_feedback("user@example.com", "General Feedback", 5, "Loving the new SpreadThrift branding!", sync_to_sheets=False)
+    fid = log_feedback("user@example.com", "General Feedback", 5, "Loving the new Thread Count branding!", sync_to_sheets=False)
     items = get_feedback_list(status_filter="new")
     assert len(items) == 1
     assert items[0]["id"] == fid

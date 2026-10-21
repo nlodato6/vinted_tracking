@@ -1,4 +1,4 @@
-"""Admin & Telemetry Dashboard for SpreadThrift owner.
+"""Admin & Telemetry Dashboard for Thread Count owner.
 
 Displays active user metrics, feature adoption, user feedback, and real-time error alerts with Google Sheets persistence.
 """
@@ -25,7 +25,7 @@ from src.telemetry import (
 
 
 def render_admin_page():
-    st.header("🛡️ SpreadThrift Admin & Telemetry Hub")
+    st.header("🛡️ Thread Count Admin & Telemetry Hub")
     st.caption("Live monitoring of user adoption, feedback submissions, and real-time runtime error alerts.")
 
     # -------------------------------------------------------------------------
@@ -34,7 +34,7 @@ def render_admin_page():
     is_admin = st.session_state.get("is_admin", False)
 
     if not is_admin:
-        st.error("⛔ Access Restricted: You must be an authorized SpreadThrift Administrator to view this portal.")
+        st.error("⛔ Access Restricted: You must be an authorized Thread Count Administrator to view this portal.")
         
         with st.container(border=True):
             st.markdown("#### 🔑 Administrator Verification")
@@ -327,7 +327,7 @@ def render_admin_page():
     # -------------------------------------------------------------------------
     with tab_analytics:
         st.markdown("### 📈 Product Utilization & Analytics")
-        st.caption("How users are interacting with SpreadThrift features over time.")
+        st.caption("How users are interacting with Thread Count features over time.")
 
         c_a1, c_a2 = st.columns([1.5, 1])
 
@@ -407,7 +407,7 @@ def render_admin_page():
         with col_t1:
             with st.container(border=True):
                 st.markdown("#### 📊 Google Sheets Admin Storage")
-                st.caption("SpreadThrift stores all admin metrics, error logs, and user feedback in Google Sheets to eliminate external databases.")
+                st.caption("Thread Count stores all admin metrics, error logs, and user feedback in Google Sheets to eliminate external databases.")
                 target_sheet = settings.admin_sheet_id or settings.google_sheet_id
                 st.markdown(f"**Target Admin Spreadsheet ID:** `{target_sheet}`")
                 st.markdown("**Worksheet Tab:** `User_Feedback`")

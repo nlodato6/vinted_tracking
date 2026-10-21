@@ -85,7 +85,7 @@ def get_cached_titles(sheet_id: str, _creds):
 
 
 def render_sync_page():
-    st.header("⚡ SpreadThrift Operations & Sync Hub")
+    st.header("⚡ Thread Count Operations & Sync Hub")
     st.caption("From inbox alerts to bottom-line gains. Reconcile inventory via HTML uploads, live Gmail sync, or supply tracking.")
 
     client = get_sheets_client()
