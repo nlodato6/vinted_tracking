@@ -76,6 +76,7 @@ def get_authorization_url(redirect_uri: Optional[str] = None) -> Tuple[str, str]
         config,
         scopes=SCOPES,
         redirect_uri=redirect_uri,
+        autogenerate_code_verifier=False,
     )
     auth_url, state = flow.authorization_url(
         access_type="offline",
@@ -100,6 +101,7 @@ def exchange_code_for_credentials(code: str, redirect_uri: Optional[str] = None,
         scopes=SCOPES,
         redirect_uri=redirect_uri,
         state=state,
+        autogenerate_code_verifier=False,
     )
     flow.fetch_token(code=code)
     creds = flow.credentials
