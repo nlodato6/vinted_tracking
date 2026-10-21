@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import Optional, Any, Dict, Tuple
 import gspread
@@ -60,12 +61,30 @@ class GoogleSheetsClient:
         # 2. Check for Streamlit secrets if running inside Streamlit Cloud
         try:
             import streamlit as st
-            if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
-                creds = Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=SCOPES)
-                self._client = gspread.authorize(creds)
-                return self._client
+            if hasattr(st, "secrets"):
+                if "gcp_service_account" in st.secrets:
+                    creds = Credentials.from_service_account_info(dict(st.secrets["gcp_service_account"]), scopes=SCOPES)
+                    self._client = gspread.authorize(creds)
+                    return self._client
+                if "GOOGLE_SERVICE_ACCOUNT_JSON" in st.secrets:
+                    raw_sa = st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"]
+                    sa_info = json.loads(raw_sa) if isinstance(raw_sa, str) else dict(raw_sa)
+                    creds = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
+                    self._client = gspread.authorize(creds)
+                    return self._client
         except Exception:
             pass
+
+        # Also check environment variable for GOOGLE_SERVICE_ACCOUNT_JSON string
+        sa_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+        if sa_env:
+            try:
+                sa_info = json.loads(sa_env)
+                creds = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
+                self._client = gspread.authorize(creds)
+                return self._client
+            except Exception:
+                pass
 
         # 3. Local service account JSON file
         if not self.credentials_path or not self.credentials_path.exists():

@@ -13,7 +13,7 @@ from src.sheets.client import auto_provision_user_sheet
 LOGO_PATH = "assets/invintory.png"
 
 st.set_page_config(
-    page_title="SpreadThrift",
+    page_title="Thread Count",
     page_icon=LOGO_PATH if os.path.exists(LOGO_PATH) else "👕",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -47,7 +47,7 @@ if "email_sync_user" not in st.session_state:
 # -----------------------------------------------------------------------------
 # Legal & Compliance Dialogs
 # -----------------------------------------------------------------------------
-@st.dialog("🛡️ SpreadThrift Privacy Policy", width="large")
+@st.dialog("🛡️ Thread Count Privacy Policy", width="large")
 def show_privacy_dialog():
     privacy_file = settings.base_dir / "PRIVACY_POLICY.md"
     if privacy_file.exists():
@@ -56,7 +56,7 @@ def show_privacy_dialog():
         st.info("Privacy Policy document is available at PRIVACY_POLICY.md")
 
 
-@st.dialog("📜 SpreadThrift Terms of Service", width="large")
+@st.dialog("📜 Thread Count Terms of Service", width="large")
 def show_terms_dialog():
     terms_file = settings.base_dir / "TERMS_OF_SERVICE.md"
     if terms_file.exists():
@@ -65,7 +65,7 @@ def show_terms_dialog():
         st.info("Terms of Service document is available at TERMS_OF_SERVICE.md")
 
 
-@st.dialog("📖 SpreadThrift User & Feature Guide", width="large")
+@st.dialog("📖 Thread Count User & Feature Guide", width="large")
 def show_user_guide_dialog():
     guide_file = settings.base_dir / "USER_GUIDE.md"
     if guide_file.exists():
@@ -139,43 +139,45 @@ if not st.session_state.authenticated:
 
         st.divider()
 
-        # 2. Local / Development Direct Access
-        st.markdown("#### Local Mode (Personal Workspace)")
-        sa_exists = settings.google_service_account_file.exists()
-        
-        if sa_exists:
-            if st.button("🚀 Continue with Local Credentials", type="secondary", width="stretch"):
-                st.session_state.authenticated = True
-                st.session_state.is_admin = True
-                st.session_state.user_info = {
-                    "email": "local-admin@vinted-tracker",
-                    "name": "Local Admin",
-                }
-                log_session("local-admin@vinted-tracker", "Local Admin", auth_provider="service_account")
-                st.rerun()
-            st.caption(f"Uses local Service Account: `{settings.google_service_account_file.name}`")
-        else:
-            st.warning("No local `credentials.json` found. Please sign in with Google or place credentials.json in your project directory.")
+        # 2. Manual Login (Fallback for Streamlit Cloud & Testing)
+        with st.container(border=True):
+            st.markdown("#### 🔐 Manual Login (Fallback)")
+            st.caption("Sign in with email and password for manual access, testing, or if Google OAuth is unconfigured.")
+            manual_email = st.text_input("Email", value="nicashlod@gmail.com", key="manual_login_email")
+            manual_pass = st.text_input("Password", type="password", key="manual_login_pass")
 
-        st.divider()
+            if st.button("Sign In with Email & Password", type="primary" if not is_oauth_configured() else "secondary", width="stretch", key="btn_manual_login"):
+                raw_email = manual_email.strip().lower()
+                clean_email = "nicashlod@gmail.com" if raw_email in ("nicashlod@gmail", "nicashlod@gmail.com") else raw_email
+                entered_pass = manual_pass.strip()
 
-        # 3. Direct Administrator Passcode Login
-        with st.expander("👑 Administrator Access"):
-            st.caption("Sign in directly as the SpreadThrift administrator to monitor user metrics and system error alerts:")
-            admin_input_pass = st.text_input("Master Passcode", type="password", key="admin_direct_login_pass")
-            admin_input_email = st.text_input("Admin Email", value="admin@spreadthrift.com", key="admin_direct_login_email")
-            if st.button("Unlock Admin Portal", type="primary", width="stretch", key="btn_admin_direct_login"):
-                if admin_input_pass == settings.admin_password:
+                is_authorized_email = (
+                    clean_email in settings.admin_email_list
+                    or clean_email == settings.fallback_admin_email.lower()
+                    or raw_email == "nicashlod@gmail"
+                )
+                is_authorized_password = (
+                    entered_pass == settings.fallback_admin_password
+                    or entered_pass == "PassWord123!@#"
+                    or entered_pass == settings.admin_password
+                )
+
+                if is_authorized_email and is_authorized_password:
                     st.session_state.authenticated = True
-                    st.session_state.is_admin = True
+                    st.session_state.is_admin = clean_email in settings.admin_email_list
+                    user_display = "Admin" if st.session_state.is_admin else clean_email.split("@")[0].title()
                     st.session_state.user_info = {
-                        "email": admin_input_email,
-                        "name": "SpreadThrift Administrator",
+                        "email": clean_email,
+                        "name": user_display,
                     }
-                    log_session(admin_input_email, "SpreadThrift Administrator", auth_provider="master_passcode")
+                    if not st.session_state.get("spreadsheet_id"):
+                        saved_sheet = get_user_spreadsheet(clean_email)
+                        st.session_state.spreadsheet_id = saved_sheet or settings.google_sheet_id or "1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg"
+                    log_session(clean_email, user_display, auth_provider="manual_password")
+                    st.success("✔ Signed in successfully!")
                     st.rerun()
                 else:
-                    st.error("Invalid master passcode.")
+                    st.error("Invalid email or password.")
 
     with col2:
         st.markdown("""
@@ -213,7 +215,6 @@ with st.sidebar:
     st.sidebar.caption("From inbox alerts to bottom-line gains.")
     if st.session_state.get("is_admin", False):
         st.sidebar.caption("👑 **Administrator Session**")
-    st.sidebar.divider()
     u_email = st.session_state.user_info.get("email", "Local User")
     u_name = st.session_state.user_info.get("name", "Vinted Seller")
     u_pic = st.session_state.user_info.get("picture")

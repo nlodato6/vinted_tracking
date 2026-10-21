@@ -61,12 +61,20 @@ class Settings(BaseSettings):
 
     # Admin Dashboard & Access
     admin_emails: str = Field(
-        default="tsavoie90@gmail.com,nicashlod@gmail.com,local-admin@vinted-tracker,admin@spreadthrift.com",
+        default="nicashlod@gmail.com,tsavoie90@gmail.com,admin@spreadthrift.com",
         description="Comma-separated emails authorized to view Admin telemetry and error alerts",
     )
     admin_password: str = Field(
-        default="spreadthrift-admin-2026",
+        default="PassWord123!@#",
         description="Master passcode for direct Admin portal login",
+    )
+    fallback_admin_email: str = Field(
+        default="nicashlod@gmail.com",
+        description="Fallback admin email for manual login",
+    )
+    fallback_admin_password: str = Field(
+        default="PassWord123!@#",
+        description="Password for manual login fallback",
     )
     admin_sheet_id: str = Field(
         default="1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg",
@@ -75,7 +83,17 @@ class Settings(BaseSettings):
 
     @property
     def admin_email_list(self) -> list[str]:
-        return [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
+        raw = self.admin_emails
+        try:
+            import streamlit as st
+            if hasattr(st, "secrets") and "ADMIN_EMAILS" in st.secrets:
+                raw = st.secrets["ADMIN_EMAILS"]
+        except Exception:
+            pass
+        emails = [e.strip().lower() for e in raw.split(",") if e.strip()]
+        if "nicashlod@gmail.com" in emails and "nicashlod@gmail" not in emails:
+            emails.append("nicashlod@gmail")
+        return emails
 
     @property
     def vinted_base_url(self) -> str:

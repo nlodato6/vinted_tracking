@@ -69,3 +69,24 @@ def test_sync_page_html_parser_data_editor_and_lot_options():
     assert "auto_assign_lot=False" in sync_code
 
 
+def test_cloud_ready_auth_and_manual_login():
+    from pathlib import Path
+    from src.config import settings
+
+    # 1. Verify admin configuration
+    assert "nicashlod@gmail.com" in settings.admin_email_list
+    assert "nicashlod@gmail" in settings.admin_email_list
+    assert settings.fallback_admin_password == "PassWord123!@#"
+
+    # 2. Verify local login is removed from app.py
+    app_code = Path("app.py").read_text()
+    assert "Continue with Local Credentials" not in app_code
+    assert "Local Mode (Personal Workspace)" not in app_code
+
+    # 3. Verify manual fallback login exists
+    assert "Manual Login (Fallback)" in app_code
+    assert "PassWord123!@#" in app_code or "settings.fallback_admin_password" in app_code
+    assert "manual_login_email" in app_code
+
+
+
