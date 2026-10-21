@@ -45,26 +45,33 @@ def normalize_date_str(s: str) -> str:
 class SheetsSyncEngine:
     def __init__(self, client: GoogleSheetsClient):
         self.client = client
+        self._ws_cache: Dict[str, Any] = {}
+
+    def get_worksheet(self, tab_name: str) -> Any:
+        """Caches worksheet objects to prevent redundant fetch_sheet_metadata network calls."""
+        if tab_name not in self._ws_cache:
+            sh = self.client.get_spreadsheet()
+            self._ws_cache[tab_name] = sh.worksheet(tab_name)
+        return self._ws_cache[tab_name]
+
+    def clear_worksheet_cache(self):
+        self._ws_cache.clear()
 
     def get_listings_records(self) -> List[Dict[str, Any]]:
-        sh = self.client.get_spreadsheet()
-        ws = sh.worksheet(TAB_ITEM_LISTINGS)
+        ws = self.get_worksheet(TAB_ITEM_LISTINGS)
         return ws.get_all_records()
 
     def get_sold_records(self) -> List[Dict[str, Any]]:
-        sh = self.client.get_spreadsheet()
-        ws = sh.worksheet(TAB_SOLD_ITEMS)
+        ws = self.get_worksheet(TAB_SOLD_ITEMS)
         return ws.get_all_records()
 
     def get_sales_records(self) -> List[Dict[str, Any]]:
-        sh = self.client.get_spreadsheet()
-        ws = sh.worksheet(TAB_SALES_LOG)
+        ws = self.get_worksheet(TAB_SALES_LOG)
         return ws.get_all_records()
 
     def get_date_to_lot_map(self) -> Dict[str, str]:
         """Reads Inventory_Lots to map Purchase_Date (YYYY-MM-DD) -> Lot_ID."""
-        sh = self.client.get_spreadsheet()
-        ws_lots = sh.worksheet(TAB_INVENTORY_LOTS)
+        ws_lots = self.get_worksheet(TAB_INVENTORY_LOTS)
         lots_rows = ws_lots.get_all_values()
         date_to_lot_id: Dict[str, str] = {}
 
@@ -90,8 +97,7 @@ class SheetsSyncEngine:
 
     def get_all_lots(self) -> List[Dict[str, Any]]:
         """Reads Inventory_Lots worksheet and returns all lots as dictionaries."""
-        sh = self.client.get_spreadsheet()
-        ws_lots = sh.worksheet(TAB_INVENTORY_LOTS)
+        ws_lots = self.get_worksheet(TAB_INVENTORY_LOTS)
         lots_rows = ws_lots.get_all_values()
         if len(lots_rows) <= 1:
             return []
@@ -135,8 +141,7 @@ class SheetsSyncEngine:
         notes: str = "",
     ) -> Dict[str, Any]:
         """Appends a new lot row into Inventory_Lots with automated formulas."""
-        sh = self.client.get_spreadsheet()
-        ws = sh.worksheet(TAB_INVENTORY_LOTS)
+        ws = self.get_worksheet(TAB_INVENTORY_LOTS)
         rows = ws.get_all_values()
         next_row = len(rows) + 1
 
@@ -173,8 +178,7 @@ class SheetsSyncEngine:
 
     def get_all_supplies(self) -> Dict[str, Any]:
         """Reads Shipping_Supplies and returns active supplies and global average packaging cost."""
-        sh = self.client.get_spreadsheet()
-        ws_sup = sh.worksheet(TAB_SHIPPING_SUPPLIES)
+        ws_sup = self.get_worksheet(TAB_SHIPPING_SUPPLIES)
         rows = ws_sup.get_all_values()
         if len(rows) <= 1:
             return {"supplies": [], "avg_cost_per_shipment": 0.25, "total_rows": 0}
@@ -203,8 +207,7 @@ class SheetsSyncEngine:
 
     def get_next_supply_id(self) -> str:
         """Finds next supply ID (or first empty placeholder ID)."""
-        sh = self.client.get_spreadsheet()
-        ws_sup = sh.worksheet(TAB_SHIPPING_SUPPLIES)
+        ws_sup = self.get_worksheet(TAB_SHIPPING_SUPPLIES)
         rows = ws_sup.get_all_values()
         if len(rows) <= 1:
             return "SUP-01"
@@ -239,8 +242,7 @@ class SheetsSyncEngine:
         total_cost: float = 0.0,
     ) -> Dict[str, Any]:
         """Saves or updates a shipping supply row with formulas preserved."""
-        sh = self.client.get_spreadsheet()
-        ws_sup = sh.worksheet(TAB_SHIPPING_SUPPLIES)
+        ws_sup = self.get_worksheet(TAB_SHIPPING_SUPPLIES)
         rows = ws_sup.get_all_values()
 
         target_row = None
@@ -325,10 +327,9 @@ class SheetsSyncEngine:
         3. Evaluates and updates Status to 'Completed' once all items in that lot are sold
            (sold_count >= total_articles > 0), otherwise 'Active' if items are processed, or 'Pending'.
         """
-        sh = self.client.get_spreadsheet()
-        ws_lots = sh.worksheet(TAB_INVENTORY_LOTS)
-        ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
-        ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+        ws_lots = self.get_worksheet(TAB_INVENTORY_LOTS)
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
+        ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
 
         lots_rows = ws_lots.get_all_values()
         if len(lots_rows) <= 1:
@@ -417,14 +418,24 @@ class SheetsSyncEngine:
             "updated_cells": len(updates),
         }
 
-    def get_max_sku_num(self) -> int:
+    def get_max_sku_num(self, cached_rows: Optional[List[List[Any]]] = None) -> int:
         """Finds highest SKU number across Item_Listings, Sold_Items, and Sales_Log."""
-        sh = self.client.get_spreadsheet()
         max_sku = 1000
+
+        if cached_rows:
+            for r in cached_rows:
+                if len(r) > 0 and str(r[0]).strip().upper().startswith("SKU-"):
+                    try:
+                        num = int(str(r[0]).strip().upper().replace("SKU-", ""))
+                        if num > max_sku:
+                            max_sku = num
+                    except ValueError:
+                        pass
+            return max_sku
 
         for tab_name in (TAB_ITEM_LISTINGS, TAB_SOLD_ITEMS):
             try:
-                ws = sh.worksheet(tab_name)
+                ws = self.get_worksheet(tab_name)
                 rows = ws.get_all_values()
                 if len(rows) > 1:
                     sku_idx = rows[0].index("Item_SKU") if "Item_SKU" in rows[0] else 0
@@ -440,7 +451,7 @@ class SheetsSyncEngine:
                 pass
 
         try:
-            ws_sales = sh.worksheet(TAB_SALES_LOG)
+            ws_sales = self.get_worksheet(TAB_SALES_LOG)
             s_rows = ws_sales.get_all_values()
             if len(s_rows) > 1:
                 s_sku_idx = s_rows[0].index("Item_SKU") if "Item_SKU" in s_rows[0] else 2
@@ -467,15 +478,15 @@ class SheetsSyncEngine:
         sale_date: Optional[str] = None,
         platform: str = "Vinted",
         order_id: str = "",
+        sync_lots_after: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """
         Finds an active listing in Item_Listings by SKU, Vinted ID, or Title,
         moves it to Sold_Items with full sale metadata, profit formulas, and sale type,
         and removes it from Item_Listings.
         """
-        sh = self.client.get_spreadsheet()
-        ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
-        ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
+        ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
 
         listings_rows = ws_listings.get_all_values()
         if len(listings_rows) <= 1:
@@ -562,10 +573,11 @@ class SheetsSyncEngine:
         ws_sold.append_row(sold_row_data, value_input_option="USER_ENTERED")
         ws_listings.delete_rows(target_row_idx)
 
-        try:
-            self.sync_lots()
-        except Exception:
-            pass
+        if sync_lots_after:
+            try:
+                self.sync_lots()
+            except Exception:
+                pass
 
         return {SOLD_ITEMS_HEADERS[i]: sold_row_data[i] for i in range(len(SOLD_ITEMS_HEADERS))}
 
@@ -574,8 +586,7 @@ class SheetsSyncEngine:
         Finds any listings in Item_Listings where Status contains 'Sold' (e.g. manually set by user)
         and migrates them into Sold_Items, then removes them from Item_Listings.
         """
-        sh = self.client.get_spreadsheet()
-        ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
 
         listings_rows = ws_listings.get_all_values()
         if len(listings_rows) <= 1:
@@ -597,9 +608,16 @@ class SheetsSyncEngine:
                     sku=cur_sku,
                     status=cur_status,
                     sold_price=cur_price,
+                    sync_lots_after=False,
                 )
                 if res:
                     moved_count += 1
+
+        if moved_count > 0:
+            try:
+                self.sync_lots()
+            except Exception:
+                pass
 
         return moved_count
 
@@ -609,15 +627,14 @@ class SheetsSyncEngine:
         When an item sells or has sold status, it moves/appends to Sold_Items.
         Automatically assigns Lot_ID when Date_Listed matches Inventory_Lots purchase date.
         """
-        sh = self.client.get_spreadsheet()
-        ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
-        ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
+        ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
 
         listings_rows = ws_listings.get_all_values()
         sold_rows = ws_sold.get_all_values()
 
         date_to_lot_id = self.get_date_to_lot_map()
-        max_sku_num = self.get_max_sku_num()
+        max_sku_num = self.get_max_sku_num(cached_rows=listings_rows + sold_rows)
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         l_headers = listings_rows[0] if listings_rows else LISTINGS_HEADERS
@@ -881,8 +898,7 @@ class SheetsSyncEngine:
         Reconciles scraped completed orders directly with Sold_Items.
         Moves matching Item_Listings to Sold_Items, or appends directly if not currently in active listings.
         """
-        sh = self.client.get_spreadsheet()
-        ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+        ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
         date_to_lot_id = self.get_date_to_lot_map()
 
         sold_rows = ws_sold.get_all_values()
@@ -914,8 +930,9 @@ class SheetsSyncEngine:
                 sold_by_title[sr[title_idx].strip().lower()] = r_i
 
         # Pre-index active listings ONCE to avoid repeated get_all_values() in move_listing_to_sold
-        ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
         listings_rows = ws_listings.get_all_values()
+        max_sku_num = self.get_max_sku_num(cached_rows=listings_rows + sold_rows)
         active_sku_to_row: Dict[str, int] = {}
         active_title_to_row: Dict[str, int] = {}
         if len(listings_rows) > 1:
@@ -954,6 +971,7 @@ class SheetsSyncEngine:
                     sale_date=sale_date_str,
                     platform=order.platform or "Vinted",
                     order_id=order.order_id,
+                    sync_lots_after=False,
                 )
                 if moved_item:
                     synced_count += 1

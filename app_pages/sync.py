@@ -23,6 +23,60 @@ def get_sheets_client() -> GoogleSheetsClient:
     )
 
 
+@st.cache_data(ttl=60)
+def get_cached_counts(sheet_id: str, _creds):
+    """Fetches active and sold counts with batch get (1 API call) and 60-second cache."""
+    client = GoogleSheetsClient(sheet_id=sheet_id, credentials=_creds)
+    sh = client.get_spreadsheet()
+    try:
+        res = sh.values_batch_get(["Item_Listings!A:A", "Sold_Items!A:A"])
+        val_ranges = res.get("valueRanges", [])
+        active_rows = val_ranges[0].get("values", []) if len(val_ranges) > 0 else []
+        sold_rows = val_ranges[1].get("values", []) if len(val_ranges) > 1 else []
+        active_cnt = max(0, len(active_rows) - 1)
+        sold_cnt = max(0, len(sold_rows) - 1)
+        return active_cnt, sold_cnt
+    except Exception:
+        ws_l = sh.worksheet("Item_Listings")
+        ws_s = sh.worksheet("Sold_Items")
+        return max(0, len(ws_l.get_all_values()) - 1), max(0, len(ws_s.get_all_values()) - 1)
+
+
+@st.cache_data(ttl=60)
+def get_cached_lots(sheet_id: str, _creds):
+    """Fetches all lots with 60-second cache."""
+    client = GoogleSheetsClient(sheet_id=sheet_id, credentials=_creds)
+    engine = SheetsSyncEngine(client)
+    return engine.get_all_lots()
+
+
+@st.cache_data(ttl=60)
+def get_cached_supplies(sheet_id: str, _creds):
+    """Fetches all shipping supplies with 60-second cache."""
+    client = GoogleSheetsClient(sheet_id=sheet_id, credentials=_creds)
+    engine = SheetsSyncEngine(client)
+    return engine.get_all_supplies()
+
+
+@st.cache_data(ttl=60)
+def get_cached_titles(sheet_id: str, _creds):
+    """Batch-fetches Title column from Item_Listings and Sold_Items in 1 single call."""
+    client = GoogleSheetsClient(sheet_id=sheet_id, credentials=_creds)
+    sh = client.get_spreadsheet()
+    try:
+        res = sh.values_batch_get(["Item_Listings!C:C", "Sold_Items!C:C"])
+        val_ranges = res.get("valueRanges", [])
+        active_titles = {str(r[0]).strip().lower() for r in val_ranges[0].get("values", [])[1:] if r and len(r) > 0} if len(val_ranges) > 0 else set()
+        sold_titles = {str(r[0]).strip().lower() for r in val_ranges[1].get("values", [])[1:] if r and len(r) > 0} if len(val_ranges) > 1 else set()
+        return active_titles, sold_titles
+    except Exception:
+        ws_list = sh.worksheet("Item_Listings")
+        ws_sold = sh.worksheet("Sold_Items")
+        active_titles = {str(r[2]).strip().lower() for r in ws_list.get_all_values()[1:] if len(r) > 2}
+        sold_titles = {str(r[2]).strip().lower() for r in ws_sold.get_all_values()[1:] if len(r) > 2}
+        return active_titles, sold_titles
+
+
 def render_sync_page():
     st.header("⚡ SpreadThrift Operations & Sync Hub")
     st.caption("From inbox alerts to bottom-line gains. Reconcile inventory via HTML uploads, live Gmail sync, or supply tracking.")
@@ -30,15 +84,17 @@ def render_sync_page():
     client = get_sheets_client()
     status_state = get_sync_status()
     u_email = (st.session_state.get("user_info", {}).get("email") or "anonymous").lower()
+    sheet_id = st.session_state.get("spreadsheet_id", settings.google_sheet_id)
+    user_creds = st.session_state.get("user_credentials")
 
     try:
-        sh = client.get_spreadsheet()
-        ws_l = sh.worksheet("Item_Listings")
-        ws_s = sh.worksheet("Sold_Items")
-        active_cnt = max(0, len(ws_l.get_all_values()) - 1)
-        sold_cnt = max(0, len(ws_s.get_all_values()) - 1)
+        active_cnt, sold_cnt = get_cached_counts(sheet_id, user_creds)
         connected = True
     except Exception as e:
+        if "429" in str(e):
+            st.warning("⏳ Google Sheets rate limit reached (60 read requests/min). Please wait 30 seconds for Google's quota to reset.")
+            st.button("🔄 Retry Connection", on_click=lambda: st.cache_data.clear(), key="retry_rate_limit_btn")
+            return
         active_cnt = 0
         sold_cnt = 0
         connected = False
@@ -75,7 +131,13 @@ def render_sync_page():
     # ---------------------------------------------------------
     with tab_html:
         engine = SheetsSyncEngine(client)
-        all_lots = engine.get_all_lots()
+        try:
+            all_lots = get_cached_lots(sheet_id, user_creds)
+        except Exception as e:
+            if "429" in str(e):
+                st.warning("⏳ Google Sheets quota reached. Waiting for reset...")
+                st.button("🔄 Retry Lots", on_click=lambda: st.cache_data.clear(), key="retry_lots_btn")
+            all_lots = []
 
         # -----------------------------------------------------------------
         # 1. Inventory Lot Assignment (Always Visible)
@@ -224,10 +286,7 @@ def render_sync_page():
                 st.markdown(f"#### ⚡ Reconciliation Preview (Assigned to {target_lot_id})")
                 
                 try:
-                    ws_list = sh.worksheet("Item_Listings")
-                    ws_sold = sh.worksheet("Sold_Items")
-                    curr_active_titles = {str(r[2]).strip().lower(): r for r in ws_list.get_all_values()[1:] if len(r) > 2}
-                    curr_sold_titles = {str(r[2]).strip().lower(): r for r in ws_sold.get_all_values()[1:] if len(r) > 2}
+                    curr_active_titles, curr_sold_titles = get_cached_titles(sheet_id, user_creds)
 
                     new_listings = [it for it in parsed_closet if it.status != "Sold" and it.title.strip().lower() not in curr_active_titles and it.title.strip().lower() not in curr_sold_titles]
                     sold_transitions = [it for it in parsed_orders if it.item_title.strip().lower() in curr_active_titles]
@@ -370,7 +429,13 @@ def render_sync_page():
         st.caption("Manage boxes, poly mailers, labels, and tape. The global weighted average packaging cost is automatically deducted from every sale in `Sold_Items` to compute true net profits.")
 
         sup_engine = SheetsSyncEngine(client)
-        sup_data = sup_engine.get_all_supplies()
+        try:
+            sup_data = get_cached_supplies(sheet_id, user_creds)
+        except Exception as e:
+            if "429" in str(e):
+                st.warning("⏳ Google Sheets rate limit reached. Waiting for quota reset...")
+                st.button("🔄 Retry Supplies", on_click=lambda: st.cache_data.clear(), key="retry_sup_btn")
+            sup_data = {"supplies": [], "avg_cost_per_shipment": 0.24}
         active_supplies = sup_data.get("supplies", [])
         avg_cost_val = sup_data.get("avg_cost_per_shipment", 0.24)
 

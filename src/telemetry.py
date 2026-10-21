@@ -270,6 +270,7 @@ def clear_all_telemetry():
         conn.execute("DELETE FROM user_events")
         conn.execute("DELETE FROM app_errors")
         conn.execute("DELETE FROM user_feedback")
+        conn.execute("DELETE FROM user_preferences")
     conn.close()
 
 
