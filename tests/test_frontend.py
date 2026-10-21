@@ -87,6 +87,7 @@ def test_cloud_ready_auth_and_manual_login():
     assert "Manual Login (Fallback)" in app_code
     assert "PassWord123!@#" in app_code or "settings.fallback_admin_password" in app_code
     assert "manual_login_email" in app_code
+    assert 'placeholder="user@sheetcount.com"' in app_code
 
 
 

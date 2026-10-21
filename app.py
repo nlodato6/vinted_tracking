@@ -142,8 +142,8 @@ if not st.session_state.authenticated:
         # 2. Manual Login (Fallback for Streamlit Cloud & Testing)
         with st.expander("🔐 Manual Login (Fallback)", expanded=False):
             st.caption("Sign in with email and password for manual access, testing, or if Google OAuth is unconfigured.")
-            manual_email = st.text_input("Email", value="nicashlod@gmail.com", key="manual_login_email")
-            manual_pass = st.text_input("Password", type="password", key="manual_login_pass")
+            manual_email = st.text_input("Email", placeholder="user@sheetcount.com", key="manual_login_email")
+            manual_pass = st.text_input("Password", type="password", placeholder="Enter your password", key="manual_login_pass")
 
             if st.button("Sign In with Email & Password", type="primary" if not is_oauth_configured() else "secondary", width="stretch", key="btn_manual_login"):
                 raw_email = manual_email.strip().lower()
