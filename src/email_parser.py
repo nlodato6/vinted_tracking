@@ -224,15 +224,52 @@ def extract_email_body(msg: email.message.Message) -> str:
     return body
 
 
+def _resolve_imap_folder(mail: imaplib.IMAP4_SSL, folder: str = "ALL") -> str:
+    """
+    Selects the requested IMAP mailbox.
+    If 'ALL' is specified, discovers Gmail's 'All Mail' mailbox (which includes archived emails)
+    or falls back gracefully to 'INBOX'.
+    """
+    if folder.upper() == "INBOX":
+        mail.select("INBOX")
+        return "INBOX"
+
+    candidates = ['"[Gmail]/All Mail"', '"[Google Mail]/All Mail"', 'INBOX']
+    try:
+        status, folder_list = mail.list()
+        if status == "OK" and folder_list:
+            for item in folder_list:
+                if isinstance(item, bytes):
+                    item_str = item.decode("utf-8", errors="ignore")
+                    if r"\All" in item_str:
+                        parts = item_str.split(' "/" ')
+                        if len(parts) == 2:
+                            candidates.insert(0, parts[1].strip())
+    except Exception:
+        pass
+
+    for candidate in candidates:
+        try:
+            status, _ = mail.select(candidate)
+            if status == "OK":
+                return candidate
+        except Exception:
+            continue
+
+    mail.select("INBOX")
+    return "INBOX"
+
+
 def fetch_vinted_emails_via_imap(
     username: str,
     password: str,
-    folder: str = "INBOX",
+    folder: str = "ALL",
     max_emails: int = 50,
-    search_query: str = '(FROM "no-reply@vinted.com")',
+    search_query: str = '(FROM "vinted")',
 ) -> List[ParsedEmailEvent]:
     """
-    Connects to Gmail via IMAP and parses recent transactional emails from Vinted.
+    Connects to Gmail via IMAP and parses transactional emails from Vinted.
+    By default, scans 'ALL' mail (including archived and inbox messages).
     Returns list of ParsedEmailEvent objects.
     """
     if not username or not password:
@@ -240,7 +277,7 @@ def fetch_vinted_emails_via_imap(
 
     mail = imaplib.IMAP4_SSL("imap.gmail.com")
     mail.login(username, password)
-    mail.select(folder)
+    _resolve_imap_folder(mail, folder)
 
     status, search_data = mail.search(None, search_query)
     if status != "OK" or not search_data or not search_data[0]:

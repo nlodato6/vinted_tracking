@@ -37,8 +37,9 @@ function processVintedEmails() {
     label = GmailApp.createLabel(labelName);
   }
 
-  // Searches emails from no-reply@vinted.com not yet labeled Vinted-Processed
-  const query = `from:no-reply@vinted.com -label:${labelName}`;
+  // Searches all emails from Vinted not yet labeled Vinted-Processed.
+  // Note: GmailApp.search searches ALL mail (both Inbox AND Archived) across the account.
+  const query = `from:vinted -label:${labelName}`;
   const threads = GmailApp.search(query, 0, 25);
   
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -262,6 +263,18 @@ function processVintedEmails() {
     const newBanner = `🟢 SYSTEM STATUS: Active | Last HTML Import: ${htmlTime} | Last Email Parsed: ${nowTime}`;
     wsDash.getRange('A2').setValue(newBanner);
   }
+}
+
+/**
+ * Diagnostic helper: verifies active logged-in Google account and inspects recent Vinted emails
+ */
+function debugEmailSearch() {
+  Logger.log("Active Google Account: " + Session.getActiveUser().getEmail());
+  const allThreads = GmailApp.search("from:vinted", 0, 10);
+  Logger.log(`Found ${allThreads.length} total Vinted threads in account (including Inbox and Archived).`);
+  allThreads.forEach((t, i) => {
+    Logger.log(`[${i + 1}] Subject: "${t.getFirstMessageSubject()}" | Date: ${t.getLastMessageDate()}`);
+  });
 }
 ```
 

@@ -171,7 +171,8 @@ def sync_lots():
 def sync_emails(
     user: Optional[str] = typer.Option(None, "--user", "-u", help="Gmail address (defaults to GMAIL_USER in .env)"),
     password: Optional[str] = typer.Option(None, "--password", "-p", help="Google App Password (defaults to GMAIL_APP_PASSWORD in .env)"),
-    max_emails: int = typer.Option(25, "--max", "-m", help="Max emails to check"),
+    max_emails: int = typer.Option(50, "--max", "-m", help="Max emails to check"),
+    inbox_only: bool = typer.Option(False, "--inbox-only", help="Scan only the Inbox instead of All Mail (including archived)"),
 ):
     """
     Connects to Gmail via IMAP, fetches recent Vinted transactional emails,
@@ -192,19 +193,23 @@ def sync_emails(
         )
         raise typer.Exit(code=1)
 
-    console.print(f"\n[bold cyan]📬 Connecting to Gmail ({gmail_user}) via IMAP...[/bold cyan]")
+    folder_name = "INBOX" if inbox_only else "ALL"
+    folder_desc = "Inbox" if inbox_only else "All Mail (Inbox + Archived)"
+    console.print(f"\n[bold cyan]📬 Connecting to Gmail ({gmail_user}) via IMAP ({folder_desc})...[/bold cyan]")
     try:
         events = fetch_vinted_emails_via_imap(
             username=gmail_user,
             password=gmail_pwd,
+            folder=folder_name,
             max_emails=max_emails,
+            search_query='(FROM "vinted")',
         )
     except Exception as e:
         console.print(f"[bold red]❌ IMAP connection failed: {e}[/bold red]")
         raise typer.Exit(code=1)
 
     if not events:
-        console.print("[yellow]No Vinted transactional emails found in inbox.[/yellow]\n")
+        console.print(f"[yellow]No Vinted notification emails found in {folder_desc}.[/yellow]\n")
         return
 
     console.print(f"[green]Found {len(events)} Vinted notification emails! Syncing to Google Sheets...[/green]")

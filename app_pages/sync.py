@@ -374,21 +374,34 @@ def render_sync_page():
         with e1:
             gmail_user_input = st.text_input("Gmail Address", value=os.getenv("GMAIL_USER", "tsavoie90@gmail.com"))
             gmail_pass_input = st.text_input("Google App Password (16 characters)", type="password", value=os.getenv("GMAIL_APP_PASSWORD", ""), help="16-character passcode generated at myaccount.google.com/apppasswords")
-            max_emails = st.slider("Max emails to scan", min_value=10, max_value=100, value=25)
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                scan_location = st.selectbox(
+                    "Mailbox to Scan",
+                    ["All Mail (Inbox + Archived)", "Inbox Only"],
+                    index=0,
+                    help="All Mail scans both your active inbox and archived Vinted notifications."
+                )
+            with col_m2:
+                max_emails = st.slider("Max emails to scan", min_value=10, max_value=150, value=50)
+
+            folder_param = "ALL" if scan_location.startswith("All Mail") else "INBOX"
 
             if st.button("🔄 Sync Vinted Emails Now", type="primary", width="stretch"):
                 if not gmail_user_input or not gmail_pass_input:
                     st.error("Please provide your Gmail address and 16-character App Password.")
                 else:
-                    with st.spinner(f"Connecting to {gmail_user_input} via IMAP..."):
+                    with st.spinner(f"Connecting to {gmail_user_input} via IMAP ({scan_location})..."):
                         try:
                             events = fetch_vinted_emails_via_imap(
                                 username=gmail_user_input.strip(),
                                 password=gmail_pass_input.strip(),
+                                folder=folder_param,
                                 max_emails=max_emails,
+                                search_query='(FROM "vinted")',
                             )
                             if not events:
-                                st.info("No new Vinted transactional emails found in inbox.")
+                                st.info("ℹ️ No Vinted notification emails found. We scanned your entire mailbox (including archived emails) for messages from Vinted. Make sure Vinted notifications are sent to this address.")
                             else:
                                 st.success(f"Found {len(events)} Vinted notification emails! Updating sheet...")
                                 engine = SheetsSyncEngine(client)
