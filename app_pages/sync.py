@@ -129,26 +129,33 @@ def render_sync_page():
                     new_notes = st.text_input("Notes", placeholder="e.g. 50 assorted fall sweaters and flannels", key="input_new_lot_notes")
                     target_lot_id = new_lot_id.strip().upper() if new_lot_id else next_suggested_id
 
-                    if st.button("💾 Save New Lot to Spreadsheet Now", type="secondary"):
-                        with st.spinner(f"Saving {target_lot_id} to Google Sheets..."):
-                            res = engine.add_inventory_lot(
-                                lot_id=target_lot_id,
-                                purchase_date=new_purchase_date.strftime("%Y-%m-%d"),
-                                source_vendor=new_vendor,
-                                total_cost=float(new_total_cost),
-                                total_articles=int(new_total_articles),
-                                status=new_status,
-                                notes=new_notes,
-                            )
-                            engine.sync_lots()
-                            st.session_state.selected_lot = target_lot_id
-                            st.cache_data.clear()
-                        if res.get("status") == "exists":
-                            st.warning(f"Lot {target_lot_id} already exists in your spreadsheet.")
-                        else:
-                            st.success(f"✔ Lot {target_lot_id} successfully saved to Inventory_Lots!")
-                        time.sleep(1.2)
-                        st.rerun()
+                    def on_cancel_new_lot():
+                        st.session_state["sync_lot_selectbox"] = lot_options[0]
+
+                    btn_c1, btn_c2 = st.columns([2, 1], vertical_alignment="bottom")
+                    with btn_c1:
+                        if st.button("💾 Save New Lot to Spreadsheet Now", type="secondary", width="stretch"):
+                            with st.spinner(f"Saving {target_lot_id} to Google Sheets..."):
+                                res = engine.add_inventory_lot(
+                                    lot_id=target_lot_id,
+                                    purchase_date=new_purchase_date.strftime("%Y-%m-%d"),
+                                    source_vendor=new_vendor,
+                                    total_cost=float(new_total_cost),
+                                    total_articles=int(new_total_articles),
+                                    status=new_status,
+                                    notes=new_notes,
+                                )
+                                engine.sync_lots()
+                                st.session_state.selected_lot = target_lot_id
+                                st.cache_data.clear()
+                            if res.get("status") == "exists":
+                                st.warning(f"Lot {target_lot_id} already exists in your spreadsheet.")
+                            else:
+                                st.success(f"✔ Lot {target_lot_id} successfully saved to Inventory_Lots!")
+                            time.sleep(1.2)
+                            st.rerun()
+                    with btn_c2:
+                        st.button("Cancel", on_click=on_cancel_new_lot, type="tertiary", icon=":material/close:", width="stretch")
             else:
                 target_lot_id = lot_id_map.get(selected_option, st.session_state.selected_lot)
                 st.session_state.selected_lot = target_lot_id
