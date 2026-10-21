@@ -96,6 +96,92 @@ In V2, the application separates into a **stateless REST backend** and a **cross
 
 ---
 
+## 💎 Monetization & Feature Tiering (Free vs. Paid)
+
+InVintory V2 implements a **Freemium** business model tailored for both the Apple App Store / Google Play and the Web SaaS. 
+
+Resellers can start for free immediately to track their closet performance, while active sellers pay for automated background syncing and direct spreadsheet manipulation.
+
+### Feature Tier Comparison Matrix
+
+| Feature Category | Feature Description | 🆓 Free Tier | ⚡ Paid (InVintory Pro) |
+| :--- | :--- | :---: | :---: |
+| **HTML Batch Import** | Upload & parse saved Vinted closet HTML files (`active` & `sold`) | ✅ **Unlimited** | ✅ **Unlimited** |
+| **Order History Import** | Upload & parse saved Vinted orders HTML files | ✅ **Unlimited** | ✅ **Unlimited** |
+| **Metrics & Analytics** | Interactive financial KPIs (Gross Revenue, Net Profit, Margin %) | ✅ **Included** | ✅ **Included** |
+| **Sales Timeline Charts** | Historical sales trends, cumulative revenue, and profit timelines | ✅ **Included** | ✅ **Included** |
+| **Category & Brand Breakdown** | Category performance leaderboards & top brand rankings | ✅ **Included** | ✅ **Included** |
+| **Scatter Analytics** | Price vs. profit margin distribution charts | ✅ **Included** | ✅ **Included** |
+| **Direct Email Sync** | Automated IMAP Gmail sync for incoming sale alerts & accepted offers | ❌ Paywalled | ✅ **Included (Automated)** |
+| **Email Webhook Ingestion** | Instant real-time sale capture via inbound email webhooks | ❌ Paywalled | ✅ **Included** |
+| **In-App Lot Creation** | Define and save new `Inventory_Lots` directly from the app UI | ❌ Paywalled | ✅ **Included** |
+| **Live Lot Re-Assignment** | Assign and update inventory hauls to new listings from UI | ❌ Paywalled | ✅ **Included** |
+| **Shipping Supplies Manager** | Add/edit packaging materials (mailers, tape, boxes) from UI | ❌ Paywalled | ✅ **Included** |
+| **Live Spreadsheets Sync** | Write new listings, sales, and supply updates directly to Google Sheets | ❌ Read-Only / Preview | ✅ **Full 2-Way Sync** |
+| **Push / Background Alerts** | Real-time native mobile push notifications on sales & price drops | ❌ Basic | ✅ **Priority Instant Alerts** |
+
+---
+
+## 🧪 Beta Tester & VIP Bypass System (Zero-Pay Access)
+
+During beta testing, pre-launch, and for VIP power sellers, testers **must have unrestricted access to all Paid/Pro features without being charged**.
+
+InVintory V2 implements a **4-tier entitlement bypass system** to ensure seamless zero-cost access across iOS, Android, and Web:
+
+### 1. Server-Side Email Whitelist (`BETA_TESTER_EMAILS`)
+* **How it works**: The backend maintains a configuration list of authenticated Google emails granted automatic lifetime Pro status.
+* **Implementation Pattern**:
+  ```python
+  BETA_TESTER_EMAILS = {
+      "tsavoie90@gmail.com",
+      "nicashlod@gmail.com",
+      "beta-tester1@gmail.com",
+  }
+
+  def get_user_tier(email: str, subscription_status: dict) -> str:
+      # 1. VIP/Beta Whitelist always grants Pro access
+      if email.lower() in {e.lower() for e in BETA_TESTER_EMAILS}:
+          return "pro_beta_tester"
+      
+      # 2. Check active Apple StoreKit / Google Play / Stripe subscription
+      if subscription_status.get("is_active"):
+          return "pro"
+          
+      return "free"
+  ```
+* **User Experience**: The user logs in via Google OAuth. The app immediately displays an **"InVintory Pro — Beta Tester VIP"** badge and unlocks Email Sync and direct Spreadsheet updates.
+
+### 2. Apple TestFlight Automatic Zero-Cost Purchases
+* **How it works**: When distributing beta builds via **Apple TestFlight**, Apple automatically routes all In-App Purchases through the Apple Sandbox environment.
+* **Cost to Tester**: **$0.00**. Testers can tap "Upgrade to Pro" in the app, and iOS displays a confirmation popup showing `[Environment: Sandbox] - You will not be charged`.
+* **Benefit**: Allows you to test the actual purchase flow, receipt validation, and paywall UI before public release without anyone spending money.
+
+### 3. Google Play Internal & Closed Testing License Testers
+* **How it works**: In the Google Play Console, you add beta testers to **Settings $\rightarrow$ License Testing**.
+* **Cost to Tester**: **$0.00**. Google Play Billing presents a test card that approves instantly with no real charge.
+
+### 4. Secret In-App Redemption / Promo Codes
+* **How it works**: Under **Settings $\rightarrow$ Redeem Beta Code**, testers can enter a secret promo phrase (e.g. `INVINTORY-BETA-VIP`) to immediately elevate their account to Pro.
+* **Benefit**: Allows you to invite testers on the Web SaaS or outside of TestFlight without modifying server configuration files every time.
+* **App Store Promo Codes**: Apple also provides developers with up to **1,000 free App Store promotional codes** per app version that redeem subscriptions for free directly through the App Store.
+
+---
+
+## 💳 App Store Monetization Architecture (RevenueCat / StoreKit)
+
+For handling cross-platform subscriptions cleanly between iOS, Android, and Web:
+
+1. **Recommended Subscription Engine: [RevenueCat](https://www.revenuecat.com/)**:
+   * Official SDK for React Native (Expo) and Web.
+   * Single API handling Apple StoreKit 2, Google Play Billing, and Stripe (Web).
+   * Synchronizes user entitlements: if a user subscribes on their iPhone, their InVintory Pro features are automatically unlocked when they log into the Web app.
+2. **Pricing Structure**:
+   * **Free**: $0/month (unlimited HTML imports, complete analytics & metrics).
+   * **InVintory Pro Monthly**: $4.99 – $9.99/month (automated email sync, direct 2-way Google Sheets editing, shipping supplies calculator, push notifications).
+   * **InVintory Pro Annual**: $49.99 – $79.99/year (with 7-day free trial).
+
+---
+
 ## 📋 Phased Rollout Plan
 
 ### Phase 1: Web MVP Launch (Immediate)
