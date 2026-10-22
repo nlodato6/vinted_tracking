@@ -812,4 +812,69 @@ def test_reconcile_missing_sold_metadata_module_export_and_sync_engine(mock_shee
     assert hasattr(app_engine, "clean_blank_rows")
 
 
+def test_reconcile_missing_sold_metadata_with_emails(mock_sheets_env, monkeypatch):
+    from src.email_parser import ParsedEmailEvent
+    import src.email_parser
+
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Row that was imported previously with only "Order <UUID>" and missing lot, brand, category, url
+    row_data = [""] * len(SOLD_ITEMS_HEADERS)
+    row_data[0] = "SKU-8888"
+    row_data[1] = ""                                                       # Missing Lot
+    row_data[2] = "Order 01a1569f-be78-78a1-a263-1fdb328d3780"           # Generic Order Title
+    row_data[3] = ""                                                       # Missing Brand
+    row_data[4] = ""                                                       # Missing Category
+    row_data[11] = 68.00                                                   # Sold_Price
+    row_data[14] = "2026-10-22"                                            # Sale_Date
+    row_data[21] = "01a1569f-be78-78a1-a263-1fdb328d3780"                 # Order_ID
+    row_data[22] = ""                                                       # Missing Vinted_URL
+    row_data[23] = "Sold"
+    ws_sold.rows.append(row_data)
+
+    mock_email = ParsedEmailEvent(
+        event_type="sale",
+        item_title="Vintage Carhartt Chore Jacket",
+        brand="Carhartt",
+        category="Outerwear",
+        order_id="01a1569f-be78-78a1-a263-1fdb328d3780",
+        sold_price=68.00,
+        vinted_url="https://www.vinted.com/transaction/01a1569f-be78-78a1-a263-1fdb328d3780",
+        timestamp=datetime(2026, 10, 22, 12, 0, 0),
+    )
+
+    monkeypatch.setattr(
+        src.email_parser,
+        "fetch_vinted_emails_via_imap",
+        lambda *args, **kwargs: [mock_email],
+    )
+
+    res = engine.reconcile_missing_sold_metadata(
+        default_lot="LOT-OCTOBER",
+        gmail_user="test@gmail.com",
+        gmail_password="app_password",
+        max_emails_scan=50,
+    )
+
+    assert res["fixed_rows"] == 1
+    assert res["titles_fixed"] == 1
+    assert res["lots_assigned"] == 1
+    assert res["brands_fixed"] == 1
+    assert res["categories_fixed"] == 1
+    assert res["emails_scanned"] == 1
+    assert res["emails_matched"] == 1
+
+    matched = [r for r in ws_sold.rows[1:] if r[0] == "SKU-8888"]
+    assert len(matched) == 1
+    fixed_row = matched[0]
+    assert fixed_row[1] == "LOT-OCTOBER"
+    assert fixed_row[2] == "Vintage Carhartt Chore Jacket"
+    assert fixed_row[3] == "Carhartt"
+    assert fixed_row[4] == "Outerwear"
+    assert fixed_row[21] == "01a1569f-be78-78a1-a263-1fdb328d3780"
+    assert fixed_row[22] == "https://www.vinted.com/transaction/01a1569f-be78-78a1-a263-1fdb328d3780"
+
+
+
 

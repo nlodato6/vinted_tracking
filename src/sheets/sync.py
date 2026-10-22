@@ -1373,10 +1373,17 @@ class SheetsSyncEngine:
         results = self.process_email_batch([event])
         return results[0] if results else {"status": "ignored"}
 
-    def reconcile_missing_sold_metadata(self, default_lot: str = "") -> Dict[str, int]:
+    def reconcile_missing_sold_metadata(
+        self,
+        default_lot: str = "",
+        gmail_user: str = "",
+        gmail_password: str = "",
+        max_emails_scan: int = 250,
+    ) -> Dict[str, Any]:
         """
         Scans Sold_Items for rows missing Title, Brand, Category, or Lot_ID.
-        Cross-references with Item_Listings, URL slugs, and category inference to backfill missing fields.
+        Cross-references with transactional emails (including those labeled 'Vinted-Processed'),
+        active listings in Item_Listings, URL slugs, and category inference to backfill missing fields.
         Returns a dict of counts of updated fields.
         """
         ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
@@ -1386,7 +1393,15 @@ class SheetsSyncEngine:
         listings_rows = ws_listings.get_all_values()
 
         if len(sold_rows) <= 1:
-            return {"fixed_rows": 0, "titles_fixed": 0, "lots_assigned": 0, "brands_fixed": 0, "categories_fixed": 0}
+            return {
+                "fixed_rows": 0,
+                "titles_fixed": 0,
+                "lots_assigned": 0,
+                "brands_fixed": 0,
+                "categories_fixed": 0,
+                "emails_scanned": 0,
+                "emails_matched": 0,
+            }
 
         s_headers = sold_rows[0]
         sku_idx = s_headers.index("Item_SKU") if "Item_SKU" in s_headers else 0
@@ -1394,7 +1409,43 @@ class SheetsSyncEngine:
         title_idx = s_headers.index("Title") if "Title" in s_headers else 2
         brand_idx = s_headers.index("Brand") if "Brand" in s_headers else 3
         cat_idx = s_headers.index("Category") if "Category" in s_headers else 4
+        price_idx = s_headers.index("Sold_Price") if "Sold_Price" in s_headers else 11
+        date_idx = s_headers.index("Sale_Date") if "Sale_Date" in s_headers else 14
+        order_idx = s_headers.index("Order_ID") if "Order_ID" in s_headers else 21
         url_idx = s_headers.index("Vinted_URL") if "Vinted_URL" in s_headers else 22
+
+        # 1. Optionally scan Gmail for Vinted notification emails (including Vinted-Processed tag)
+        emails = []
+        if gmail_user and gmail_password:
+            try:
+                from src.email_parser import fetch_vinted_emails_via_imap
+                emails = fetch_vinted_emails_via_imap(
+                    username=gmail_user.strip(),
+                    password=gmail_password.strip(),
+                    folder="ALL",
+                    max_emails=max_emails_scan,
+                    scan_processed_label=True,
+                )
+            except Exception as e:
+                print(f"[Warning] Failed to fetch emails for sold metadata backfill: {e}")
+
+        # Index fetched emails for fast lookup
+        emails_by_order: Dict[str, Any] = {}
+        emails_by_vinted_id: Dict[str, Any] = {}
+        emails_by_url: Dict[str, Any] = {}
+        emails_by_price_date: Dict[Any, List[Any]] = {}
+
+        for ev in emails:
+            if getattr(ev, "order_id", ""):
+                emails_by_order[ev.order_id.strip().lower()] = ev
+            if getattr(ev, "vinted_id", ""):
+                emails_by_vinted_id[ev.vinted_id.strip()] = ev
+            if getattr(ev, "vinted_url", ""):
+                emails_by_url[ev.vinted_url.strip().lower()] = ev
+            sp = round(getattr(ev, "sold_price", 0.0), 2)
+            sd = normalize_date_str(ev.timestamp.strftime("%Y-%m-%d")) if getattr(ev, "timestamp", None) else ""
+            if sp > 0 and sd:
+                emails_by_price_date.setdefault((sp, sd), []).append(ev)
 
         # Index active listings by Vinted ID, URL, and Title
         l_headers = listings_rows[0] if listings_rows else []
@@ -1425,39 +1476,90 @@ class SheetsSyncEngine:
         lots_assigned = 0
         brands_fixed = 0
         categories_fixed = 0
+        emails_matched = 0
 
         for r_i, row in enumerate(sold_rows[1:], start=2):
-            cur_lot = row[lot_idx].strip() if len(row) > lot_idx else ""
-            cur_title = row[title_idx].strip() if len(row) > title_idx else ""
-            cur_brand = row[brand_idx].strip() if len(row) > brand_idx else ""
-            cur_cat = row[cat_idx].strip() if len(row) > cat_idx else ""
-            cur_url = row[url_idx].strip() if len(row) > url_idx else ""
+            cur_lot = str(row[lot_idx]).strip() if len(row) > lot_idx else ""
+            cur_title = str(row[title_idx]).strip() if len(row) > title_idx else ""
+            cur_brand = str(row[brand_idx]).strip() if len(row) > brand_idx else ""
+            cur_cat = str(row[cat_idx]).strip() if len(row) > cat_idx else ""
+            cur_price_raw = str(row[price_idx]).strip() if len(row) > price_idx else ""
+            cur_price = parse_price(cur_price_raw)
+            cur_date = normalize_date_str(str(row[date_idx]).strip()) if len(row) > date_idx else ""
+            cur_order = str(row[order_idx]).strip() if len(row) > order_idx else ""
+            cur_url = str(row[url_idx]).strip() if len(row) > url_idx else ""
 
             # Check if this row needs fixing
             needs_title = not cur_title or cur_title.lower().startswith("order ") or cur_title.lower().startswith("vinted item")
             needs_lot = not cur_lot and bool(default_lot)
-            needs_brand = not cur_brand or cur_brand.lower() in ("unbranded", "none")
-            needs_cat = not cur_cat or cur_cat.lower() in ("other apparel", "none")
+            needs_brand = not cur_brand or cur_brand.lower() in ("unbranded", "none", "unknown")
+            needs_cat = not cur_cat or cur_cat.lower() in ("other apparel", "none", "unknown")
+            needs_order = not cur_order
+            needs_url = not cur_url
 
-            if not (needs_title or needs_lot or needs_brand or needs_cat):
+            if not (needs_title or needs_lot or needs_brand or needs_cat or needs_order or needs_url):
                 continue
 
-            # Check for active listing match by URL or ID
-            v_id_match = re.search(r"/items/(\d+)", cur_url)
+            matched_ev: Any = None
+
+            # 1. Match email by Order_ID
+            if cur_order:
+                matched_ev = emails_by_order.get(cur_order.lower())
+
+            # 2. Match email by UUID in Title (e.g. "Order 01a1569f-be78...")
+            if not matched_ev and cur_title:
+                uuid_m = re.search(r"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})", cur_title, re.IGNORECASE)
+                if uuid_m:
+                    matched_ev = emails_by_order.get(uuid_m.group(1).lower())
+
+            # 3. Match email by UUID in URL (e.g. "...transaction/01a1569f-be78...")
+            if not matched_ev and cur_url:
+                uuid_m = re.search(r"/(?:transaction|inbox)/([a-f0-9-]+)", cur_url, re.IGNORECASE)
+                if uuid_m:
+                    matched_ev = emails_by_order.get(uuid_m.group(1).lower())
+
+            # 4. Match email by Vinted ID in URL
+            if not matched_ev and cur_url:
+                vid_m = re.search(r"/items/(\d+)", cur_url)
+                if vid_m:
+                    matched_ev = emails_by_vinted_id.get(vid_m.group(1))
+
+            # 5. Match email by exact URL
+            if not matched_ev and cur_url:
+                matched_ev = emails_by_url.get(cur_url.lower())
+
+            # 6. Match email by price and sale date (if unique match)
+            if not matched_ev and cur_price > 0 and cur_date:
+                cands = emails_by_price_date.get((round(cur_price, 2), cur_date))
+                if cands and len(cands) == 1:
+                    matched_ev = cands[0]
+
+            if matched_ev:
+                emails_matched += 1
+
+            # Match active listings as secondary source
+            v_id_match = re.search(r"/items/(\d+)", cur_url) if cur_url else None
             v_id = v_id_match.group(1) if v_id_match else ""
-            matched_listing = listings_by_id.get(v_id) or listings_by_url.get(cur_url.lower()) or (listings_by_title.get(cur_title.lower()) if cur_title else None)
+            matched_listing = (
+                listings_by_id.get(v_id)
+                or listings_by_url.get(cur_url.lower())
+                or (listings_by_title.get(cur_title.lower()) if cur_title else None)
+            )
 
             row_changed = False
 
-            # 1. Title
+            # 1. Backfill Title
             if needs_title:
                 new_title = ""
-                if matched_listing and len(matched_listing) > l_title_idx and matched_listing[l_title_idx].strip():
+                if matched_ev and getattr(matched_ev, "item_title", ""):
+                    new_title = matched_ev.item_title.strip()
+                elif matched_listing and len(matched_listing) > l_title_idx and matched_listing[l_title_idx].strip():
                     new_title = matched_listing[l_title_idx].strip()
                 elif cur_url:
                     slug_match = re.search(r"/items/\d+-([a-zA-Z0-9_-]+)", cur_url)
                     if slug_match:
                         new_title = slug_match.group(1).replace("-", " ").replace("_", " ").title().strip()
+
                 if new_title and new_title != cur_title:
                     cur_title = new_title
                     col_t = chr(ord('A') + title_idx)
@@ -1465,13 +1567,16 @@ class SheetsSyncEngine:
                     titles_fixed += 1
                     row_changed = True
 
-            # 2. Lot
+            # 2. Backfill Lot_ID
             if not cur_lot:
                 new_lot = ""
-                if matched_listing and len(matched_listing) > l_lot_idx and matched_listing[l_lot_idx].strip():
+                if matched_ev and getattr(matched_ev, "lot_id", ""):
+                    new_lot = matched_ev.lot_id.strip()
+                elif matched_listing and len(matched_listing) > l_lot_idx and matched_listing[l_lot_idx].strip():
                     new_lot = matched_listing[l_lot_idx].strip()
                 elif default_lot:
                     new_lot = default_lot
+
                 if new_lot:
                     cur_lot = new_lot
                     col_l = chr(ord('A') + lot_idx)
@@ -1479,31 +1584,53 @@ class SheetsSyncEngine:
                     lots_assigned += 1
                     row_changed = True
 
-            # 3. Brand
+            # 3. Backfill Brand
             if needs_brand:
                 new_brand = ""
-                if matched_listing and len(matched_listing) > l_brand_idx and matched_listing[l_brand_idx].strip():
+                if matched_ev and getattr(matched_ev, "brand", "") and matched_ev.brand.lower() not in ("unbranded", "none", "unknown"):
+                    new_brand = matched_ev.brand.strip()
+                elif matched_listing and len(matched_listing) > l_brand_idx and matched_listing[l_brand_idx].strip():
                     new_brand = matched_listing[l_brand_idx].strip()
                 elif cur_title:
                     new_brand = infer_brand(cur_title)
+
                 if new_brand and new_brand != cur_brand:
+                    cur_brand = new_brand
                     col_b = chr(ord('A') + brand_idx)
                     updates.append({"range": f"{col_b}{r_i}", "values": [[new_brand]]})
                     brands_fixed += 1
                     row_changed = True
 
-            # 4. Category
+            # 4. Backfill Category
             if needs_cat:
                 new_cat = ""
-                if matched_listing and len(matched_listing) > l_cat_idx and matched_listing[l_cat_idx].strip():
+                if matched_ev and getattr(matched_ev, "category", "") and matched_ev.category.lower() not in ("other apparel", "none", "unknown"):
+                    new_cat = matched_ev.category.strip()
+                elif matched_listing and len(matched_listing) > l_cat_idx and matched_listing[l_cat_idx].strip():
                     new_cat = matched_listing[l_cat_idx].strip()
                 elif cur_title:
                     new_cat = infer_clothing_category(cur_title)
+
                 if new_cat and new_cat != cur_cat:
+                    cur_cat = new_cat
                     col_c = chr(ord('A') + cat_idx)
                     updates.append({"range": f"{col_c}{r_i}", "values": [[new_cat]]})
                     categories_fixed += 1
                     row_changed = True
+
+            # 5. Backfill Order_ID if missing
+            if not cur_order and matched_ev and getattr(matched_ev, "order_id", ""):
+                cur_order = matched_ev.order_id.strip()
+                col_o = chr(ord('A') + order_idx)
+                updates.append({"range": f"{col_o}{r_i}", "values": [[cur_order]]})
+                row_changed = True
+
+            # 6. Backfill Vinted_URL if missing
+            if not cur_url and matched_ev and getattr(matched_ev, "vinted_url", ""):
+                cur_url = matched_ev.vinted_url.strip()
+                col_u = chr(ord('A') + url_idx)
+                updates.append({"range": f"{col_u}{r_i}", "values": [[cur_url]]})
+                row_changed = True
 
             if row_changed:
                 fixed_rows += 1
@@ -1518,12 +1645,25 @@ class SheetsSyncEngine:
             "lots_assigned": lots_assigned,
             "brands_fixed": brands_fixed,
             "categories_fixed": categories_fixed,
+            "emails_scanned": len(emails),
+            "emails_matched": emails_matched,
         }
 
 
-def reconcile_missing_sold_metadata(engine: SheetsSyncEngine, default_lot: str = "") -> Dict[str, int]:
+def reconcile_missing_sold_metadata(
+    engine: SheetsSyncEngine,
+    default_lot: str = "",
+    gmail_user: str = "",
+    gmail_password: str = "",
+    max_emails_scan: int = 250,
+) -> Dict[str, Any]:
     """Module-level helper to backfill missing metadata in Sold_Items."""
-    return engine.reconcile_missing_sold_metadata(default_lot=default_lot)
+    return engine.reconcile_missing_sold_metadata(
+        default_lot=default_lot,
+        gmail_user=gmail_user,
+        gmail_password=gmail_password,
+        max_emails_scan=max_emails_scan,
+    )
 
 
 

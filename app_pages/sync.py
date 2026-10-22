@@ -169,8 +169,17 @@ def render_sync_page():
                     time.sleep(1.2)
                     st.rerun()
         with c_tool2:
+            saved_u, saved_p = get_user_email_credentials(u_email)
+            active_email_user = saved_u or os.getenv("GMAIL_USER", "") or st.session_state.get("email_sync_user", "")
+            active_email_pass = saved_p or os.getenv("GMAIL_APP_PASSWORD", "") or st.session_state.get("gmail_pass_input", "")
+
             if st.button("✨ Backfill Missing Metadata in Sold", type="secondary", width="stretch", icon=":material/auto_fix_high:", key="backfill_metadata_btn"):
-                with st.spinner("Analyzing Sold_Items and restoring missing Titles, Lots, Brands, and Categories..."):
+                spinner_text = "Analyzing Sold_Items and restoring missing Titles, Lots, Brands, and Categories"
+                if active_email_user and active_email_pass:
+                    spinner_text += f" (re-scanning Vinted-Processed emails from {active_email_user})..."
+                else:
+                    spinner_text += "..."
+                with st.spinner(spinner_text):
                     engine = get_sheets_sync_engine(client)
                     if not hasattr(engine, "reconcile_missing_sold_metadata"):
                         import importlib
@@ -178,18 +187,30 @@ def render_sync_page():
                         importlib.reload(src.sheets.sync)
                         from src.sheets.sync import SheetsSyncEngine as FallbackEngine
                         engine = FallbackEngine(client)
-                    res = engine.reconcile_missing_sold_metadata(default_lot=st.session_state.get("selected_lot", ""))
+                    res = engine.reconcile_missing_sold_metadata(
+                        default_lot=st.session_state.get("selected_lot", ""),
+                        gmail_user=active_email_user,
+                        gmail_password=active_email_pass,
+                        max_emails_scan=250,
+                    )
                     st.cache_data.clear()
                     if res["fixed_rows"] > 0:
+                        email_info = f" from {res.get('emails_scanned', 0)} scanned emails" if res.get('emails_scanned', 0) > 0 else ""
                         st.success(
-                            f"✔ Enriched {res['fixed_rows']} sold items! "
+                            f"✔ Enriched {res['fixed_rows']} sold items{email_info}! "
                             f"({res['titles_fixed']} titles restored, {res['lots_assigned']} lots assigned, "
                             f"{res['brands_fixed']} brands, {res['categories_fixed']} categories)"
                         )
                     else:
-                        st.info("✔ All items in Sold_Items already have full metadata!")
+                        email_scanned_msg = f" (Scanned {res.get('emails_scanned', 0)} emails)" if res.get('emails_scanned', 0) > 0 else ""
+                        st.info(f"✔ All items in Sold_Items already have full metadata!{email_scanned_msg}")
                     time.sleep(1.5)
                     st.rerun()
+
+            if active_email_user:
+                st.caption(f"📬 Gmail: `{active_email_user}` (re-scans `Vinted-Processed` emails)")
+            else:
+                st.caption("💡 Enter Gmail in **Direct Email Sync** tab to re-scan `Vinted-Processed` emails.")
         with c_tool3:
             if st.button("🔄 Force Refresh Data", type="secondary", width="stretch", icon=":material/refresh:", key="force_refresh_data_btn"):
                 st.cache_data.clear()

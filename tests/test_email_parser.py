@@ -109,3 +109,86 @@ def test_parse_sold_email_html_anchor():
     assert event.sold_price == 85.00
 
 
+def test_parse_sold_email_img_alt_cdn():
+    subject = "You sold an item on Vinted!"
+    body = """
+    <html>
+      <body>
+        <h1>Congratulations on your sale!</h1>
+        <p>You sold an item to @fashionfan!</p>
+        <img src="https://images1.vinted.net/t/04_01c45_abcdef12345/f800/12345.jpeg" alt="Carhartt WIP Michigan Chore Coat" width="100">
+        <a href="https://www.vinted.com/transaction/01a1569f-be78-78a1-a263-1fdb328d3780">View order details</a>
+        <div>Total earnings: $68.00</div>
+      </body>
+    </html>
+    """
+    event = parse_vinted_email(subject, body)
+    assert event.event_type == "sale"
+    assert event.item_title == "Carhartt WIP Michigan Chore Coat"
+    assert event.brand == "Carhartt"
+    assert event.category == "Outerwear"
+    assert event.sold_price == 68.00
+    assert event.order_id == "01a1569f-be78-78a1-a263-1fdb328d3780"
+
+
+def test_parse_sold_email_html_unescape_and_explicit_brand():
+    subject = "You sold an item on Vinted!"
+    body = """
+    <div>
+      <p>Congratulations, your item was sold!</p>
+      <a href="https://www.vinted.com/transaction/01a2b3c4-9999">Levi&#39;s &amp; Vintage Denim Trucker Jacket</a>
+      <p>Brand: Levi&#39;s</p>
+      <p>Category: Outerwear</p>
+      <p>Price: $42.50</p>
+    </div>
+    """
+    event = parse_vinted_email(subject, body)
+    assert event.event_type == "sale"
+    assert "Levi's & Vintage Denim Trucker Jacket" in event.item_title
+    assert "Levi" in event.brand
+    assert event.category == "Outerwear"
+    assert event.sold_price == 42.50
+    assert event.order_id == "01a2b3c4-9999"
+
+
+def test_fetch_vinted_emails_scans_processed_label(monkeypatch):
+    import imaplib
+    from unittest.mock import MagicMock
+    from src.email_parser import fetch_vinted_emails_via_imap
+
+    mock_mail = MagicMock()
+    mock_mail.select.return_value = ("OK", [b"1"])
+    mock_mail.list.return_value = ("OK", [b'(\\HasNoChildren) "/" "[Gmail]/All Mail"'])
+
+    # Simulate search returning message ID 101 for label:Vinted-Processed
+    def mock_search(charset, *criteria):
+        query_str = " ".join(str(c) for c in criteria)
+        if "label:Vinted-Processed" in query_str:
+            return ("OK", [b"101"])
+        return ("OK", [b""])
+
+    mock_mail.search.side_effect = mock_search
+
+    # Simulate message fetch
+    raw_email = (
+        b"From: no-reply@vinted.com\r\n"
+        b"Subject: You sold an item on Vinted!\r\n"
+        b"Date: Wed, 22 Oct 2026 12:00:00 -0400\r\n"
+        b"Content-Type: text/html\r\n\r\n"
+        b"<html><body><img src='https://images1.vinted.net/item.jpg' alt='Patagonia Snap-T Fleece Pullover'>"
+        b"<a href='https://www.vinted.com/transaction/test-uuid-1234'>Order details</a>"
+        b"Earnings: $55.00</body></html>"
+    )
+    mock_mail.fetch.return_value = ("OK", [(b"101 (RFC822 {123})", raw_email)])
+
+    monkeypatch.setattr(imaplib, "IMAP4_SSL", lambda host: mock_mail)
+
+    events = fetch_vinted_emails_via_imap("user@gmail.com", "app_password_1234", max_emails=10)
+    assert len(events) == 1
+    assert events[0].item_title == "Patagonia Snap-T Fleece Pullover"
+    assert events[0].brand == "Patagonia"
+    assert events[0].sold_price == 55.00
+    assert events[0].order_id == "test-uuid-1234"
+
+
+

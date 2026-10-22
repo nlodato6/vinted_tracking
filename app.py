@@ -1,4 +1,4 @@
-"""Thread Count - Streamlit Multi-Tenant Web App for Vinted Inventory, Sales & Analytics."""
+"""Thread Count (Threadcount) - Streamlit Multi-Tenant Web App for Vinted Inventory, Sales & Analytics."""
 
 import os
 import re
@@ -36,7 +36,7 @@ from src.sheets.client import auto_provision_user_sheet
 LOGO_PATH = "assets/invintory.png"
 
 st.set_page_config(
-    page_title="Thread Count",
+    page_title="Threadcount",
     page_icon=LOGO_PATH if os.path.exists(LOGO_PATH) else "👕",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -70,7 +70,7 @@ if "email_sync_user" not in st.session_state:
 # -----------------------------------------------------------------------------
 # Legal & Compliance Dialogs
 # -----------------------------------------------------------------------------
-@st.dialog("🛡️ Thread Count Privacy Policy", width="large")
+@st.dialog("🛡️ Threadcount Privacy Policy", width="large")
 def show_privacy_dialog():
     privacy_file = settings.base_dir / "PRIVACY_POLICY.md"
     if privacy_file.exists():
@@ -79,7 +79,7 @@ def show_privacy_dialog():
         st.info("Privacy Policy document is available at PRIVACY_POLICY.md")
 
 
-@st.dialog("📜 Thread Count Terms of Service", width="large")
+@st.dialog("📜 Threadcount Terms of Service", width="large")
 def show_terms_dialog():
     terms_file = settings.base_dir / "TERMS_OF_SERVICE.md"
     if terms_file.exists():
@@ -88,7 +88,7 @@ def show_terms_dialog():
         st.info("Terms of Service document is available at TERMS_OF_SERVICE.md")
 
 
-@st.dialog("📖 Thread Count User & Feature Guide", width="large")
+@st.dialog("📖 Threadcount User & Feature Guide", width="large")
 def show_user_guide_dialog():
     guide_file = settings.base_dir / "USER_GUIDE.md"
     if guide_file.exists():
@@ -143,9 +143,9 @@ if not st.session_state.authenticated:
     header_col1, header_col2 = st.columns([0.12, 0.88], vertical_alignment="center")
     with header_col1:
         if os.path.exists(LOGO_PATH):
-            st.image(LOGO_PATH, width=80, alt="Thread Count Logo")
+            st.image(LOGO_PATH, width=80, alt="Threadcount Logo")
     with header_col2:
-        st.title("Thread Count")
+        st.title("Threadcount")
         st.markdown("**From inbox alerts to bottom-line gains.**")
 
     st.markdown("Automate your Vinted inventory tracking, net profits, and performance metrics directly with Google Sheets.")
@@ -226,7 +226,7 @@ if not st.session_state.authenticated:
     leg_col1, leg_col2, leg_col3, leg_col4 = st.columns([2.2, 1, 1, 1], vertical_alignment="center")
     with leg_col1:
         st.caption(
-            "⚖️ **Third-Party Trademark & Legal Disclaimer**: Independent tool. Not affiliated with, authorized, or endorsed by "
+            "**Third-Party Trademark & Legal Disclaimer**: Independent tool. Not affiliated with, authorized, or endorsed by "
             "Vinted, Google LLC, or Meta Platforms, Inc. All trademarks belong to their respective owners."
         )
     with leg_col2:
@@ -247,7 +247,7 @@ if not st.session_state.authenticated:
 with st.sidebar:
     st.sidebar.caption("From inbox alerts to bottom-line gains.")
     if st.session_state.get("is_admin", False):
-        st.sidebar.caption("👑 **Administrator Session**")
+        st.sidebar.caption("**Administrator Session**")
     u_email = st.session_state.user_info.get("email", "Local User")
     u_name = st.session_state.user_info.get("name", "Vinted Seller")
     u_pic = st.session_state.user_info.get("picture")
@@ -363,8 +363,8 @@ with st.sidebar:
 
     # Feedback & User Voice Module
     with st.sidebar.popover("💬 Feedback & Requests", icon=":material/rate_review:", width="stretch"):
-        st.markdown("#### 💬 Share Your Feedback")
-        st.caption("Suggest features, report bugs, or share thoughts directly with the Thread Count team.")
+        st.markdown("#### Share Your Feedback")
+        st.caption("Suggest features, report bugs, or share thoughts directly with the Threadcount team.")
 
         fb_category = st.selectbox(
             "Feedback Type",
@@ -406,7 +406,7 @@ with st.sidebar:
     st.sidebar.divider()
     with st.sidebar.expander("⚖️ Legal & Compliance"):
         st.caption(
-            "**Thread Count** is an independent third-party tool and is not affiliated with, authorized, or endorsed by "
+            "**Threadcount** is an independent third-party tool and is not affiliated with, authorized, or endorsed by "
             "Vinted, Google LLC, or Meta Platforms, Inc. All trademarks belong to their respective owners."
         )
         col_sp, col_st = st.columns(2)

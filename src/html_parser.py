@@ -33,36 +33,63 @@ def extract_vinted_id(url_or_str: str) -> str:
 def infer_clothing_category(title: str) -> str:
     """Infers high-level clothing category from garment title."""
     t = title.lower()
-    if any(k in t for k in ["jacket", "coat", "blazer", "parka", "windbreaker", "vest"]):
+    if any(k in t for k in ["jacket", "coat", "blazer", "parka", "windbreaker", "vest", "anorak", "overcoat", "bomber", "trench"]):
         return "Outerwear"
-    if any(k in t for k in ["sweater", "hoodie", "sweatshirt", "cardigan", "pullover", "fleece"]):
+    if any(k in t for k in ["sweater", "hoodie", "sweatshirt", "cardigan", "pullover", "fleece", "knit", "jumper", "crewneck", "quarter zip"]):
         return "Sweaters & Hoodies"
-    if any(k in t for k in ["shirt", "tee", "top", "blouse", "polo", "tank"]):
+    if any(k in t for k in ["shirt", "tee", "top", "blouse", "polo", "tank", "jersey", "t-shirt", "button up", "button down", "henley", "camisole", "crop"]):
         return "Tops & Shirts"
-    if any(k in t for k in ["jean", "pant", "trouser", "denim", "short", "legging", "jogger", "sweatpant"]):
+    if any(k in t for k in ["jean", "pant", "trouser", "denim", "short", "legging", "jogger", "sweatpant", "cargo", "chino", "bottom"]):
         return "Pants & Jeans"
-    if any(k in t for k in ["shoe", "boot", "sneaker", "heel", "sandal", "loafer", "flat"]):
+    if any(k in t for k in ["shoe", "boot", "sneaker", "heel", "sandal", "loafer", "flat", "cleat", "clog", "slide", "mule", "slipper"]):
         return "Footwear"
-    if any(k in t for k in ["bag", "purse", "backpack", "tote", "hat", "cap", "belt", "scarf", "sunglass", "wallet", "jewelry", "necklace"]):
-        return "Accessories"
-    if any(k in t for k in ["dress", "skirt"]):
+    if any(k in t for k in ["dress", "skirt", "gown", "sundress", "maxi", "midi", "mini"]):
         return "Dresses & Skirts"
+    if any(k in t for k in ["bag", "purse", "backpack", "tote", "hat", "cap", "belt", "scarf", "sunglass", "wallet", "jewelry", "necklace", "beanie", "ring", "bracelet", "watch", "tie"]):
+        return "Accessories"
+    if any(k in t for k in ["swim", "bikini", "trunks", "boardshort"]):
+        return "Swimwear"
+    if any(k in t for k in ["bra", "underwear", "boxer", "brief", "sock", "pajama", "robe", "lounge"]):
+        return "Underwear & Loungewear"
     return "Other Apparel"
 
 
 def infer_brand(title: str, card_text: str = "") -> str:
     """Detects brand from card text or garment title."""
     popular_brands = [
-        "Carhartt", "Nike", "Levi's", "Levis", "Levi", "Adidas", "Ralph Lauren", "Polo",
+        "Carhartt", "Nike", "Levi's", "Levis", "Levi", "Adidas", "Ralph Lauren", "Polo Ralph Lauren", "Polo",
         "The North Face", "North Face", "Patagonia", "Stussy", "Champion",
-        "Harley Davidson", "Dickies", "Tommy Hilfiger", "Wrangler", "L.L. Bean",
+        "Harley Davidson", "Dickies", "Tommy Hilfiger", "Wrangler", "L.L. Bean", "LL Bean",
         "Arc'teryx", "Arcteryx", "Supreme", "Zara", "H&M", "Columbia", "Coach",
         "Free People", "Abercrombie", "American Eagle", "BCBG", "Calvin Klein",
+        "Lululemon", "Under Armour", "Puma", "Reebok", "New Balance", "Vans", "Converse",
+        "GAP", "Old Navy", "Banana Republic", "J.Crew", "Madewell", "Urban Outfitters",
+        "Hollister", "Aeropostale", "Gucci", "Prada", "Louis Vuitton", "Burberry",
+        "Bape", "Palace", "Kith", "Off-White", "Fear of God", "Essentials",
+        "Timberland", "Dr. Martens", "Birkenstock", "UGG", "Doc Martens",
+        "Guess", "Express", "Lucky Brand", "True Religion", "Diesel", "G-Star",
+        "Michael Kors", "Kate Spade", "Tory Burch", "Marc Jacobs", "Steve Madden",
+        "Disney", "Starter", "Russell Athletic", "Fruit of the Loom", "Gildan",
+        "Hanes", "Jerzees", "Brooks Brothers", "Pendleton", "Woolrich", "Filson",
+        "Barbour", "Lowe Alpine", "Marmot", "Mountain Hardwear", "Salomon"
     ]
     combined = f"{title} {card_text}".lower()
     for brand in popular_brands:
-        if brand.lower() in combined:
-            return "Levi's" if brand.lower() in ("levis", "levi") else brand
+        b_lower = brand.lower()
+        if re.search(r"\b" + re.escape(b_lower) + r"\b", combined) or b_lower in combined:
+            if b_lower in ("levis", "levi"):
+                return "Levi's"
+            if b_lower in ("polo", "polo ralph lauren"):
+                return "Ralph Lauren"
+            if b_lower == "ll bean":
+                return "L.L. Bean"
+            if b_lower == "north face":
+                return "The North Face"
+            if b_lower == "arcteryx":
+                return "Arc'teryx"
+            if b_lower == "doc martens":
+                return "Dr. Martens"
+            return brand
     return ""
 
 
