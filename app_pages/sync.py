@@ -2,7 +2,9 @@
 
 import os
 import time
-from datetime import datetime, date
+import html
+from datetime import datetime, date, timedelta
+from typing import Tuple, Optional
 import streamlit as st
 import pandas as pd
 
@@ -105,6 +107,263 @@ def get_cached_titles(sheet_id: str, _creds):
         return active_titles, sold_titles
 
 
+def format_sync_timestamp(raw_ts: Optional[str]) -> Tuple[str, str]:
+    """Formats a raw sync timestamp into a clean, legible string and relative time."""
+    if not raw_ts or str(raw_ts).strip().lower() in ("not yet run", "none", ""):
+        return ("Not yet run", "Awaiting sync")
+    ts_clean = str(raw_ts).strip()
+    dt = None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(ts_clean[:19], fmt)
+            break
+        except Exception:
+            continue
+    if not dt:
+        return (ts_clean, "Recorded")
+
+    now = datetime.now()
+    diff = now - dt
+    tot_secs = int(diff.total_seconds())
+    if tot_secs < 0:
+        rel = "Just now"
+    elif tot_secs < 60:
+        rel = "Just now"
+    elif tot_secs < 3600:
+        rel = f"{tot_secs // 60}m ago"
+    elif tot_secs < 86400:
+        rel = f"{tot_secs // 3600}h ago"
+    elif tot_secs < 86400 * 7:
+        rel = f"{tot_secs // 86400}d ago"
+    else:
+        rel = dt.strftime("%b %d")
+
+    # Safe cross-platform 12-hour format without %-I / %#I
+    hour_12 = dt.hour % 12 or 12
+    minute = f"{dt.minute:02d}"
+    am_pm = "AM" if dt.hour < 12 else "PM"
+    time_str = f"{hour_12}:{minute} {am_pm}"
+
+    if dt.date() == now.date():
+        display = f"Today, {time_str}"
+    elif dt.date() == (now - timedelta(days=1)).date():
+        display = f"Yesterday, {time_str}"
+    else:
+        month_str = dt.strftime("%b")
+        display = f"{month_str} {dt.day}, {time_str}"
+
+    return (display, rel)
+
+
+def render_sync_kpi_cards(
+    active_cnt: int,
+    sold_cnt: int,
+    raw_h_time: Optional[str],
+    raw_e_time: Optional[str],
+    h_details: Optional[str] = "",
+    e_details: Optional[str] = "",
+):
+    """Renders modern, responsive KPI cards with clean typography and custom color options."""
+    h_display, h_rel = format_sync_timestamp(raw_h_time)
+    e_display, e_rel = format_sync_timestamp(raw_e_time)
+
+    # Style state initialization
+    if "sync_metric_style" not in st.session_state:
+        st.session_state["sync_metric_style"] = "Vibrant Tinted"
+    if "sync_card_custom_bg" not in st.session_state:
+        st.session_state["sync_card_custom_bg"] = "#1e293b"
+    if "sync_card_custom_text" not in st.session_state:
+        st.session_state["sync_card_custom_text"] = "#f8fafc"
+    if "sync_card_custom_border" not in st.session_state:
+        st.session_state["sync_card_custom_border"] = "#3b82f6"
+
+    # Style control bar
+    c_head, c_btn = st.columns([5, 1], vertical_alignment="center")
+    with c_head:
+        st.markdown("##### 📊 Sync Status & Metrics")
+    with c_btn:
+        with st.popover("🎨 Card Style", help="Customize card background, text color, and themes"):
+            st.markdown("**Metric Card Styling**")
+            theme_choice = st.radio(
+                "Theme Preset",
+                options=["Vibrant Tinted", "Minimalist Neutral", "Deep Slate (Dark)", "Custom Colors", "Native Streamlit"],
+                index=["Vibrant Tinted", "Minimalist Neutral", "Deep Slate (Dark)", "Custom Colors", "Native Streamlit"].index(
+                    st.session_state.get("sync_metric_style", "Vibrant Tinted")
+                ),
+                key="sync_metric_style_picker",
+            )
+            st.session_state["sync_metric_style"] = theme_choice
+
+            if theme_choice == "Custom Colors":
+                st.markdown("---")
+                st.caption("Customize card colors:")
+                st.session_state["sync_card_custom_bg"] = st.color_picker(
+                    "Background Color",
+                    value=st.session_state.get("sync_card_custom_bg", "#1e293b"),
+                    key="picker_custom_bg",
+                )
+                st.session_state["sync_card_custom_text"] = st.color_picker(
+                    "Text Color",
+                    value=st.session_state.get("sync_card_custom_text", "#f8fafc"),
+                    key="picker_custom_text",
+                )
+                st.session_state["sync_card_custom_border"] = st.color_picker(
+                    "Border / Accent Color",
+                    value=st.session_state.get("sync_card_custom_border", "#3b82f6"),
+                    key="picker_custom_border",
+                )
+
+    style_mode = st.session_state.get("sync_metric_style", "Vibrant Tinted")
+
+    # Native Streamlit fallback
+    if style_mode == "Native Streamlit":
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.metric("Active Listings", f"{active_cnt:,}", border=True)
+        with m2:
+            st.metric("Sold Items", f"{sold_cnt:,}", border=True)
+        with m3:
+            st.metric("Last HTML Import", h_display, delta=h_rel if h_rel != "Awaiting sync" else None, delta_color="off", border=True)
+        with m4:
+            st.metric("Last Email Parsed", e_display, delta=e_rel if e_rel != "Awaiting sync" else None, delta_color="off", border=True)
+        return
+
+    # Subtitles
+    h_sub = f"{h_rel} • HTML Upload" if h_rel != "Awaiting sync" else "Awaiting import"
+    e_sub = f"{e_rel} • Gmail IMAP" if e_rel != "Awaiting sync" else "Awaiting sync"
+
+    # Palette configurations
+    if style_mode == "Minimalist Neutral":
+        cards = [
+            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "var(--secondary-background-color, rgba(128,128,128,0.06))", "border": "rgba(128,128,128,0.22)", "accent": "var(--text-color, inherit)", "text": "var(--text-color, inherit)"},
+            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "var(--secondary-background-color, rgba(128,128,128,0.06))", "border": "rgba(128,128,128,0.22)", "accent": "var(--text-color, inherit)", "text": "var(--text-color, inherit)"},
+            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "var(--secondary-background-color, rgba(128,128,128,0.06))", "border": "rgba(128,128,128,0.22)", "accent": "var(--text-color, inherit)", "text": "var(--text-color, inherit)"},
+            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "var(--secondary-background-color, rgba(128,128,128,0.06))", "border": "rgba(128,128,128,0.22)", "accent": "var(--text-color, inherit)", "text": "var(--text-color, inherit)"},
+        ]
+    elif style_mode == "Deep Slate (Dark)":
+        cards = [
+            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#0f172a", "border": "#1e3a8a", "accent": "#60a5fa", "text": "#f8fafc"},
+            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#0f172a", "border": "#065f46", "accent": "#34d399", "text": "#f8fafc"},
+            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#0f172a", "border": "#854d0e", "accent": "#fbbf24", "text": "#f8fafc"},
+            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#0f172a", "border": "#581c87", "accent": "#c084fc", "text": "#f8fafc"},
+        ]
+    elif style_mode == "Custom Colors":
+        c_bg = st.session_state.get("sync_card_custom_bg", "#1e293b")
+        c_text = st.session_state.get("sync_card_custom_text", "#f8fafc")
+        c_border = st.session_state.get("sync_card_custom_border", "#3b82f6")
+        cards = [
+            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
+            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
+            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
+            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
+        ]
+    else:  # "Vibrant Tinted" (Default)
+        cards = [
+            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "rgba(59, 130, 246, 0.08)", "border": "rgba(59, 130, 246, 0.28)", "accent": "#2563eb", "text": "var(--text-color, #1e293b)"},
+            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "rgba(16, 185, 129, 0.08)", "border": "rgba(16, 185, 129, 0.28)", "accent": "#059669", "text": "var(--text-color, #1e293b)"},
+            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "rgba(245, 158, 11, 0.08)", "border": "rgba(245, 158, 11, 0.28)", "accent": "#d97706", "text": "var(--text-color, #1e293b)"},
+            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "rgba(139, 92, 246, 0.08)", "border": "rgba(139, 92, 246, 0.28)", "accent": "#7c3aed", "text": "var(--text-color, #1e293b)"},
+        ]
+
+    # Generate CSS & Grid HTML
+    cards_html_parts = []
+    for c in cards:
+        val_class = "sync-metric-val-date" if c["is_date"] else "sync-metric-val-num"
+        card_html = f'''
+        <div class="sync-metric-card" style="background: {c['bg']}; border-color: {c['border']}; color: {c['text']};">
+          <div class="sync-metric-header">
+            <span class="sync-metric-label" style="color: {c['accent']};">{html.escape(c['label'])}</span>
+            <span class="sync-metric-icon">{c['icon']}</span>
+          </div>
+          <div class="{val_class}" title="{html.escape(c['value'])}">{html.escape(c['value'])}</div>
+          <div class="sync-metric-footer">
+            <span class="sync-metric-badge" style="border-color: {c['border']};">{html.escape(c['sub'])}</span>
+          </div>
+        </div>'''
+        cards_html_parts.append(card_html)
+
+    html_content = f'''
+    <style>
+    .sync-metrics-grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 12px;
+        margin-top: 4px;
+        margin-bottom: 1.25rem;
+    }}
+    .sync-metric-card {{
+        border-radius: 12px;
+        padding: 14px 16px;
+        border: 1px solid;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 104px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }}
+    .sync-metric-card:hover {{
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }}
+    .sync-metric-header {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 6px;
+    }}
+    .sync-metric-label {{
+        font-size: 0.74rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }}
+    .sync-metric-icon {{
+        font-size: 1.05rem;
+        line-height: 1;
+    }}
+    .sync-metric-val-num {{
+        font-size: 1.85rem;
+        font-weight: 700;
+        line-height: 1.15;
+        margin-bottom: 6px;
+        letter-spacing: -0.02em;
+    }}
+    .sync-metric-val-date {{
+        font-size: 1.10rem;
+        font-weight: 600;
+        line-height: 1.25;
+        margin-bottom: 6px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }}
+    .sync-metric-footer {{
+        display: flex;
+        align-items: center;
+        margin-top: auto;
+    }}
+    .sync-metric-badge {{
+        display: inline-block;
+        padding: 2px 7px;
+        border-radius: 6px;
+        font-size: 0.72rem;
+        font-weight: 500;
+        opacity: 0.85;
+        background: rgba(128, 128, 128, 0.1);
+        border: 1px solid transparent;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }}
+    </style>
+    <div class="sync-metrics-grid">
+      {''.join(cards_html_parts)}
+    </div>
+    '''
+    st.html(html_content)
+
+
 def render_sync_page():
     st.header("⚡ Thread Count Operations & Sync Hub")
     st.caption("From inbox alerts to bottom-line gains. Reconcile inventory via HTML uploads, live Gmail sync, or supply tracking.")
@@ -129,24 +388,21 @@ def render_sync_page():
         log_error(u_email, "sync.py:connect", e)
 
     # KPI Metric Row
-    m1, m2, m3, m4 = st.columns(4)
-    with m1:
-        st.metric("Active Listings", active_cnt, border=True)
-    with m2:
-        st.metric("Sold Items", sold_cnt, border=True)
-    with m3:
-        h_time = status_state.get("last_html_parsed_at", "Not yet run")
-        st.metric("Last HTML Import", h_time, border=True)
-    with m4:
-        e_time = status_state.get("last_email_parsed_at", "Not yet run")
-        st.metric("Last Email Parsed", e_time, border=True)
+    render_sync_kpi_cards(
+        active_cnt=active_cnt,
+        sold_cnt=sold_cnt,
+        raw_h_time=status_state.get("last_html_parsed_at"),
+        raw_e_time=status_state.get("last_email_parsed_at"),
+        h_details=status_state.get("last_html_details", ""),
+        e_details=status_state.get("last_email_details", ""),
+    )
 
     if not connected:
         st.warning("⚠️ Could not connect to Google Spreadsheet. Check permissions or ensure your spreadsheet is shared with your account.")
         return
 
     # Quick Maintenance Tools
-    with st.expander("🛠️ Spreadsheet Tools (Clean Blank Rows, Fix Missing Metadata, & Refresh)", expanded=False):
+    with st.expander("🛠️ Spreadsheet Tools", expanded=False):
         c_tool1, c_tool2, c_tool3 = st.columns(3)
         with c_tool1:
             if st.button("🧹 Clean Blank Rows", type="secondary", width="stretch", icon=":material/cleaning_services:", key="clean_blank_rows_btn"):

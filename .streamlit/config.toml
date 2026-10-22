@@ -5,3 +5,7 @@ fileWatcherType = "poll"
 
 [client]
 showErrorDetails = true
+
+[theme]
+metricValueFontSize = "1.5rem"
+

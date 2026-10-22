@@ -90,4 +90,56 @@ def test_cloud_ready_auth_and_manual_login():
     assert 'placeholder="user@threadcount.com"' in app_code or 'placeholder="user@sheetcount.com"' in app_code
 
 
+def test_format_sync_timestamp():
+    from app_pages.sync import format_sync_timestamp
+    from datetime import datetime, timedelta
+
+    # 1. Unrun or empty
+    disp, rel = format_sync_timestamp("Not yet run")
+    assert disp == "Not yet run"
+    assert rel == "Awaiting sync"
+
+    disp_none, rel_none = format_sync_timestamp(None)
+    assert disp_none == "Not yet run"
+    assert rel_none == "Awaiting sync"
+
+    # 2. Today
+    now = datetime.now()
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    disp_today, rel_today = format_sync_timestamp(now_str)
+    assert "Today," in disp_today
+    assert ("ago" in rel_today or "Just now" in rel_today)
+
+    # 3. Yesterday
+    yesterday = now - timedelta(days=1)
+    disp_yest, _ = format_sync_timestamp(yesterday.strftime("%Y-%m-%d %H:%M"))
+    assert "Yesterday," in disp_yest
+
+    # 4. Older date
+    past = now - timedelta(days=10)
+    disp_past, _ = format_sync_timestamp(past.strftime("%Y-%m-%d %H:%M"))
+    assert past.strftime("%b") in disp_past
+
+
+def test_sync_metrics_styling_and_config():
+    from pathlib import Path
+
+    # Verify config.toml metricValueFontSize is set to 1.5rem
+    config_toml = Path(".streamlit/config.toml").read_text()
+    assert 'metricValueFontSize = "1.5rem"' in config_toml
+
+    # Verify sync.py implements render_sync_kpi_cards and custom styling options
+    sync_code = Path("app_pages/sync.py").read_text()
+    assert "render_sync_kpi_cards" in sync_code
+    assert "format_sync_timestamp" in sync_code
+    assert "sync-metrics-grid" in sync_code
+    assert "sync-metric-val-date" in sync_code
+    assert "Vibrant Tinted" in sync_code
+    assert "Minimalist Neutral" in sync_code
+    assert "Deep Slate (Dark)" in sync_code
+    assert "Custom Colors" in sync_code
+    assert "color_picker" in sync_code
+
+
+
 
