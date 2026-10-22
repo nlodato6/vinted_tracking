@@ -428,7 +428,7 @@ def render_sync_page():
                     st.rerun()
         with c_tool2:
             saved_u, saved_p = get_user_email_credentials(u_email)
-            active_email_user = saved_u or os.getenv("GMAIL_USER", "") or st.session_state.get("email_sync_user", "")
+            active_email_user = saved_u or os.getenv("GMAIL_USER", "") or st.session_state.get("gmail_user_input", "") or st.session_state.get("email_sync_user", "")
             active_email_pass = saved_p or os.getenv("GMAIL_APP_PASSWORD", "") or st.session_state.get("gmail_pass_input", "")
 
             if st.button("✨ Backfill Missing Metadata in Sold", type="secondary", width="stretch", icon=":material/auto_fix_high:", key="backfill_metadata_btn"):
@@ -849,12 +849,13 @@ def render_sync_page():
             default_user = saved_u or os.getenv("GMAIL_USER", "") or fallback_email
             default_pwd = saved_p or os.getenv("GMAIL_APP_PASSWORD", "")
 
-            gmail_user_input = st.text_input("Gmail Address", value=default_user, placeholder="your-email@gmail.com")
+            gmail_user_input = st.text_input("Gmail Address", value=default_user, placeholder="your-email@gmail.com", key="gmail_user_input")
             gmail_pass_input = st.text_input(
                 "Google App Password (16 characters)",
                 type="password",
                 value=default_pwd,
-                help="16-character passcode generated at myaccount.google.com/apppasswords"
+                help="16-character passcode generated at myaccount.google.com/apppasswords",
+                key="gmail_pass_input",
             )
 
             col_rem1, col_rem2 = st.columns([1.5, 1], vertical_alignment="center")

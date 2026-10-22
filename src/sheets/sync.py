@@ -657,15 +657,25 @@ class SheetsSyncEngine:
                 headers = all_rows[0]
                 sku_idx = headers.index("Item_SKU") if "Item_SKU" in headers else 0
                 title_idx = headers.index("Title") if "Title" in headers else 2
+                brand_idx = headers.index("Brand") if "Brand" in headers else 3
+                cat_idx = headers.index("Category") if "Category" in headers else 4
+                lot_idx = headers.index("Lot_ID") if "Lot_ID" in headers else 1
+                url_idx = headers.index("Vinted_URL") if "Vinted_URL" in headers else (22 if tab_name == TAB_SOLD_ITEMS else 14)
 
                 blank_row_indices = []
                 for r_idx, row in enumerate(all_rows[1:], start=2):
                     # Check if entirely blank
                     is_empty = not any(str(c).strip() for c in row)
-                    # Check if missing both SKU and Title
                     sku_val = str(row[sku_idx]).strip() if len(row) > sku_idx else ""
                     title_val = str(row[title_idx]).strip() if len(row) > title_idx else ""
-                    if is_empty or (not sku_val and not title_val):
+                    brand_val = str(row[brand_idx]).strip() if len(row) > brand_idx else ""
+                    cat_val = str(row[cat_idx]).strip() if len(row) > cat_idx else ""
+                    lot_val = str(row[lot_idx]).strip() if len(row) > lot_idx else ""
+                    url_val = str(row[url_idx]).strip() if len(row) > url_idx else ""
+
+                    # An empty row or a phantom row with NO item identity whatsoever
+                    is_phantom = not title_val and not brand_val and not cat_val and not lot_val and not url_val
+                    if is_empty or (not sku_val and not title_val) or is_phantom:
                         blank_row_indices.append(r_idx)
 
                 # Delete in descending order
@@ -1471,6 +1481,7 @@ class SheetsSyncEngine:
                 listings_by_url[lurl] = lr
 
         updates: List[Dict[str, Any]] = []
+        phantom_rows_to_delete: List[int] = []
         fixed_rows = 0
         titles_fixed = 0
         lots_assigned = 0
@@ -1488,6 +1499,11 @@ class SheetsSyncEngine:
             cur_date = normalize_date_str(str(row[date_idx]).strip()) if len(row) > date_idx else ""
             cur_order = str(row[order_idx]).strip() if len(row) > order_idx else ""
             cur_url = str(row[url_idx]).strip() if len(row) > url_idx else ""
+
+            # Check if this row is an empty phantom duplicate row lacking all item identity
+            if not cur_title and not cur_brand and not cur_cat and not cur_lot and not cur_url:
+                phantom_rows_to_delete.append(r_i)
+                continue
 
             # Check if this row needs fixing
             needs_title = not cur_title or cur_title.lower().startswith("order ") or cur_title.lower().startswith("vinted item")
@@ -1559,6 +1575,19 @@ class SheetsSyncEngine:
                     slug_match = re.search(r"/items/\d+-([a-zA-Z0-9_-]+)", cur_url)
                     if slug_match:
                         new_title = slug_match.group(1).replace("-", " ").replace("_", " ").title().strip()
+
+                # Guaranteed fallback if still empty so no sold item is left titleless
+                if not new_title and not cur_title:
+                    if cur_brand and cur_cat:
+                        new_title = f"{cur_brand} {cur_cat}"
+                    elif cur_brand:
+                        new_title = f"{cur_brand} Apparel"
+                    elif cur_order and not cur_order.lower().startswith("ord-17"):
+                        new_title = f"Vinted Order {cur_order}"
+                    elif cur_date:
+                        new_title = f"Vinted Sale ({cur_date})"
+                    else:
+                        new_title = "Vinted Item"
 
                 if new_title and new_title != cur_title:
                     cur_title = new_title
@@ -1637,6 +1666,15 @@ class SheetsSyncEngine:
 
         if updates:
             ws_sold.batch_update(updates, value_input_option="USER_ENTERED")
+            self.sync_lots()
+
+        if phantom_rows_to_delete:
+            for r_del in sorted(phantom_rows_to_delete, reverse=True):
+                try:
+                    ws_sold.delete_rows(r_del)
+                    fixed_rows += 1
+                except Exception:
+                    pass
             self.sync_lots()
 
         return {
