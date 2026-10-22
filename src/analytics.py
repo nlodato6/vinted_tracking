@@ -39,7 +39,50 @@ def parse_sold_dataframe(rows: list) -> pd.DataFrame:
         return pd.DataFrame()
 
     headers = [str(h).strip() for h in rows[0]]
-    df = pd.DataFrame(rows[1:], columns=headers)
+    # Deduplicate empty or duplicate header names
+    cleaned_headers = []
+    seen = {}
+    for i, h in enumerate(headers):
+        name = h if h else f"Col_{i}"
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}_{seen[name]}"
+        else:
+            seen[name] = 0
+        cleaned_headers.append(name)
+
+    df = pd.DataFrame(rows[1:], columns=cleaned_headers)
+
+    # Normalize header casing to canonical names
+    canonical_aliases = {
+        "category": "Category",
+        "brand": "Brand",
+        "title": "Title",
+        "sale_type": "Sale_Type",
+        "saletype": "Sale_Type",
+        "sale_date": "Sale_Date",
+        "saledate": "Sale_Date",
+        "date": "Sale_Date",
+        "unit_cost": "Unit_Cost",
+        "unitcost": "Unit_Cost",
+        "posted_price": "Posted_Price",
+        "current_price": "Current_Price",
+        "sold_price": "Sold_Price",
+        "soldprice": "Sold_Price",
+        "net_profit": "Net_Profit",
+        "netprofit": "Net_Profit",
+        "packaging_cost": "Packaging_Cost",
+        "margin_%": "Margin_%",
+        "margin_pct": "Margin_%",
+        "margin": "Margin_%",
+    }
+    rename_dict = {}
+    for col in df.columns:
+        norm = col.lower().strip()
+        if norm in canonical_aliases and canonical_aliases[norm] not in df.columns:
+            rename_dict[col] = canonical_aliases[norm]
+    if rename_dict:
+        df = df.rename(columns=rename_dict)
 
     # Clean numeric columns
     numeric_cols = [
@@ -73,13 +116,26 @@ def parse_sold_dataframe(rows: list) -> pd.DataFrame:
     else:
         df["sale_date_dt"] = pd.NaT
 
-    # Fill text defaults
+    # Guarantee canonical columns ALWAYS exist with sensible defaults
     if "Brand" in df.columns:
         df["Brand"] = df["Brand"].fillna("Unbranded").replace("", "Unbranded")
+    else:
+        df["Brand"] = "Unbranded"
+
     if "Category" in df.columns:
         df["Category"] = df["Category"].fillna("Other Apparel").replace("", "Other Apparel")
+    else:
+        df["Category"] = "Other Apparel"
+
     if "Sale_Type" in df.columns:
         df["Sale_Type"] = df["Sale_Type"].fillna("Original Price").replace("", "Original Price")
+    else:
+        df["Sale_Type"] = "Original Price"
+
+    if "Title" in df.columns:
+        df["Title"] = df["Title"].fillna("Untitled Item").replace("", "Untitled Item")
+    else:
+        df["Title"] = "Untitled Item"
 
     return df
 
@@ -90,7 +146,36 @@ def parse_active_dataframe(rows: list) -> pd.DataFrame:
         return pd.DataFrame()
 
     headers = [str(h).strip() for h in rows[0]]
-    df = pd.DataFrame(rows[1:], columns=headers)
+    cleaned_headers = []
+    seen = {}
+    for i, h in enumerate(headers):
+        name = h if h else f"Col_{i}"
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}_{seen[name]}"
+        else:
+            seen[name] = 0
+        cleaned_headers.append(name)
+
+    df = pd.DataFrame(rows[1:], columns=cleaned_headers)
+
+    canonical_aliases = {
+        "category": "Category",
+        "brand": "Brand",
+        "title": "Title",
+        "unit_cost": "Unit_Cost",
+        "posted_price": "Posted_Price",
+        "current_price": "Current_Price",
+        "favorites": "Favorites",
+        "views": "Views",
+    }
+    rename_dict = {}
+    for col in df.columns:
+        norm = col.lower().strip()
+        if norm in canonical_aliases and canonical_aliases[norm] not in df.columns:
+            rename_dict[col] = canonical_aliases[norm]
+    if rename_dict:
+        df = df.rename(columns=rename_dict)
 
     numeric_cols = [
         ("Unit_Cost", "unit_cost_num"),
@@ -115,8 +200,18 @@ def parse_active_dataframe(rows: list) -> pd.DataFrame:
 
     if "Brand" in df.columns:
         df["Brand"] = df["Brand"].fillna("Unbranded").replace("", "Unbranded")
+    else:
+        df["Brand"] = "Unbranded"
+
     if "Category" in df.columns:
         df["Category"] = df["Category"].fillna("Other Apparel").replace("", "Other Apparel")
+    else:
+        df["Category"] = "Other Apparel"
+
+    if "Title" in df.columns:
+        df["Title"] = df["Title"].fillna("Untitled Item").replace("", "Untitled Item")
+    else:
+        df["Title"] = "Untitled Item"
 
     return df
 

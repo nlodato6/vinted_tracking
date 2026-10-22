@@ -140,3 +140,36 @@ def test_compute_net_cash_profit():
 
     fig_neg = build_cash_flow_waterfall(res_neg)
     assert fig_neg is not None
+
+
+def test_missing_and_misaligned_headers_robustness():
+    # Case where sheet has NO Category column and lowercase headers
+    raw_sold = [
+        ["sku", "title", "sold_price", "net_profit"],
+        ["SKU-1", "Cool Shirt", "$20.00", "$15.00"],
+    ]
+    df_sold = parse_sold_dataframe(raw_sold)
+    assert "Category" in df_sold.columns
+    assert df_sold["Category"].iloc[0] == "Other Apparel"
+    assert "Brand" in df_sold.columns
+    assert df_sold["Brand"].iloc[0] == "Unbranded"
+    assert "Sale_Type" in df_sold.columns
+    assert df_sold["sold_price_num"].iloc[0] == 20.00
+
+    raw_active = [
+        ["sku", "title", "current_price"],
+        ["SKU-2", "Vintage Jeans", "$45.00"],
+    ]
+    df_active = parse_active_dataframe(raw_active)
+    assert "Category" in df_active.columns
+    assert df_active["Category"].iloc[0] == "Other Apparel"
+    assert "Brand" in df_active.columns
+    assert df_active["current_price_num"].iloc[0] == 45.00
+
+    # Ensure charts still build cleanly with no exceptions
+    fig_scatter = build_price_vs_profit_scatter(df_sold)
+    assert fig_scatter is not None
+
+    fig_cat = build_category_chart(df_sold)
+    assert fig_cat is not None
+

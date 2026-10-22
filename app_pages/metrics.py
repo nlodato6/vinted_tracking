@@ -100,7 +100,9 @@ def render_metrics_page():
         selected_time = st.segmented_control("Timeframe", time_options, default="All Time")
 
     with f2:
-        all_categories = sorted(list(set(df_sold["Category"].dropna().unique().tolist() + df_active["Category"].dropna().unique().tolist())))
+        sold_cats = df_sold["Category"].dropna().unique().tolist() if (not df_sold.empty and "Category" in df_sold.columns) else []
+        active_cats = df_active["Category"].dropna().unique().tolist() if (not df_active.empty and "Category" in df_active.columns) else []
+        all_categories = sorted(list(set(sold_cats + active_cats)))
         selected_cats = st.multiselect("Filter Categories", options=all_categories, default=[])
 
     with f3:
@@ -128,9 +130,9 @@ def render_metrics_page():
 
     # Category filter
     if selected_cats:
-        if not filtered_sold.empty:
+        if not filtered_sold.empty and "Category" in filtered_sold.columns:
             filtered_sold = filtered_sold[filtered_sold["Category"].isin(selected_cats)]
-        if not filtered_active.empty:
+        if not filtered_active.empty and "Category" in filtered_active.columns:
             filtered_active = filtered_active[filtered_active["Category"].isin(selected_cats)]
 
     # -------------------------------------------------------------------------
