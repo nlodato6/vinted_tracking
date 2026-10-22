@@ -11,7 +11,7 @@ import pandas as pd
 from src.config import settings
 from src.sheets import GoogleSheetsClient, SheetsSyncEngine
 from src.sheets.sync import parse_price
-from src.html_parser import parse_closet_html, parse_orders_html, detect_html_type
+from src.html_parser import parse_closet_html, parse_orders_html, detect_html_type, infer_brand, infer_clothing_category
 from src.email_parser import fetch_vinted_emails_via_imap
 from src.notifications import record_html_parse_event, record_email_parse_event, get_sync_status
 from src.telemetry import (
@@ -721,7 +721,10 @@ def render_sync_page():
                                 })
                             preview_df = pd.DataFrame(preview_rows)
 
-                            lot_editor_options = [""] + available_lot_ids
+                            for r in preview_rows:
+                                if r["Assigned Lot"] and r["Assigned Lot"] not in available_lot_ids:
+                                    available_lot_ids.append(r["Assigned Lot"])
+                            lot_editor_options = [""] + sorted(list(set(available_lot_ids)))
                             if available_lot_ids:
                                 lot_column_config = st.column_config.SelectboxColumn(
                                     "Assigned Lot",
@@ -972,14 +975,13 @@ def render_sync_page():
                 available_lot_ids = [l.get("Lot_ID", "") for l in all_lots if l.get("Lot_ID")]
                 if target_email_lot and target_email_lot not in available_lot_ids:
                     available_lot_ids.append(target_email_lot)
-                lot_col_options = [""] + available_lot_ids
 
                 sale_rows = []
                 for idx, ev in enumerate(preview_events):
                     if ev.event_type == "sale":
                         sale_indices.append(idx)
                         cur_lot = getattr(ev, "lot_id", "") or target_email_lot
-                        cur_brand = getattr(ev, "brand", "") or infer_brand(ev.item_title)
+                        cur_brand = getattr(ev, "brand", "") or (infer_brand(ev.item_title) if ev.item_title else "")
                         cur_cat = getattr(ev, "category", "") or (infer_clothing_category(ev.item_title) if ev.item_title else "Other Apparel")
                         sale_rows.append({
                             "Title": ev.item_title or f"Vinted Sale {ev.order_id}",
@@ -992,14 +994,33 @@ def render_sync_page():
                             "Date": ev.timestamp.strftime("%Y-%m-%d"),
                         })
 
+                for r in sale_rows:
+                    if r["Assigned Lot"] and r["Assigned Lot"] not in available_lot_ids:
+                        available_lot_ids.append(r["Assigned Lot"])
+                lot_col_options = [""] + sorted(list(set(available_lot_ids)))
+
+                cat_col_options = [
+                    "Tops & Shirts", "Outerwear", "Pants & Jeans", "Sweaters & Hoodies",
+                    "Dresses & Skirts", "Footwear", "Accessories", "Swimwear",
+                    "Underwear & Loungewear", "Other Apparel"
+                ]
+                for r in sale_rows:
+                    if r["Category"] and r["Category"] not in cat_col_options:
+                        cat_col_options.append(r["Category"])
+
                 sale_df = pd.DataFrame(sale_rows)
                 edited_sale_df = st.data_editor(
                     sale_df,
                     column_config={
                         "Title": st.column_config.TextColumn("Title", required=True, width="large"),
-                        "Assigned Lot": st.column_config.SelectboxColumn("Assigned Lot", options=lot_col_options, format_func=lambda x: "⚪ None (Unassigned)" if not x else x, width="medium"),
+                        "Assigned Lot": st.column_config.SelectboxColumn(
+                            "Assigned Lot",
+                            options=lot_col_options,
+                            format_func=lambda x: "⚪ None (Unassigned)" if not x else x,
+                            width="medium"
+                        ) if available_lot_ids else st.column_config.TextColumn("Assigned Lot", width="medium"),
                         "Brand": st.column_config.TextColumn("Brand", width="medium"),
-                        "Category": st.column_config.SelectboxColumn("Category", options=["Tops & Shirts", "Outerwear", "Pants & Jeans", "Sweaters & Hoodies", "Dresses & Skirts", "Footwear", "Accessories", "Other Apparel"], width="medium"),
+                        "Category": st.column_config.SelectboxColumn("Category", options=cat_col_options, width="medium"),
                         "Price": st.column_config.TextColumn("Price", disabled=True, width="small"),
                         "Buyer": st.column_config.TextColumn("Buyer", disabled=True, width="small"),
                         "Order ID": st.column_config.TextColumn("Order ID", disabled=True, width="medium"),
