@@ -8,6 +8,10 @@ import requests
 
 from src.config import settings
 
+# Relax strict oauthlib scope checks so Google OAuth does not raise ScopeChangeError
+# when Google returns granular, subsets, or reordered scopes
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.file",
@@ -84,6 +88,7 @@ def get_redirect_uri() -> str:
 def get_authorization_url(redirect_uri: Optional[str] = None) -> Tuple[str, str]:
     """Generates the Google OAuth authorization URL and state token."""
     redirect_uri = redirect_uri or get_redirect_uri()
+    os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
     if redirect_uri.startswith("http://"):
         os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
@@ -108,6 +113,7 @@ def get_authorization_url(redirect_uri: Optional[str] = None) -> Tuple[str, str]
 def exchange_code_for_credentials(code: str, redirect_uri: Optional[str] = None, state: Optional[str] = None) -> Tuple[Credentials, Dict[str, Any]]:
     """Exchanges an authorization code for user Credentials and retrieves basic user info."""
     redirect_uri = redirect_uri or get_redirect_uri()
+    os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
     if redirect_uri.startswith("http://"):
         os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 

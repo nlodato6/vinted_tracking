@@ -89,11 +89,17 @@ if "code" in query_params and not st.session_state.authenticated:
         st.session_state.is_admin = u_email in settings.admin_email_list
         log_session(u_email, user_info.get("name", "Google User"), auth_provider="google")
 
+        # Check if Google Sheets permission was granted
+        granted_scopes = getattr(creds, "scopes", []) or []
+        has_sheets_scope = any("spreadsheets" in str(s) for s in granted_scopes)
+        if not has_sheets_scope:
+            st.session_state.missing_sheets_scope = True
+
         # Auto-lookup or auto-provision spreadsheet in user's Google Drive
         saved_sheet = get_user_spreadsheet(u_email)
         if saved_sheet:
             st.session_state.spreadsheet_id = saved_sheet
-        elif creds:
+        elif creds and has_sheets_scope:
             try:
                 s_id, s_title, _ = auto_provision_user_sheet(creds, user_name=user_info.get("name", "Reseller"))
                 st.session_state.spreadsheet_id = s_id
@@ -232,8 +238,15 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.session_state.user_credentials = None
         st.session_state.user_info = {}
+        st.session_state.pop("missing_sheets_scope", None)
         st.cache_data.clear()
         st.rerun()
+
+    if st.session_state.get("missing_sheets_scope", False):
+        st.warning(
+            "⚠️ **Google Sheets Permission Needed**: When you signed in with Google, the permission to view and edit Google Sheets was not selected.\n\n"
+            "To allow Thread Count to read and update your spreadsheets, please click **Sign Out** above and when the Google prompt appears, **check the checkbox for Google Sheets**."
+        )
 
     st.sidebar.divider()
     st.sidebar.markdown("### 📊 Google Sheet")
