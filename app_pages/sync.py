@@ -266,6 +266,28 @@ def render_sync_page():
         st.markdown("### Upload Saved Vinted HTML Files")
         st.caption(f"Drag and drop your saved HTML files (`Active Listings`, `Sold Listings`, `My Orders`). Newly detected items will default to {lot_display_str}.")
 
+        with st.expander("ℹ️ How to export your FULL catalog (180+ items) from Vinted", expanded=False):
+            st.markdown(
+                """
+                **Why does an uploaded file only show 20 items?**
+                Vinted uses **infinite scrolling** (lazy loading). When you first load your profile or orders page, your browser only renders the first **20 items**. As you scroll down, Vinted loads more items into the page.
+                
+                If you save the page (`Cmd+S` or `Ctrl+S`) before scrolling down, your browser only saves the items currently visible in memory!
+                
+                **How to save all items (e.g. 183 active & 166 sold):**
+                1. Open your Vinted closet (`vinted.com/member/...`) or Orders page in Chrome, Safari, or Edge.
+                2. **Scroll all the way down to the bottom** until all your items have loaded (you can hold down the **Page Down** or **End** key).
+                3. Press **Cmd + S** (Mac) or **Ctrl + S** (Windows) $\\rightarrow$ select **"Webpage, Complete"** or **"Webpage, HTML Only"**.
+                4. Upload the newly saved `.html` file here.
+                
+                *⚡ Pro Tip: 5-Second Auto-Scroll Console Snippet:*
+                If you have a large closet and don't want to scroll manually, open Developer Tools Console (`Cmd+Option+J` on Mac or `Ctrl+Shift+J` on Windows / Chrome), paste this snippet, and hit Enter:
+                ```javascript
+                let t = setInterval(() => { window.scrollBy(0, 1500); if (window.innerHeight + window.scrollY >= document.body.offsetHeight) { clearInterval(t); alert("All items loaded! Press Cmd+S to save."); } }, 250);
+                ```
+                """
+            )
+
         uploaded_files = st.file_uploader(
             "Drop Vinted HTML files here",
             type=["html", "htm"],
