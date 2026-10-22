@@ -51,7 +51,11 @@ def parse_sold_dataframe(rows: list) -> pd.DataFrame:
             seen[name] = 0
         cleaned_headers.append(name)
 
-    df = pd.DataFrame(rows[1:], columns=cleaned_headers)
+    data_rows = [r for r in rows[1:] if any(str(c).strip() for c in r)]
+    if not data_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(data_rows, columns=cleaned_headers)
 
     # Normalize header casing to canonical names
     canonical_aliases = {
@@ -157,7 +161,11 @@ def parse_active_dataframe(rows: list) -> pd.DataFrame:
             seen[name] = 0
         cleaned_headers.append(name)
 
-    df = pd.DataFrame(rows[1:], columns=cleaned_headers)
+    data_rows = [r for r in rows[1:] if any(str(c).strip() for c in r)]
+    if not data_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(data_rows, columns=cleaned_headers)
 
     canonical_aliases = {
         "category": "Category",

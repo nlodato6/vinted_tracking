@@ -40,13 +40,15 @@ def get_cached_counts(sheet_id: str, _creds):
         val_ranges = res.get("valueRanges", [])
         active_rows = val_ranges[0].get("values", []) if len(val_ranges) > 0 else []
         sold_rows = val_ranges[1].get("values", []) if len(val_ranges) > 1 else []
-        active_cnt = max(0, len(active_rows) - 1)
-        sold_cnt = max(0, len(sold_rows) - 1)
+        active_cnt = sum(1 for r in active_rows[1:] if any(str(c).strip() for c in r))
+        sold_cnt = sum(1 for r in sold_rows[1:] if any(str(c).strip() for c in r))
         return active_cnt, sold_cnt
     except Exception:
         ws_l = sh.worksheet("Item_Listings")
         ws_s = sh.worksheet("Sold_Items")
-        return max(0, len(ws_l.get_all_values()) - 1), max(0, len(ws_s.get_all_values()) - 1)
+        active_cnt = sum(1 for r in ws_l.get_all_values()[1:] if any(str(c).strip() for c in r))
+        sold_cnt = sum(1 for r in ws_s.get_all_values()[1:] if any(str(c).strip() for c in r))
+        return active_cnt, sold_cnt
 
 
 @st.cache_data(ttl=60)
@@ -123,6 +125,30 @@ def render_sync_page():
     if not connected:
         st.warning("⚠️ Could not connect to Google Spreadsheet. Check permissions or ensure your spreadsheet is shared with your account.")
         return
+
+    # Quick Maintenance Tools
+    with st.expander("🛠️ Spreadsheet Tools (Clean Blank Rows & Refresh)", expanded=False):
+        c_tool1, c_tool2 = st.columns(2)
+        with c_tool1:
+            if st.button("🧹 Clean Blank Rows from Spreadsheet", type="secondary", width="stretch", icon=":material/cleaning_services:", key="clean_blank_rows_btn"):
+                with st.spinner("Scanning and purging blank rows from Google Sheets..."):
+                    engine = SheetsSyncEngine(client)
+                    res = engine.clean_blank_rows()
+                    st.cache_data.clear()
+                    total_cleaned = sum(res.values())
+                    if total_cleaned > 0:
+                        details = ", ".join(f"{tab}: {cnt}" for tab, cnt in res.items() if cnt > 0)
+                        st.success(f"✔ Purged {total_cleaned} blank row(s) from spreadsheet ({details})!")
+                    else:
+                        st.info("✔ No blank rows detected in your spreadsheet. All clean!")
+                    time.sleep(1.2)
+                    st.rerun()
+        with c_tool2:
+            if st.button("🔄 Force Refresh Data from Google Sheets", type="secondary", width="stretch", icon=":material/refresh:", key="force_refresh_data_btn"):
+                st.cache_data.clear()
+                st.success("✔ Cache cleared! Reloading fresh data...")
+                time.sleep(0.5)
+                st.rerun()
 
     # -------------------------------------------------------------------------
     # Main Tabs: HTML Import & Email Sync

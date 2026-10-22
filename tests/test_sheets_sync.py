@@ -719,3 +719,17 @@ def test_sync_orders_with_unassigned_lot(mock_sheets_env):
     assert matched[0][1] == ""
 
 
+def test_clean_blank_rows(mock_sheets_env):
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+
+    # Insert a blank row and a row with no SKU or Title
+    ws_listings.rows.append(["", "", "", "", "", ""])
+    ws_listings.rows.append(["", "LOT-001", "", "", "", ""])
+    initial_count = len(ws_listings.rows)
+
+    res = engine.clean_blank_rows([TAB_ITEM_LISTINGS])
+    assert res[TAB_ITEM_LISTINGS] == 2
+    assert len(ws_listings.rows) == initial_count - 2
+
+

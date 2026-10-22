@@ -635,6 +635,53 @@ class SheetsSyncEngine:
 
         return moved_count
 
+    def clean_blank_rows(self, tab_names: Optional[List[str]] = None) -> Dict[str, int]:
+        """
+        Scans specified worksheets (defaulting to Item_Listings and Sold_Items)
+        and deletes any rows where all cells are empty or where both SKU and Title are missing.
+        Deletes in reverse order to preserve correct indices.
+        Returns a dict mapping tab name to count of removed rows.
+        """
+        targets = tab_names or [TAB_ITEM_LISTINGS, TAB_SOLD_ITEMS]
+        removed_summary: Dict[str, int] = {}
+
+        for tab_name in targets:
+            try:
+                ws = self.get_worksheet(tab_name)
+                all_rows = ws.get_all_values()
+                if len(all_rows) <= 1:
+                    removed_summary[tab_name] = 0
+                    continue
+
+                headers = all_rows[0]
+                sku_idx = headers.index("Item_SKU") if "Item_SKU" in headers else 0
+                title_idx = headers.index("Title") if "Title" in headers else 2
+
+                blank_row_indices = []
+                for r_idx, row in enumerate(all_rows[1:], start=2):
+                    # Check if entirely blank
+                    is_empty = not any(str(c).strip() for c in row)
+                    # Check if missing both SKU and Title
+                    sku_val = str(row[sku_idx]).strip() if len(row) > sku_idx else ""
+                    title_val = str(row[title_idx]).strip() if len(row) > title_idx else ""
+                    if is_empty or (not sku_val and not title_val):
+                        blank_row_indices.append(r_idx)
+
+                # Delete in descending order
+                deleted_count = 0
+                for r_to_del in sorted(blank_row_indices, reverse=True):
+                    try:
+                        ws.delete_rows(r_to_del)
+                        deleted_count += 1
+                    except Exception:
+                        pass
+
+                removed_summary[tab_name] = deleted_count
+            except Exception:
+                removed_summary[tab_name] = 0
+
+        return removed_summary
+
     def sync_listings(self, scraped_items: List[ItemListing], auto_assign_lot: bool = True) -> Dict[str, int]:
         """
         Updates live prices, price drop tracking, and statuses of active listings in Item_Listings.
@@ -901,6 +948,9 @@ class SheetsSyncEngine:
 
         # Update Inventory_Lots: unit costs, items processed, status (Completed when all sold)
         self.sync_lots()
+
+        # Clean any accidental blank rows left behind
+        self.clean_blank_rows()
 
         return {
             "updated": updated_count,

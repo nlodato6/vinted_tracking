@@ -435,6 +435,23 @@ def render_admin_page():
                         st.warning(res["message"])
                     st.rerun()
 
+                if st.button("🧹 Purge Blank Rows from Sheets", type="secondary", width="stretch", icon=":material/cleaning_services:"):
+                    try:
+                        from src.sheets.client import GoogleSheetsClient
+                        from src.sheets.sync import SheetsSyncEngine
+                        client = GoogleSheetsClient(sheet_id=target_sheet)
+                        engine = SheetsSyncEngine(client)
+                        res = engine.clean_blank_rows()
+                        total = sum(res.values())
+                        if total > 0:
+                            details = ", ".join(f"{t}: {n}" for t, n in res.items() if n > 0)
+                            st.success(f"✔ Purged {total} blank rows ({details})!")
+                        else:
+                            st.info("✔ Spreadsheet has no blank rows.")
+                    except Exception as e:
+                        st.error(f"Failed to clean blank rows: {e}")
+                    st.rerun()
+
         with col_t2:
             with st.container(border=True):
                 st.markdown("#### 🧪 Test Error Notification")

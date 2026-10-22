@@ -173,3 +173,27 @@ def test_missing_and_misaligned_headers_robustness():
     fig_cat = build_category_chart(df_sold)
     assert fig_cat is not None
 
+
+def test_blank_rows_handling():
+    # Verify that completely blank rows or rows with empty cells are omitted
+    raw_active_with_blanks = [
+        ["Item_SKU", "Lot_ID", "Title", "Brand", "Current_Price"],
+        ["SKU-1001", "LOT-001", "Valid Jacket", "Nike", "$50.00"],
+        ["", "", "", "", ""],
+        ["", "   ", "", "  ", ""],
+        ["SKU-1002", "LOT-001", "Valid Pants", "Levis", "$30.00"],
+    ]
+    df_active = parse_active_dataframe(raw_active_with_blanks)
+    assert len(df_active) == 2
+    assert list(df_active["Title"]) == ["Valid Jacket", "Valid Pants"]
+
+    raw_sold_with_blanks = [
+        ["Item_SKU", "Title", "Sold_Price", "Sale_Date"],
+        ["SKU-1001", "Sold Sweater", "$40.00", "2026-10-20"],
+        ["", "", "", ""],
+        ["SKU-1002", "Sold Shoes", "$60.00", "2026-10-21"],
+    ]
+    df_sold = parse_sold_dataframe(raw_sold_with_blanks)
+    assert len(df_sold) == 2
+    assert list(df_sold["Title"]) == ["Sold Sweater", "Sold Shoes"]
+
