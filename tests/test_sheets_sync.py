@@ -876,5 +876,209 @@ def test_reconcile_missing_sold_metadata_with_emails(mock_sheets_env, monkeypatc
     assert fixed_row[22] == "https://www.vinted.com/transaction/01a1569f-be78-78a1-a263-1fdb328d3780"
 
 
+def test_email_then_html_sync_orders_deduplicates_and_enriches(mock_sheets_env):
+    """
+    When a sold entry is first pulled from email (missing full title, lot, brand, category),
+    and later HTML orders are imported, sync_orders MUST NOT append a duplicate row.
+    It must detect the duplicate and enrich the existing row with the additional fields.
+    """
+    from datetime import datetime, date
+    from src.email_parser import ParsedEmailEvent
+    from src.models import SalesOrder
+
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # 1. Email arrives with placeholder title and missing lot/brand/category
+    email_event = ParsedEmailEvent(
+        event_type="sale",
+        item_title="Order 01a156e8-07ba-4ba8-9b88-c44d03613a0c",
+        order_id="01a156e8-07ba-4ba8-9b88-c44d03613a0c",
+        sold_price=45.00,
+        timestamp=datetime(2026, 10, 21, 14, 30),
+    )
+    email_res = engine.process_email_batch([email_event])
+    assert len(email_res) == 1
+    assert email_res[0]["status"] == "appended_to_sold"
+    assert len(ws_sold.rows) == 2  # Header + 1 row
+
+    initial_row = ws_sold.rows[1]
+    assert initial_row[2] == "Order 01a156e8-07ba-4ba8-9b88-c44d03613a0c"
+    assert initial_row[1] == ""  # Lot_ID empty
+
+    # 2. Later, HTML orders are imported with rich metadata
+    html_order = SalesOrder(
+        order_id="01a156e8-07ba-4ba8-9b88-c44d03613a0c",
+        item_title="Patagonia Synchilla Fleece Snap-T Pullover",
+        brand="Patagonia",
+        category="Fleece",
+        sold_price=45.00,
+        sale_date=date(2026, 10, 21),
+        favorites=12,
+        platform="Vinted",
+    )
+    order_res = engine.sync_orders([html_order], default_lot="LOT-002")
+    assert order_res["synced_orders"] == 1
+
+    # CRITICAL: Duplicate check must NOT append a second row!
+    assert len(ws_sold.rows) == 2
+
+    # The existing row must now contain the enriched fields from HTML
+    enriched_row = ws_sold.rows[1]
+    assert enriched_row[0] == initial_row[0]  # SKU preserved
+    assert enriched_row[1] == "LOT-002"       # Lot_ID enriched
+    assert enriched_row[2] == "Patagonia Synchilla Fleece Snap-T Pullover"  # Title enriched!
+    assert enriched_row[3] == "Patagonia"     # Brand enriched!
+    assert enriched_row[4] == "Fleece"        # Category enriched!
+    assert enriched_row[11] == 45.00          # Price preserved
+    assert enriched_row[19] == 12             # Favorites enriched!
+    assert enriched_row[21] == "01a156e8-07ba-4ba8-9b88-c44d03613a0c"
+
+
+def test_email_fallback_order_id_fuzzy_matched_and_upgraded_by_html(mock_sheets_env):
+    """
+    When an email sale had an ORD-timestamp fallback order_id and placeholder title,
+    HTML orders matching price and date must detect the duplicate, prevent a new row,
+    and upgrade the Order_ID, Title, Brand, and Category.
+    """
+    from datetime import datetime, date
+    from src.email_parser import ParsedEmailEvent
+    from src.models import SalesOrder
+
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Email with fallback ORD- timestamp
+    email_event = ParsedEmailEvent(
+        event_type="sale",
+        item_title="Order ORD-1729500000",
+        order_id="ORD-1729500000",
+        sold_price=30.00,
+        timestamp=datetime(2026, 10, 21, 10, 0),
+    )
+    engine.process_email_batch([email_event])
+    assert len(ws_sold.rows) == 2
+
+    # HTML order with real UUID and full title
+    html_order = SalesOrder(
+        order_id="01a156e8-abcd-4ba8-9b88-c44d03613a0c",
+        item_title="Vintage Carhartt Work Jacket",
+        brand="Carhartt",
+        category="Outerwear",
+        sold_price=30.00,
+        sale_date=date(2026, 10, 21),
+    )
+    res = engine.sync_orders([html_order])
+    assert res["synced_orders"] == 1
+
+    # No duplicate row
+    assert len(ws_sold.rows) == 2
+    row = ws_sold.rows[1]
+    assert row[2] == "Vintage Carhartt Work Jacket"
+    assert row[3] == "Carhartt"
+    assert row[4] == "Outerwear"
+    assert row[21] == "01a156e8-abcd-4ba8-9b88-c44d03613a0c"  # Upgraded from ORD-1729500000!
+
+
+def test_html_first_then_email_sync_deduplicates_and_enriches(mock_sheets_env):
+    """
+    When HTML orders was imported first, and email sync runs later for the same sale,
+    email sync must NOT append a duplicate row and must enrich any missing fields (like Vinted_URL).
+    """
+    from datetime import datetime, date
+    from src.email_parser import ParsedEmailEvent
+    from src.models import SalesOrder
+
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # 1. HTML order imported first (URL empty)
+    html_order = SalesOrder(
+        order_id="01a156e8-8888-4ba8-9b88-c44d03613a0c",
+        item_title="Vintage Nike Crewneck Sweatshirt",
+        brand="Nike",
+        category="Hoodies & Sweatshirts",
+        sold_price=38.00,
+        sale_date=date(2026, 10, 21),
+    )
+    engine.sync_orders([html_order], default_lot="")
+    assert len(ws_sold.rows) == 2
+    assert ws_sold.rows[1][22] == ""  # Vinted_URL empty
+
+    # 2. Email arrives with URL and user assigns a lot in email preview
+    email_event = ParsedEmailEvent(
+        event_type="sale",
+        item_title="Vintage Nike Crewneck Sweatshirt",
+        order_id="01a156e8-8888-4ba8-9b88-c44d03613a0c",
+        sold_price=38.00,
+        vinted_url="https://www.vinted.com/items/776655-vintage-nike-crewneck",
+        lot_id="LOT-001",
+        timestamp=datetime(2026, 10, 21, 12, 0),
+    )
+    email_res = engine.process_email_batch([email_event])
+    assert len(email_res) == 1
+    assert email_res[0]["status"] == "enriched_sold"
+
+    # No duplicate row
+    assert len(ws_sold.rows) == 2
+    enriched_row = ws_sold.rows[1]
+    assert enriched_row[1] == "LOT-001"
+    assert enriched_row[2] == "Vintage Nike Crewneck Sweatshirt"
+    assert enriched_row[22] == "https://www.vinted.com/items/776655-vintage-nike-crewneck"
+
+
+def test_closet_sales_sync_listings_deduplicates_and_enriches_email_row(mock_sheets_env):
+    """
+    When an email sale created a row with partial title and no brand/category,
+    sync_listings from member profile sold HTML must match by Vinted ID / URL,
+    prevent duplicate rows, and enrich Title, Brand, and Category.
+    """
+    from datetime import date
+    from src.models import ItemListing
+
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Existing placeholder row from email in Sold_Items
+    placeholder_sold_row = [""] * len(SOLD_ITEMS_HEADERS)
+    placeholder_sold_row[0] = "SKU-9999"
+    placeholder_sold_row[1] = ""
+    placeholder_sold_row[2] = "Vinted Item 554433"
+    placeholder_sold_row[3] = "Unbranded"
+    placeholder_sold_row[4] = "Other Apparel"
+    placeholder_sold_row[11] = 25.00
+    placeholder_sold_row[14] = "2026-10-20"
+    placeholder_sold_row[22] = "https://www.vinted.com/items/554433"
+    placeholder_sold_row[23] = "Sold"
+    ws_sold.append_row(placeholder_sold_row)
+    assert len(ws_sold.rows) == 2
+
+    # Scraped closet sold item
+    closet_item = ItemListing(
+        item_sku="",
+        vinted_id="554433",
+        title="Levi's Vintage 501 Straight Leg Jeans",
+        brand="Levi's",
+        category="Jeans",
+        current_price=25.00,
+        sold_price=25.00,
+        status="Sold",
+        vinted_url="https://www.vinted.com/items/554433-levis-vintage-501",
+        date_listed=date(2026, 10, 1),
+    )
+
+    res = engine.sync_listings([closet_item])
+    assert res["created"] == 0  # No new listing created!
+    assert len(ws_sold.rows) == 2  # NO DUPLICATE ROW ADDED!
+
+    enriched = ws_sold.rows[1]
+    assert enriched[0] == "SKU-9999"
+    assert enriched[2] == "Levi's Vintage 501 Straight Leg Jeans"  # Title enriched!
+    assert enriched[3] == "Levi's"  # Brand enriched!
+    assert enriched[4] == "Jeans"   # Category enriched!
+    assert enriched[24] == "2026-10-01"  # Date_Listed enriched!
+
+
+
 
 
