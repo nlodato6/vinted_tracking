@@ -10,6 +10,9 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 
 
+from src.html_parser import infer_brand, infer_clothing_category
+
+
 class ParsedEmailEvent(BaseModel):
     event_type: str  # "sale", "favorite", "offer", or "unknown"
     item_title: str = ""
@@ -22,13 +25,17 @@ class ParsedEmailEvent(BaseModel):
     vinted_url: str = ""
     timestamp: datetime = datetime.now()
     raw_subject: str = ""
+    brand: str = ""
+    category: str = ""
+    lot_id: str = ""
 
 
 
 def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optional[datetime] = None) -> ParsedEmailEvent:
     """
     Parses Vinted notification email content without web scraping.
-    Handles both sale confirmation emails and favorite notification emails.
+    Handles sale confirmation emails, favorite notification emails, and offers.
+    Extracts item title, brand, category, price, buyer, and IDs.
     """
     sub_clean = subject.strip()
     content = body_text_or_html or ""
@@ -46,16 +53,25 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
         # Extract Item ID and URL from links in email body
         v_id = ""
         v_url = ""
-        item_link_match = re.search(r"https?://(?:www\.)?vinted\.[a-z.]+/items/(\d+)(?:-[\w-]+)?", content)
+        slug_title = ""
+        item_link_match = re.search(r"https?://(?:www\.)?vinted\.[a-z.]+/items/(\d+)(?:-([\w-]+))?", content)
         if item_link_match:
             v_id = item_link_match.group(1)
             v_url = item_link_match.group(0)
+            if item_link_match.group(2):
+                slug_title = item_link_match.group(2).replace("-", " ").replace("_", " ").title().strip()
+
+        if not title and slug_title:
+            title = slug_title
 
         # Extract buyer username if mentioned (e.g., "@buyer123 added your item")
         buyer = ""
         buyer_match = re.search(r"@([\w.-]+)\s+(?:added|favorited)", content, re.IGNORECASE)
         if buyer_match:
             buyer = buyer_match.group(1)
+
+        brand = infer_brand(title, content)
+        category = infer_clothing_category(title) if title else "Other Apparel"
 
         return ParsedEmailEvent(
             event_type="favorite",
@@ -65,6 +81,8 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
             buyer_username=buyer,
             timestamp=dt,
             raw_subject=sub_clean,
+            brand=brand,
+            category=category,
         )
 
     # 2. Check for Sale Notification
@@ -83,13 +101,16 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
             except ValueError:
                 sold_price = 0.0
 
-        # Extract Item ID and Item URL
+        # Extract Item ID, Item URL, and slug title
         v_id = ""
         v_url = ""
-        item_link_match = re.search(r"https?://(?:www\.)?vinted\.[a-z.]+/items/(\d+)(?:-[\w-]+)?", content)
+        slug_title = ""
+        item_link_match = re.search(r"https?://(?:www\.)?vinted\.[a-z.]+/items/(\d+)(?:-([\w-]+))?", content)
         if item_link_match:
             v_id = item_link_match.group(1)
             v_url = item_link_match.group(0)
+            if item_link_match.group(2):
+                slug_title = item_link_match.group(2).replace("-", " ").replace("_", " ").title().strip()
 
         # Extract Order ID / Transaction Reference
         order_id = ""
@@ -105,11 +126,56 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
         if buyer_match:
             buyer = buyer_match.group(1)
 
-        # Extract Item Title from content if present
+        # Multi-strategy Title Extraction:
         title = ""
-        title_match = re.search(r"(?:item|article):\s*([^\n\r<]+)", content, re.IGNORECASE)
+
+        # Strategy 1: Explicit pattern "Item: <Title>" or "Article: <Title>" or "Listing: <Title>"
+        title_match = re.search(r"(?:item|article|listing):\s*([^\n\r<]+)", content, re.IGNORECASE)
         if title_match:
-            title = title_match.group(1).strip()
+            cand = title_match.group(1).strip()
+            if cand.lower().startswith("http") or "/items/" in cand:
+                m_slug = re.search(r"/items/\d+-([a-zA-Z0-9_-]+)", cand)
+                cand = m_slug.group(1).replace("-", " ").replace("_", " ").title().strip() if m_slug else ""
+            if cand and cand.lower() not in ("sold", "details", "order", "an item", "and item"):
+                title = cand
+
+        # Strategy 2: Subject line "You sold [Title] on Vinted"
+        if not title:
+            m_sub = re.search(r"you sold\s+[\"']?([^\"'\n\r]+?)[\"']?\s+on vinted", sub_clean, re.IGNORECASE)
+            if m_sub and m_sub.group(1).lower() not in ("an item", "and item", "your item"):
+                title = m_sub.group(1).strip()
+
+        # Strategy 3: HTML link text `<a href=".../items/...">Title</a>`
+        if not title:
+            m_a = re.search(r'<a\s+[^>]*href=["\'][^"\']*?/items/\d+[^"\']*?["\'][^>]*>([^<]+)</a>', content, re.IGNORECASE)
+            if m_a and m_a.group(1).strip() and not m_a.group(1).strip().lower().startswith("http"):
+                cand = m_a.group(1).strip()
+                if cand.lower() not in ("view item", "item link", "see item", "item", "order details"):
+                    title = cand
+
+        # Strategy 4: Image alt attribute `<img alt="Title" ...>`
+        if not title:
+            m_alt = re.search(r'<img\s+[^>]*alt=["\']([^"\']+)["\'][^>]*src=["\'][^"\']*?/items/', content, re.IGNORECASE)
+            if m_alt and m_alt.group(1).strip():
+                title = m_alt.group(1).strip()
+
+        # Strategy 5: "sold <Title> to @buyer" or "bought <Title>"
+        if not title:
+            m_sold_to = re.search(r"(?:you sold|sold)\s+[\"']?([^\"'\n\r<]+?)[\"']?\s+to\s+@?[\w.-]+", content, re.IGNORECASE)
+            if m_sold_to and m_sold_to.group(1).lower() not in ("an item", "and item", "your item"):
+                title = m_sold_to.group(1).strip()
+
+        # Strategy 6: Slug from Item URL
+        if not title and slug_title:
+            title = slug_title
+
+        # Clean title
+        if title:
+            title = re.sub(r"<[^>]+>", "", title).strip().strip('"').strip("'")
+
+        # Infer Brand and Category
+        brand = infer_brand(title, content)
+        category = infer_clothing_category(title) if title else "Other Apparel"
 
         return ParsedEmailEvent(
             event_type="sale",
@@ -121,6 +187,8 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
             vinted_url=v_url,
             timestamp=dt,
             raw_subject=sub_clean,
+            brand=brand,
+            category=category,
         )
 
     # 3. Check for Offer Received Notification
@@ -163,6 +231,9 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
         if buyer_match:
             buyer = buyer_match.group(1)
 
+        brand = infer_brand(title, content)
+        category = infer_clothing_category(title) if title else "Other Apparel"
+
         return ParsedEmailEvent(
             event_type="offer",
             item_title=title,
@@ -173,6 +244,8 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
             buyer_username=buyer,
             timestamp=dt,
             raw_subject=sub_clean,
+            brand=brand,
+            category=category,
         )
 
     return ParsedEmailEvent(

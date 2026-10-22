@@ -733,3 +733,68 @@ def test_clean_blank_rows(mock_sheets_env):
     assert len(ws_listings.rows) == initial_count - 2
 
 
+def test_process_email_batch_with_custom_lot_and_metadata(mock_sheets_env):
+    from src.email_parser import ParsedEmailEvent
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Simulate an email sale with user-provided lot, brand, and category
+    event = ParsedEmailEvent(
+        event_type="sale",
+        item_title="Floral Summer Dress",
+        vinted_id="99881122",
+        order_id="ORD-EMAIL-TEST-1",
+        sold_price=28.00,
+        lot_id="LOT-002",
+        brand="Zara",
+        category="Dresses & Skirts",
+        vinted_url="https://www.vinted.com/items/99881122-floral-summer-dress",
+    )
+
+    results = engine.process_email_batch([event], default_lot="LOT-001")
+    assert len(results) == 1
+    assert results[0]["status"] == "appended_to_sold"
+    assert results[0]["lot"] == "LOT-002"
+
+    matched = [r for r in ws_sold.rows[1:] if r[2] == "Floral Summer Dress"]
+    assert len(matched) == 1
+    row = matched[0]
+    assert row[1] == "LOT-002"            # Lot_ID
+    assert row[3] == "Zara"               # Brand
+    assert row[4] == "Dresses & Skirts"   # Category
+    assert row[11] == 28.00               # Sold_Price
+
+
+def test_reconcile_missing_sold_metadata(mock_sheets_env):
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Add a sold item row missing title, lot, brand, and category, but with a Vinted URL slug
+    row_data = [""] * len(SOLD_ITEMS_HEADERS)
+    row_data[0] = "SKU-9999"
+    row_data[1] = ""                       # Missing Lot
+    row_data[2] = ""                       # Missing Title
+    row_data[3] = ""                       # Missing Brand
+    row_data[4] = ""                       # Missing Category
+    row_data[11] = 50.00                   # Sold_Price
+    row_data[22] = "https://www.vinted.com/items/55443322-vintage-levi-denim-jacket"
+    row_data[23] = "Sold"
+    ws_sold.rows.append(row_data)
+
+    res = engine.reconcile_missing_sold_metadata(default_lot="LOT-001")
+    assert res["fixed_rows"] >= 1
+    assert res["titles_fixed"] >= 1
+    assert res["lots_assigned"] >= 1
+    assert res["brands_fixed"] >= 1
+    assert res["categories_fixed"] >= 1
+
+    # Verify backfilled values
+    matched = [r for r in ws_sold.rows[1:] if r[0] == "SKU-9999"]
+    assert len(matched) == 1
+    fixed_row = matched[0]
+    assert fixed_row[1] == "LOT-001"
+    assert fixed_row[2] == "Vintage Levi Denim Jacket"
+    assert fixed_row[3] == "Levi's"
+    assert fixed_row[4] == "Outerwear"
+
+

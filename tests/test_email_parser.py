@@ -73,3 +73,39 @@ def test_fetch_vinted_emails_empty_credentials():
     assert fetch_vinted_emails_via_imap("", "") == []
 
 
+def test_parse_sold_email_slug_fallback():
+    # Email with no explicit 'Item:' text, only URL slug
+    subject = "You sold an item on Vinted!"
+    body = """
+    Congratulations on your sale!
+    Sold to @shopper1
+    Earnings: $45.00
+    Transaction link: https://www.vinted.com/transaction/01a1569f-be78
+    Item: https://www.vinted.com/items/987654321-vintage-carhartt-hoodie
+    """
+    event = parse_vinted_email(subject, body)
+    assert event.event_type == "sale"
+    assert event.item_title == "Vintage Carhartt Hoodie"
+    assert event.brand == "Carhartt"
+    assert event.category == "Sweaters & Hoodies"
+    assert event.sold_price == 45.00
+
+
+def test_parse_sold_email_html_anchor():
+    # Email with HTML anchor link
+    subject = "You sold an item on Vinted!"
+    body = """
+    <div>
+        <p>Congratulations, your item was bought by @collector!</p>
+        <a href="https://www.vinted.com/items/12345678">Nike Air Max Sneakers</a>
+        <span>Total: $85.00</span>
+    </div>
+    """
+    event = parse_vinted_email(subject, body)
+    assert event.event_type == "sale"
+    assert event.item_title == "Nike Air Max Sneakers"
+    assert event.brand == "Nike"
+    assert event.category == "Footwear"
+    assert event.sold_price == 85.00
+
+

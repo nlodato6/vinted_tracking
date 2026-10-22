@@ -14,6 +14,7 @@ from src.sheets.schemas import (
 )
 import re
 from src.models import ItemListing, SalesOrder
+from src.html_parser import infer_brand, infer_clothing_category
 
 
 def parse_price(price_val: Any) -> float:
@@ -1118,12 +1119,14 @@ class SheetsSyncEngine:
 
         return {"synced_orders": synced_count}
 
-    def process_email_batch(self, events: List[Any]) -> List[Dict[str, Any]]:
+    def process_email_batch(self, events: List[Any], default_lot: str = "") -> List[Dict[str, Any]]:
         """
         Batch-processes a list of parsed Vinted email events (sales, offers, favorites)
         with minimal Google Sheets API calls:
         - Single batch read for active listings and sold items.
         - In-memory matching and formula evaluation.
+        - Preserves user-assigned lot, title, brand, and category from preview editor.
+        - Infers brand and category when missing so records are never blank.
         - Single batch cell updates for listings and single batch append for sold items.
         - Single notification banner update at the end.
         """
@@ -1161,6 +1164,7 @@ class SheetsSyncEngine:
         fav_idx = l_headers.index("Favorites") if "Favorites" in l_headers else 11
         views_idx = l_headers.index("Views") if "Views" in l_headers else 12
         id_idx = l_headers.index("Vinted_ID") if "Vinted_ID" in l_headers else 13
+        url_idx = l_headers.index("Vinted_URL") if "Vinted_URL" in l_headers else 14
 
         s_headers = sold_rows[0] if sold_rows else []
         s_ord_idx = s_headers.index("Order_ID") if "Order_ID" in s_headers else 21
@@ -1176,15 +1180,19 @@ class SheetsSyncEngine:
         active_listings_by_row: Dict[int, List[Any]] = {}
         row_by_vinted_id: Dict[str, int] = {}
         row_by_title: Dict[str, int] = {}
+        row_by_url: Dict[str, int] = {}
 
         for r_i, r in enumerate(listings_rows[1:], start=2):
             active_listings_by_row[r_i] = list(r)
             r_id = r[id_idx].replace(",", "").strip() if len(r) > id_idx else ""
             r_title = r[title_idx].strip().lower() if len(r) > title_idx else ""
+            r_url = r[url_idx].strip().lower() if len(r) > url_idx else ""
             if r_id:
                 row_by_vinted_id[r_id] = r_i
             if r_title:
                 row_by_title[r_title] = r_i
+            if r_url:
+                row_by_url[r_url] = r_i
 
         listings_cell_updates: List[Dict[str, Any]] = []
         rows_to_append_to_sold: List[List[Any]] = []
@@ -1196,11 +1204,14 @@ class SheetsSyncEngine:
 
         for event in events:
             clean_target_title = (event.item_title or "").strip().lower()
-            clean_target_id = (event.vinted_id or "").strip()
+            clean_target_id = (event.vinted_id or "").replace(",", "").strip()
+            clean_target_url = (event.vinted_url or "").strip().lower()
 
             target_row = None
             if clean_target_id and clean_target_id in row_by_vinted_id:
                 target_row = row_by_vinted_id[clean_target_id]
+            elif clean_target_url and clean_target_url in row_by_url:
+                target_row = row_by_url[clean_target_url]
             elif clean_target_title:
                 if clean_target_title in row_by_title:
                     target_row = row_by_title[clean_target_title]
@@ -1267,10 +1278,10 @@ class SheetsSyncEngine:
                     rows_to_delete_from_listings.append(target_row)
 
                     item_sku = t_data[sku_idx] if len(t_data) > sku_idx and t_data[sku_idx].strip() else f"SKU-{max_sku_num + 1}"
-                    lot_id = t_data[lot_idx] if len(t_data) > lot_idx else ""
-                    item_title = t_data[title_idx] if len(t_data) > title_idx else event.item_title
-                    brand = t_data[brand_idx] if len(t_data) > brand_idx else ""
-                    category = t_data[cat_idx] if len(t_data) > cat_idx else ""
+                    lot_id = getattr(event, "lot_id", "") or (t_data[lot_idx] if len(t_data) > lot_idx and t_data[lot_idx].strip() else default_lot)
+                    item_title = event.item_title or (t_data[title_idx] if len(t_data) > title_idx else "")
+                    brand = getattr(event, "brand", "") or (t_data[brand_idx] if len(t_data) > brand_idx and t_data[brand_idx].strip() else infer_brand(item_title))
+                    category = getattr(event, "category", "") or (t_data[cat_idx] if len(t_data) > cat_idx and t_data[cat_idx].strip() else infer_clothing_category(item_title))
                     posted_p = t_data[posted_idx] if len(t_data) > posted_idx else event.sold_price
                     curr_p = t_data[curr_idx] if len(t_data) > curr_idx else event.sold_price
                     hist_p = t_data[hist_idx] if len(t_data) > hist_idx else ""
@@ -1293,13 +1304,18 @@ class SheetsSyncEngine:
                     rows_to_append_to_sold.append(sold_row)
                     if event.order_id:
                         existing_orders.add(event.order_id)
-                    results.append({"status": "moved_to_sold", "title": item_title, "sku": item_sku})
+                    results.append({"status": "moved_to_sold", "title": item_title, "sku": item_sku, "lot": lot_id})
 
                 else:
                     max_sku_num += 1
                     new_sku = f"SKU-{max_sku_num}"
+                    assigned_lot = getattr(event, "lot_id", "") or default_lot
+                    assigned_title = event.item_title or (f"Vinted Item {clean_target_id}" if clean_target_id else f"Order {event.order_id}")
+                    assigned_brand = getattr(event, "brand", "") or infer_brand(assigned_title)
+                    assigned_cat = getattr(event, "category", "") or infer_clothing_category(assigned_title)
+
                     sold_row = [
-                        new_sku, "", event.item_title, "", "",
+                        new_sku, assigned_lot, assigned_title, assigned_brand, assigned_cat,
                         f'=IFERROR(VLOOKUP({col_lot}{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)',
                         event.sold_price, event.sold_price, "NO", 0.0, "", event.sold_price,
                         f'=IF(OR({col_g}{next_sold_row}="", L{next_sold_row}=""), "", IF(AND(ISNUMBER({col_g}{next_sold_row}), ISNUMBER(L{next_sold_row}), {col_g}{next_sold_row}>L{next_sold_row}), {col_g}{next_sold_row}-L{next_sold_row}, 0))',
@@ -1313,7 +1329,7 @@ class SheetsSyncEngine:
                     rows_to_append_to_sold.append(sold_row)
                     if event.order_id:
                         existing_orders.add(event.order_id)
-                    results.append({"status": "appended_to_sold", "title": event.item_title, "sku": new_sku})
+                    results.append({"status": "appended_to_sold", "title": assigned_title, "sku": new_sku, "lot": assigned_lot})
 
             else:
                 results.append({"status": "ignored"})
@@ -1341,7 +1357,11 @@ class SheetsSyncEngine:
             pass
 
         # 6. Synchronize inventory lots ONCE
+        # 6. Synchronize inventory lots ONCE
         self.sync_lots()
+
+        # 7. Clean accidental blank rows
+        self.clean_blank_rows()
 
         return results
 
@@ -1352,5 +1372,153 @@ class SheetsSyncEngine:
         """
         results = self.process_email_batch([event])
         return results[0] if results else {"status": "ignored"}
+
+    def reconcile_missing_sold_metadata(self, default_lot: str = "") -> Dict[str, int]:
+        """
+        Scans Sold_Items for rows missing Title, Brand, Category, or Lot_ID.
+        Cross-references with Item_Listings, URL slugs, and category inference to backfill missing fields.
+        Returns a dict of counts of updated fields.
+        """
+        ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
+
+        sold_rows = ws_sold.get_all_values()
+        listings_rows = ws_listings.get_all_values()
+
+        if len(sold_rows) <= 1:
+            return {"fixed_rows": 0, "titles_fixed": 0, "lots_assigned": 0, "brands_fixed": 0, "categories_fixed": 0}
+
+        s_headers = sold_rows[0]
+        sku_idx = s_headers.index("Item_SKU") if "Item_SKU" in s_headers else 0
+        lot_idx = s_headers.index("Lot_ID") if "Lot_ID" in s_headers else 1
+        title_idx = s_headers.index("Title") if "Title" in s_headers else 2
+        brand_idx = s_headers.index("Brand") if "Brand" in s_headers else 3
+        cat_idx = s_headers.index("Category") if "Category" in s_headers else 4
+        url_idx = s_headers.index("Vinted_URL") if "Vinted_URL" in s_headers else 22
+
+        # Index active listings by Vinted ID, URL, and Title
+        l_headers = listings_rows[0] if listings_rows else []
+        l_title_idx = l_headers.index("Title") if "Title" in l_headers else 2
+        l_lot_idx = l_headers.index("Lot_ID") if "Lot_ID" in l_headers else 1
+        l_brand_idx = l_headers.index("Brand") if "Brand" in l_headers else 3
+        l_cat_idx = l_headers.index("Category") if "Category" in l_headers else 4
+        l_id_idx = l_headers.index("Vinted_ID") if "Vinted_ID" in l_headers else 13
+        l_url_idx = l_headers.index("Vinted_URL") if "Vinted_URL" in l_headers else 14
+
+        listings_by_id: Dict[str, List[str]] = {}
+        listings_by_title: Dict[str, List[str]] = {}
+        listings_by_url: Dict[str, List[str]] = {}
+        for lr in listings_rows[1:]:
+            vid = lr[l_id_idx].replace(",", "").strip() if len(lr) > l_id_idx else ""
+            ltit = lr[l_title_idx].strip().lower() if len(lr) > l_title_idx else ""
+            lurl = lr[l_url_idx].strip().lower() if len(lr) > l_url_idx else ""
+            if vid:
+                listings_by_id[vid] = lr
+            if ltit:
+                listings_by_title[ltit] = lr
+            if lurl:
+                listings_by_url[lurl] = lr
+
+        updates: List[Dict[str, Any]] = []
+        fixed_rows = 0
+        titles_fixed = 0
+        lots_assigned = 0
+        brands_fixed = 0
+        categories_fixed = 0
+
+        for r_i, row in enumerate(sold_rows[1:], start=2):
+            cur_lot = row[lot_idx].strip() if len(row) > lot_idx else ""
+            cur_title = row[title_idx].strip() if len(row) > title_idx else ""
+            cur_brand = row[brand_idx].strip() if len(row) > brand_idx else ""
+            cur_cat = row[cat_idx].strip() if len(row) > cat_idx else ""
+            cur_url = row[url_idx].strip() if len(row) > url_idx else ""
+
+            # Check if this row needs fixing
+            needs_title = not cur_title or cur_title.lower().startswith("order ") or cur_title.lower().startswith("vinted item")
+            needs_lot = not cur_lot and bool(default_lot)
+            needs_brand = not cur_brand or cur_brand.lower() in ("unbranded", "none")
+            needs_cat = not cur_cat or cur_cat.lower() in ("other apparel", "none")
+
+            if not (needs_title or needs_lot or needs_brand or needs_cat):
+                continue
+
+            # Check for active listing match by URL or ID
+            v_id_match = re.search(r"/items/(\d+)", cur_url)
+            v_id = v_id_match.group(1) if v_id_match else ""
+            matched_listing = listings_by_id.get(v_id) or listings_by_url.get(cur_url.lower()) or (listings_by_title.get(cur_title.lower()) if cur_title else None)
+
+            row_changed = False
+
+            # 1. Title
+            if needs_title:
+                new_title = ""
+                if matched_listing and len(matched_listing) > l_title_idx and matched_listing[l_title_idx].strip():
+                    new_title = matched_listing[l_title_idx].strip()
+                elif cur_url:
+                    slug_match = re.search(r"/items/\d+-([a-zA-Z0-9_-]+)", cur_url)
+                    if slug_match:
+                        new_title = slug_match.group(1).replace("-", " ").replace("_", " ").title().strip()
+                if new_title and new_title != cur_title:
+                    cur_title = new_title
+                    col_t = chr(ord('A') + title_idx)
+                    updates.append({"range": f"{col_t}{r_i}", "values": [[new_title]]})
+                    titles_fixed += 1
+                    row_changed = True
+
+            # 2. Lot
+            if not cur_lot:
+                new_lot = ""
+                if matched_listing and len(matched_listing) > l_lot_idx and matched_listing[l_lot_idx].strip():
+                    new_lot = matched_listing[l_lot_idx].strip()
+                elif default_lot:
+                    new_lot = default_lot
+                if new_lot:
+                    cur_lot = new_lot
+                    col_l = chr(ord('A') + lot_idx)
+                    updates.append({"range": f"{col_l}{r_i}", "values": [[new_lot]]})
+                    lots_assigned += 1
+                    row_changed = True
+
+            # 3. Brand
+            if needs_brand:
+                new_brand = ""
+                if matched_listing and len(matched_listing) > l_brand_idx and matched_listing[l_brand_idx].strip():
+                    new_brand = matched_listing[l_brand_idx].strip()
+                elif cur_title:
+                    new_brand = infer_brand(cur_title)
+                if new_brand and new_brand != cur_brand:
+                    col_b = chr(ord('A') + brand_idx)
+                    updates.append({"range": f"{col_b}{r_i}", "values": [[new_brand]]})
+                    brands_fixed += 1
+                    row_changed = True
+
+            # 4. Category
+            if needs_cat:
+                new_cat = ""
+                if matched_listing and len(matched_listing) > l_cat_idx and matched_listing[l_cat_idx].strip():
+                    new_cat = matched_listing[l_cat_idx].strip()
+                elif cur_title:
+                    new_cat = infer_clothing_category(cur_title)
+                if new_cat and new_cat != cur_cat:
+                    col_c = chr(ord('A') + cat_idx)
+                    updates.append({"range": f"{col_c}{r_i}", "values": [[new_cat]]})
+                    categories_fixed += 1
+                    row_changed = True
+
+            if row_changed:
+                fixed_rows += 1
+
+        if updates:
+            ws_sold.batch_update(updates, value_input_option="USER_ENTERED")
+            self.sync_lots()
+
+        return {
+            "fixed_rows": fixed_rows,
+            "titles_fixed": titles_fixed,
+            "lots_assigned": lots_assigned,
+            "brands_fixed": brands_fixed,
+            "categories_fixed": categories_fixed,
+        }
+
 
 

@@ -127,10 +127,10 @@ def render_sync_page():
         return
 
     # Quick Maintenance Tools
-    with st.expander("🛠️ Spreadsheet Tools (Clean Blank Rows & Refresh)", expanded=False):
-        c_tool1, c_tool2 = st.columns(2)
+    with st.expander("🛠️ Spreadsheet Tools (Clean Blank Rows, Fix Missing Metadata, & Refresh)", expanded=False):
+        c_tool1, c_tool2, c_tool3 = st.columns(3)
         with c_tool1:
-            if st.button("🧹 Clean Blank Rows from Spreadsheet", type="secondary", width="stretch", icon=":material/cleaning_services:", key="clean_blank_rows_btn"):
+            if st.button("🧹 Clean Blank Rows", type="secondary", width="stretch", icon=":material/cleaning_services:", key="clean_blank_rows_btn"):
                 with st.spinner("Scanning and purging blank rows from Google Sheets..."):
                     engine = SheetsSyncEngine(client)
                     res = engine.clean_blank_rows()
@@ -144,7 +144,23 @@ def render_sync_page():
                     time.sleep(1.2)
                     st.rerun()
         with c_tool2:
-            if st.button("🔄 Force Refresh Data from Google Sheets", type="secondary", width="stretch", icon=":material/refresh:", key="force_refresh_data_btn"):
+            if st.button("✨ Backfill Missing Metadata in Sold", type="secondary", width="stretch", icon=":material/auto_fix_high:", key="backfill_metadata_btn"):
+                with st.spinner("Analyzing Sold_Items and restoring missing Titles, Lots, Brands, and Categories..."):
+                    engine = SheetsSyncEngine(client)
+                    res = engine.reconcile_missing_sold_metadata(default_lot=st.session_state.get("selected_lot", ""))
+                    st.cache_data.clear()
+                    if res["fixed_rows"] > 0:
+                        st.success(
+                            f"✔ Enriched {res['fixed_rows']} sold items! "
+                            f"({res['titles_fixed']} titles restored, {res['lots_assigned']} lots assigned, "
+                            f"{res['brands_fixed']} brands, {res['categories_fixed']} categories)"
+                        )
+                    else:
+                        st.info("✔ All items in Sold_Items already have full metadata!")
+                    time.sleep(1.5)
+                    st.rerun()
+        with c_tool3:
+            if st.button("🔄 Force Refresh Data", type="secondary", width="stretch", icon=":material/refresh:", key="force_refresh_data_btn"):
                 st.cache_data.clear()
                 st.success("✔ Cache cleared! Reloading fresh data...")
                 time.sleep(0.5)
@@ -621,27 +637,102 @@ def render_sync_page():
             prev_c2.metric("💬 Offers Received", offers_count, border=True)
             prev_c3.metric("❤️ Favorites to Increment", favs_count, border=True)
 
-            preview_table_data = []
-            for ev in preview_events:
-                price_str = f"${ev.sold_price:.2f}" if ev.event_type == "sale" else (f"${ev.offer_price:.2f}" if ev.event_type == "offer" else "-")
-                preview_table_data.append({
-                    "Type": ev.event_type.upper(),
-                    "Item / Reference": ev.item_title or ev.order_id,
-                    "Price": price_str,
-                    "Buyer": f"@{ev.buyer_username}" if ev.buyer_username else "-",
-                    "Order ID": ev.order_id or "-",
-                    "Date": ev.timestamp.strftime("%Y-%m-%d %H:%M"),
-                })
+            # Default Inventory Lot Selector for Email Sales
+            NO_LOT_OPTION = "⚪ None / No Lot (Unassigned)"
+            email_lot_options = [NO_LOT_OPTION] + [
+                f"{l['Lot_ID']} — {l.get('Source_Vendor', 'Vendor')} ({l.get('Unit_Cost', '$0.00')}/ea)"
+                for l in all_lots if l.get("Lot_ID")
+            ]
+            selected_email_lot = st.selectbox(
+                "Default Inventory Lot for Email Sales:",
+                options=email_lot_options,
+                help="Select an inventory lot to assign to detected sales, or assign individual lots per-item in the table below.",
+                key="email_sync_lot_selectbox",
+            )
+            target_email_lot = selected_email_lot.split(" — ")[0].strip() if selected_email_lot != NO_LOT_OPTION else ""
 
-            st.dataframe(pd.DataFrame(preview_table_data), width="stretch")
+            # Interactive Sales Table with Lot, Title, Brand, Category editing
+            edited_sale_df = None
+            sale_indices = []
+
+            if sales_count > 0:
+                st.markdown("##### 🛒 Detected Sales (Editable Preview)")
+                st.caption("✏️ You can edit the **Title**, choose an **Assigned Lot**, and verify **Brand** or **Category** before syncing to `Sold_Items`.")
+
+                available_lot_ids = [l.get("Lot_ID", "") for l in all_lots if l.get("Lot_ID")]
+                if target_email_lot and target_email_lot not in available_lot_ids:
+                    available_lot_ids.append(target_email_lot)
+                lot_col_options = [""] + available_lot_ids
+
+                sale_rows = []
+                for idx, ev in enumerate(preview_events):
+                    if ev.event_type == "sale":
+                        sale_indices.append(idx)
+                        cur_lot = getattr(ev, "lot_id", "") or target_email_lot
+                        cur_brand = getattr(ev, "brand", "") or infer_brand(ev.item_title)
+                        cur_cat = getattr(ev, "category", "") or (infer_clothing_category(ev.item_title) if ev.item_title else "Other Apparel")
+                        sale_rows.append({
+                            "Title": ev.item_title or f"Vinted Sale {ev.order_id}",
+                            "Assigned Lot": cur_lot,
+                            "Brand": cur_brand,
+                            "Category": cur_cat,
+                            "Price": f"${ev.sold_price:.2f}",
+                            "Buyer": f"@{ev.buyer_username}" if ev.buyer_username else "-",
+                            "Order ID": ev.order_id or "-",
+                            "Date": ev.timestamp.strftime("%Y-%m-%d"),
+                        })
+
+                sale_df = pd.DataFrame(sale_rows)
+                edited_sale_df = st.data_editor(
+                    sale_df,
+                    column_config={
+                        "Title": st.column_config.TextColumn("Title", required=True, width="large"),
+                        "Assigned Lot": st.column_config.SelectboxColumn("Assigned Lot", options=lot_col_options, format_func=lambda x: "⚪ None (Unassigned)" if not x else x, width="medium"),
+                        "Brand": st.column_config.TextColumn("Brand", width="medium"),
+                        "Category": st.column_config.SelectboxColumn("Category", options=["Tops & Shirts", "Outerwear", "Pants & Jeans", "Sweaters & Hoodies", "Dresses & Skirts", "Footwear", "Accessories", "Other Apparel"], width="medium"),
+                        "Price": st.column_config.TextColumn("Price", disabled=True, width="small"),
+                        "Buyer": st.column_config.TextColumn("Buyer", disabled=True, width="small"),
+                        "Order ID": st.column_config.TextColumn("Order ID", disabled=True, width="medium"),
+                        "Date": st.column_config.TextColumn("Date", disabled=True, width="small"),
+                    },
+                    hide_index=True,
+                    num_rows="fixed",
+                    width="stretch",
+                    key="email_sales_editor",
+                )
+
+            non_sales = [e for e in preview_events if e.event_type != "sale"]
+            if non_sales:
+                with st.expander(f"View Other Detected Events ({len(non_sales)} offers & favorites)", expanded=False):
+                    st.dataframe(pd.DataFrame([{
+                        "Type": ev.event_type.upper(),
+                        "Item": ev.item_title or ev.vinted_id,
+                        "Detail": f"${ev.offer_price:.2f}" if ev.event_type == "offer" else "Favorited",
+                        "User": f"@{ev.buyer_username}" if ev.buyer_username else "-",
+                        "Date": ev.timestamp.strftime("%Y-%m-%d %H:%M"),
+                    } for ev in non_sales]), width="stretch")
 
             action_c1, action_c2 = st.columns([1.5, 1])
             with action_c1:
                 if st.button("🚀 Confirm & Sync to Google Sheets", type="primary", width="stretch", key="btn_confirm_email_sync"):
                     with st.spinner("Synchronizing email events to Google Sheets..."):
                         try:
+                            # Apply any edits from st.data_editor to preview_events
+                            if edited_sale_df is not None and not edited_sale_df.empty:
+                                for s_idx, df_idx in enumerate(sale_indices):
+                                    if s_idx < len(edited_sale_df):
+                                        row = edited_sale_df.iloc[s_idx]
+                                        ev = preview_events[df_idx]
+                                        ed_title = str(row.get("Title", "")).strip()
+                                        if ed_title:
+                                            ev.item_title = ed_title
+                                        raw_lot = row.get("Assigned Lot")
+                                        ev.lot_id = "" if (pd.isna(raw_lot) or str(raw_lot).strip() in ("", "None", "⚪ None", "⚪ None (Unassigned)")) else str(raw_lot).strip()
+                                        ev.brand = str(row.get("Brand", "")).strip()
+                                        ev.category = str(row.get("Category", "")).strip()
+
                             engine = SheetsSyncEngine(client)
-                            results = engine.process_email_batch(preview_events)
+                            results = engine.process_email_batch(preview_events, default_lot=target_email_lot)
                             processed = len([r for r in results if r.get("status") not in ("ignored", "no_listings")])
                             log_event(
                                 u_email,
@@ -651,7 +742,7 @@ def render_sync_page():
                             )
                             st.cache_data.clear()
                             st.session_state.email_sync_preview = None
-                            st.success(f"✔ Successfully synced {processed} email transactions to your Google Sheet!")
+                            st.success(f"✔ Successfully synced {processed} email transactions to your Google Sheet with full lot, brand, and category assignments!")
                             st.balloons()
                             time.sleep(1.5)
                             st.rerun()
