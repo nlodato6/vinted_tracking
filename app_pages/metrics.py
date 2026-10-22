@@ -90,6 +90,31 @@ def render_metrics_page():
         st.info("No sales or inventory listings found in this spreadsheet yet.")
         return
 
+    # Guarantee canonical columns exist even if Google Sheet headers were customized or empty
+    if not df_sold.empty:
+        for col, default_val in [
+            ("Category", "Other Apparel"),
+            ("Brand", "Unbranded"),
+            ("Sale_Type", "Original Price"),
+            ("Title", "Untitled Item"),
+            ("sold_price_num", 0.0),
+            ("net_profit_num", 0.0),
+            ("margin_pct_num", 0.0),
+        ]:
+            if col not in df_sold.columns:
+                df_sold[col] = default_val
+
+    if not df_active.empty:
+        for col, default_val in [
+            ("Category", "Other Apparel"),
+            ("Brand", "Unbranded"),
+            ("Title", "Untitled Item"),
+            ("current_price_num", 0.0),
+            ("posted_price_num", 0.0),
+        ]:
+            if col not in df_active.columns:
+                df_active[col] = default_val
+
     # -------------------------------------------------------------------------
     # Top Control Bar & Filters
     # -------------------------------------------------------------------------
@@ -138,14 +163,14 @@ def render_metrics_page():
     # -------------------------------------------------------------------------
     # Financial KPI Cards & Actual Net Cash Profit
     # -------------------------------------------------------------------------
-    total_rev = filtered_sold["sold_price_num"].sum() if not filtered_sold.empty else 0.0
-    total_profit = filtered_sold["net_profit_num"].sum() if not filtered_sold.empty else 0.0
+    total_rev = filtered_sold["sold_price_num"].sum() if (not filtered_sold.empty and "sold_price_num" in filtered_sold.columns) else 0.0
+    total_profit = filtered_sold["net_profit_num"].sum() if (not filtered_sold.empty and "net_profit_num" in filtered_sold.columns) else 0.0
     items_sold = len(filtered_sold)
     avg_price = (total_rev / items_sold) if items_sold > 0 else 0.0
     margin_pct = ((total_profit / total_rev) * 100) if total_rev > 0 else 0.0
 
     active_items = len(filtered_active)
-    active_value = filtered_active["current_price_num"].sum() if not filtered_active.empty else 0.0
+    active_value = filtered_active["current_price_num"].sum() if (not filtered_active.empty and "current_price_num" in filtered_active.columns) else 0.0
     total_catalog = items_sold + active_items
     sell_through = ((items_sold / total_catalog) * 100) if total_catalog > 0 else 0.0
 

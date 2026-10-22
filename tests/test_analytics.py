@@ -197,3 +197,18 @@ def test_blank_rows_handling():
     assert len(df_sold) == 2
     assert list(df_sold["Title"]) == ["Sold Sweater", "Sold Shoes"]
 
+
+def test_charts_with_missing_columns_do_not_throw_keyerror():
+    # DataFrame that has NO Category, NO Brand, NO numeric columns
+    sparse_df = pd.DataFrame([{"Arbitrary_Col": "Value1"}, {"Arbitrary_Col": "Value2"}])
+
+    # None of these chart builders should raise KeyError
+    assert build_sales_trend_chart(sparse_df) is not None
+    assert build_category_chart(sparse_df) is not None
+    assert build_top_brands_chart(sparse_df) is not None
+    assert build_price_vs_profit_scatter(sparse_df) is not None
+    assert build_sale_types_chart(sparse_df) is not None
+    d1, d2 = build_inventory_split_donuts(sparse_df, sparse_df)
+    assert d1 is not None and d2 is not None
+
+

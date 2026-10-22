@@ -441,6 +441,12 @@ def render_admin_page():
                         from src.sheets.sync import SheetsSyncEngine
                         client = GoogleSheetsClient(sheet_id=target_sheet)
                         engine = SheetsSyncEngine(client)
+                        if not hasattr(engine, "clean_blank_rows"):
+                            import importlib
+                            import src.sheets.sync
+                            importlib.reload(src.sheets.sync)
+                            from src.sheets.sync import SheetsSyncEngine as FallbackEngine
+                            engine = FallbackEngine(client)
                         res = engine.clean_blank_rows()
                         total = sum(res.values())
                         if total > 0:

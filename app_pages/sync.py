@@ -30,6 +30,25 @@ def get_sheets_client() -> GoogleSheetsClient:
     )
 
 
+def get_sheets_sync_engine(client: GoogleSheetsClient) -> SheetsSyncEngine:
+    """Returns a SheetsSyncEngine instance, ensuring module freshness if hot-reloaded by Streamlit Cloud."""
+    import importlib
+    import src.sheets.sync
+    import src.sheets
+    from src.sheets.sync import SheetsSyncEngine as EngineClass
+
+    # Check if the class definition currently in sys.modules is stale
+    if not hasattr(EngineClass, "reconcile_missing_sold_metadata") or not hasattr(EngineClass, "clean_blank_rows"):
+        try:
+            importlib.reload(src.sheets.sync)
+            importlib.reload(src.sheets)
+            from src.sheets.sync import SheetsSyncEngine as ReloadedClass
+            return ReloadedClass(client)
+        except Exception:
+            pass
+    return EngineClass(client)
+
+
 @st.cache_data(ttl=60)
 def get_cached_counts(sheet_id: str, _creds):
     """Fetches active and sold counts with batch get (1 API call) and 60-second cache."""
@@ -55,7 +74,7 @@ def get_cached_counts(sheet_id: str, _creds):
 def get_cached_lots(sheet_id: str, _creds):
     """Fetches all lots with 60-second cache."""
     client = GoogleSheetsClient(sheet_id=sheet_id, credentials=_creds)
-    engine = SheetsSyncEngine(client)
+    engine = get_sheets_sync_engine(client)
     return engine.get_all_lots()
 
 
@@ -63,7 +82,7 @@ def get_cached_lots(sheet_id: str, _creds):
 def get_cached_supplies(sheet_id: str, _creds):
     """Fetches all shipping supplies with 60-second cache."""
     client = GoogleSheetsClient(sheet_id=sheet_id, credentials=_creds)
-    engine = SheetsSyncEngine(client)
+    engine = get_sheets_sync_engine(client)
     return engine.get_all_supplies()
 
 
@@ -132,7 +151,13 @@ def render_sync_page():
         with c_tool1:
             if st.button("🧹 Clean Blank Rows", type="secondary", width="stretch", icon=":material/cleaning_services:", key="clean_blank_rows_btn"):
                 with st.spinner("Scanning and purging blank rows from Google Sheets..."):
-                    engine = SheetsSyncEngine(client)
+                    engine = get_sheets_sync_engine(client)
+                    if not hasattr(engine, "clean_blank_rows"):
+                        import importlib
+                        import src.sheets.sync
+                        importlib.reload(src.sheets.sync)
+                        from src.sheets.sync import SheetsSyncEngine as FallbackEngine
+                        engine = FallbackEngine(client)
                     res = engine.clean_blank_rows()
                     st.cache_data.clear()
                     total_cleaned = sum(res.values())
@@ -146,7 +171,13 @@ def render_sync_page():
         with c_tool2:
             if st.button("✨ Backfill Missing Metadata in Sold", type="secondary", width="stretch", icon=":material/auto_fix_high:", key="backfill_metadata_btn"):
                 with st.spinner("Analyzing Sold_Items and restoring missing Titles, Lots, Brands, and Categories..."):
-                    engine = SheetsSyncEngine(client)
+                    engine = get_sheets_sync_engine(client)
+                    if not hasattr(engine, "reconcile_missing_sold_metadata"):
+                        import importlib
+                        import src.sheets.sync
+                        importlib.reload(src.sheets.sync)
+                        from src.sheets.sync import SheetsSyncEngine as FallbackEngine
+                        engine = FallbackEngine(client)
                     res = engine.reconcile_missing_sold_metadata(default_lot=st.session_state.get("selected_lot", ""))
                     st.cache_data.clear()
                     if res["fixed_rows"] > 0:
@@ -179,7 +210,7 @@ def render_sync_page():
     # TAB 1: HTML IMPORT
     # ---------------------------------------------------------
     with tab_html:
-        engine = SheetsSyncEngine(client)
+        engine = get_sheets_sync_engine(client)
         try:
             all_lots = get_cached_lots(sheet_id, user_creds)
         except Exception as e:
@@ -731,7 +762,7 @@ def render_sync_page():
                                         ev.brand = str(row.get("Brand", "")).strip()
                                         ev.category = str(row.get("Category", "")).strip()
 
-                            engine = SheetsSyncEngine(client)
+                            engine = get_sheets_sync_engine(client)
                             results = engine.process_email_batch(preview_events, default_lot=target_email_lot)
                             processed = len([r for r in results if r.get("status") not in ("ignored", "no_listings")])
                             log_event(
@@ -762,7 +793,7 @@ def render_sync_page():
         st.markdown("### 🏷️ Shipping Supplies & Packaging Costs")
         st.caption("Manage boxes, poly mailers, labels, and tape. The global weighted average packaging cost is automatically deducted from every sale in `Sold_Items` to compute true net profits.")
 
-        sup_engine = SheetsSyncEngine(client)
+        sup_engine = get_sheets_sync_engine(client)
         try:
             sup_data = get_cached_supplies(sheet_id, user_creds)
         except Exception as e:

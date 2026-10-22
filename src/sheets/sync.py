@@ -1521,4 +1521,10 @@ class SheetsSyncEngine:
         }
 
 
+def reconcile_missing_sold_metadata(engine: SheetsSyncEngine, default_lot: str = "") -> Dict[str, int]:
+    """Module-level helper to backfill missing metadata in Sold_Items."""
+    return engine.reconcile_missing_sold_metadata(default_lot=default_lot)
+
+
+
 

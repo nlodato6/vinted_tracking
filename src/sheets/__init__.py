@@ -1,6 +1,6 @@
 from .client import GoogleSheetsClient
 from .templates import initialize_all_tabs
-from .sync import SheetsSyncEngine, parse_price
+from .sync import SheetsSyncEngine, parse_price, reconcile_missing_sold_metadata
 from .schemas import (
     TAB_INVENTORY_LOTS,
     TAB_ITEM_LISTINGS,
@@ -15,6 +15,7 @@ __all__ = [
     "initialize_all_tabs",
     "SheetsSyncEngine",
     "parse_price",
+    "reconcile_missing_sold_metadata",
     "TAB_INVENTORY_LOTS",
     "TAB_ITEM_LISTINGS",
     "TAB_SOLD_ITEMS",

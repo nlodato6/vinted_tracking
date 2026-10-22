@@ -798,3 +798,18 @@ def test_reconcile_missing_sold_metadata(mock_sheets_env):
     assert fixed_row[4] == "Outerwear"
 
 
+def test_reconcile_missing_sold_metadata_module_export_and_sync_engine(mock_sheets_env):
+    from src.sheets import reconcile_missing_sold_metadata, SheetsSyncEngine
+    from app_pages.sync import get_sheets_sync_engine
+
+    engine, sh = mock_sheets_env
+    assert hasattr(engine, "reconcile_missing_sold_metadata")
+    assert callable(reconcile_missing_sold_metadata)
+
+    # Test get_sheets_sync_engine from app_pages.sync
+    app_engine = get_sheets_sync_engine(engine.client)
+    assert hasattr(app_engine, "reconcile_missing_sold_metadata")
+    assert hasattr(app_engine, "clean_blank_rows")
+
+
+

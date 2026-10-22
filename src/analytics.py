@@ -230,7 +230,13 @@ def parse_active_dataframe(rows: list) -> pd.DataFrame:
 
 def build_sales_trend_chart(df: pd.DataFrame, freq: str = "D") -> go.Figure:
     """Builds a dual-axis timeline chart of sales revenue and net profit."""
-    if df.empty or "sale_date_dt" not in df.columns or df["sale_date_dt"].dropna().empty:
+    if (
+        df.empty
+        or "sale_date_dt" not in df.columns
+        or "sold_price_num" not in df.columns
+        or "net_profit_num" not in df.columns
+        or df["sale_date_dt"].dropna().empty
+    ):
         fig = go.Figure()
         fig.add_annotation(text="No sales data available for date range", showarrow=False, font=dict(size=14))
         return fig
@@ -306,7 +312,13 @@ def build_sales_trend_chart(df: pd.DataFrame, freq: str = "D") -> go.Figure:
 
 def build_category_chart(df: pd.DataFrame) -> go.Figure:
     """Builds horizontal bar chart comparing net profit & revenue by category."""
-    if df.empty:
+    if (
+        df.empty
+        or "Category" not in df.columns
+        or "sold_price_num" not in df.columns
+        or "net_profit_num" not in df.columns
+        or "margin_pct_num" not in df.columns
+    ):
         fig = go.Figure()
         fig.add_annotation(text="No category data available", showarrow=False)
         return fig
@@ -354,7 +366,13 @@ def build_category_chart(df: pd.DataFrame) -> go.Figure:
 
 def build_top_brands_chart(df: pd.DataFrame, top_n: int = 10) -> go.Figure:
     """Builds a horizontal bar chart of top brands ranked by total net profit."""
-    if df.empty:
+    if (
+        df.empty
+        or "Brand" not in df.columns
+        or "sold_price_num" not in df.columns
+        or "net_profit_num" not in df.columns
+        or "margin_pct_num" not in df.columns
+    ):
         fig = go.Figure()
         fig.add_annotation(text="No brand data available", showarrow=False)
         return fig
@@ -396,7 +414,13 @@ def build_top_brands_chart(df: pd.DataFrame, top_n: int = 10) -> go.Figure:
 
 def build_price_vs_profit_scatter(df: pd.DataFrame) -> go.Figure:
     """Builds an interactive scatter plot of Sold Price vs Net Profit colored by category."""
-    if df.empty:
+    if (
+        df.empty
+        or "sold_price_num" not in df.columns
+        or "net_profit_num" not in df.columns
+        or "Category" not in df.columns
+        or "Title" not in df.columns
+    ):
         fig = go.Figure()
         fig.add_annotation(text="No sales data available", showarrow=False)
         return fig
@@ -485,7 +509,12 @@ def build_inventory_split_donuts(df_sold: pd.DataFrame, df_active: pd.DataFrame)
 
 def build_sale_types_chart(df: pd.DataFrame) -> go.Figure:
     """Builds a bar chart showing the breakdown of Sale Types (Full Price vs Offers vs Drops)."""
-    if df.empty or "Sale_Type" not in df.columns:
+    if (
+        df.empty
+        or "Sale_Type" not in df.columns
+        or "sold_price_num" not in df.columns
+        or "net_profit_num" not in df.columns
+    ):
         fig = go.Figure()
         fig.add_annotation(text="No sale type data available", showarrow=False)
         return fig
