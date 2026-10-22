@@ -7,5 +7,7 @@ fileWatcherType = "poll"
 showErrorDetails = true
 
 [theme]
+base = "dark"
 metricValueFontSize = "1.5rem"
+
 

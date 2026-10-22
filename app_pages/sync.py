@@ -167,11 +167,11 @@ def render_sync_kpi_cards(
     h_display, h_rel = format_sync_timestamp(raw_h_time)
     e_display, e_rel = format_sync_timestamp(raw_e_time)
 
-    # Style state initialization
-    if "sync_metric_style" not in st.session_state:
-        st.session_state["sync_metric_style"] = "Vibrant Tinted"
+    # Style state initialization - Default to Dark
+    if "sync_metric_style" not in st.session_state or st.session_state.get("sync_metric_style") == "Vibrant Tinted":
+        st.session_state["sync_metric_style"] = "Deep Slate (Dark)"
     if "sync_card_custom_bg" not in st.session_state:
-        st.session_state["sync_card_custom_bg"] = "#1e293b"
+        st.session_state["sync_card_custom_bg"] = "#0f172a"
     if "sync_card_custom_text" not in st.session_state:
         st.session_state["sync_card_custom_text"] = "#f8fafc"
     if "sync_card_custom_border" not in st.session_state:
@@ -186,9 +186,11 @@ def render_sync_kpi_cards(
             st.markdown("**Metric Card Styling**")
             theme_choice = st.radio(
                 "Theme Preset",
-                options=["Vibrant Tinted", "Minimalist Neutral", "Deep Slate (Dark)", "Custom Colors", "Native Streamlit"],
-                index=["Vibrant Tinted", "Minimalist Neutral", "Deep Slate (Dark)", "Custom Colors", "Native Streamlit"].index(
-                    st.session_state.get("sync_metric_style", "Vibrant Tinted")
+                options=["Deep Slate (Dark)", "Vibrant Dark", "Minimalist Dark", "Custom Colors", "Native Streamlit"],
+                index=["Deep Slate (Dark)", "Vibrant Dark", "Minimalist Dark", "Custom Colors", "Native Streamlit"].index(
+                    st.session_state.get("sync_metric_style", "Deep Slate (Dark)")
+                    if st.session_state.get("sync_metric_style") in ["Deep Slate (Dark)", "Vibrant Dark", "Minimalist Dark", "Custom Colors", "Native Streamlit"]
+                    else "Deep Slate (Dark)"
                 ),
                 key="sync_metric_style_picker",
             )
@@ -199,7 +201,7 @@ def render_sync_kpi_cards(
                 st.caption("Customize card colors:")
                 st.session_state["sync_card_custom_bg"] = st.color_picker(
                     "Background Color",
-                    value=st.session_state.get("sync_card_custom_bg", "#1e293b"),
+                    value=st.session_state.get("sync_card_custom_bg", "#0f172a"),
                     key="picker_custom_bg",
                 )
                 st.session_state["sync_card_custom_text"] = st.color_picker(
@@ -213,7 +215,7 @@ def render_sync_kpi_cards(
                     key="picker_custom_border",
                 )
 
-    style_mode = st.session_state.get("sync_metric_style", "Vibrant Tinted")
+    style_mode = st.session_state.get("sync_metric_style", "Deep Slate (Dark)")
 
     # Native Streamlit fallback
     if style_mode == "Native Streamlit":
@@ -232,23 +234,23 @@ def render_sync_kpi_cards(
     h_sub = f"{h_rel} • HTML Upload" if h_rel != "Awaiting sync" else "Awaiting import"
     e_sub = f"{e_rel} • Gmail IMAP" if e_rel != "Awaiting sync" else "Awaiting sync"
 
-    # Palette configurations
-    if style_mode == "Minimalist Neutral":
+    # Palette configurations (Defaulting to Dark backgrounds)
+    if style_mode == "Minimalist Dark":
         cards = [
-            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "var(--secondary-background-color, rgba(128,128,128,0.06))", "border": "rgba(128,128,128,0.22)", "accent": "var(--text-color, inherit)", "text": "var(--text-color, inherit)"},
-            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "var(--secondary-background-color, rgba(128,128,128,0.06))", "border": "rgba(128,128,128,0.22)", "accent": "var(--text-color, inherit)", "text": "var(--text-color, inherit)"},
-            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "var(--secondary-background-color, rgba(128,128,128,0.06))", "border": "rgba(128,128,128,0.22)", "accent": "var(--text-color, inherit)", "text": "var(--text-color, inherit)"},
-            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "var(--secondary-background-color, rgba(128,128,128,0.06))", "border": "rgba(128,128,128,0.22)", "accent": "var(--text-color, inherit)", "text": "var(--text-color, inherit)"},
+            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#161b22", "border": "#30363d", "accent": "#58a6ff", "text": "#f0f6fc"},
+            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#161b22", "border": "#30363d", "accent": "#3fb950", "text": "#f0f6fc"},
+            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#161b22", "border": "#30363d", "accent": "#d29922", "text": "#f0f6fc"},
+            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#161b22", "border": "#30363d", "accent": "#bc8cff", "text": "#f0f6fc"},
         ]
-    elif style_mode == "Deep Slate (Dark)":
+    elif style_mode == "Vibrant Dark":
         cards = [
-            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#0f172a", "border": "#1e3a8a", "accent": "#60a5fa", "text": "#f8fafc"},
-            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#0f172a", "border": "#065f46", "accent": "#34d399", "text": "#f8fafc"},
-            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#0f172a", "border": "#854d0e", "accent": "#fbbf24", "text": "#f8fafc"},
-            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#0f172a", "border": "#581c87", "accent": "#c084fc", "text": "#f8fafc"},
+            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#0c1e3d", "border": "#2563eb", "accent": "#60a5fa", "text": "#f8fafc"},
+            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#062e24", "border": "#059669", "accent": "#34d399", "text": "#f8fafc"},
+            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#361e05", "border": "#d97706", "accent": "#fbbf24", "text": "#f8fafc"},
+            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#260e42", "border": "#7c3aed", "accent": "#c084fc", "text": "#f8fafc"},
         ]
     elif style_mode == "Custom Colors":
-        c_bg = st.session_state.get("sync_card_custom_bg", "#1e293b")
+        c_bg = st.session_state.get("sync_card_custom_bg", "#0f172a")
         c_text = st.session_state.get("sync_card_custom_text", "#f8fafc")
         c_border = st.session_state.get("sync_card_custom_border", "#3b82f6")
         cards = [
@@ -257,12 +259,12 @@ def render_sync_kpi_cards(
             {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
             {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
         ]
-    else:  # "Vibrant Tinted" (Default)
+    else:  # "Deep Slate (Dark)" (Default)
         cards = [
-            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "rgba(59, 130, 246, 0.08)", "border": "rgba(59, 130, 246, 0.28)", "accent": "#2563eb", "text": "var(--text-color, #1e293b)"},
-            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "rgba(16, 185, 129, 0.08)", "border": "rgba(16, 185, 129, 0.28)", "accent": "#059669", "text": "var(--text-color, #1e293b)"},
-            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "rgba(245, 158, 11, 0.08)", "border": "rgba(245, 158, 11, 0.28)", "accent": "#d97706", "text": "var(--text-color, #1e293b)"},
-            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "rgba(139, 92, 246, 0.08)", "border": "rgba(139, 92, 246, 0.28)", "accent": "#7c3aed", "text": "var(--text-color, #1e293b)"},
+            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#0f172a", "border": "#1e3a8a", "accent": "#60a5fa", "text": "#f8fafc"},
+            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#0f172a", "border": "#065f46", "accent": "#34d399", "text": "#f8fafc"},
+            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#0f172a", "border": "#854d0e", "accent": "#fbbf24", "text": "#f8fafc"},
+            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#0f172a", "border": "#581c87", "accent": "#c084fc", "text": "#f8fafc"},
         ]
 
     # Generate CSS & Grid HTML

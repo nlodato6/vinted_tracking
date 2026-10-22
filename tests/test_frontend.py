@@ -124,8 +124,9 @@ def test_format_sync_timestamp():
 def test_sync_metrics_styling_and_config():
     from pathlib import Path
 
-    # Verify config.toml metricValueFontSize is set to 1.5rem
+    # Verify config.toml base is dark and metricValueFontSize is set to 1.5rem
     config_toml = Path(".streamlit/config.toml").read_text()
+    assert 'base = "dark"' in config_toml
     assert 'metricValueFontSize = "1.5rem"' in config_toml
 
     # Verify sync.py implements render_sync_kpi_cards and custom styling options
@@ -134,9 +135,9 @@ def test_sync_metrics_styling_and_config():
     assert "format_sync_timestamp" in sync_code
     assert "sync-metrics-grid" in sync_code
     assert "sync-metric-val-date" in sync_code
-    assert "Vibrant Tinted" in sync_code
-    assert "Minimalist Neutral" in sync_code
     assert "Deep Slate (Dark)" in sync_code
+    assert "Vibrant Dark" in sync_code
+    assert "Minimalist Dark" in sync_code
     assert "Custom Colors" in sync_code
     assert "color_picker" in sync_code
 
