@@ -93,7 +93,7 @@ def infer_brand(title: str, card_text: str = "") -> str:
     return ""
 
 
-def detect_html_type(content: Union[str, bytes]) -> str:
+def detect_html_type(content: Union[str, bytes], filename: str = "") -> str:
     """
     Detects whether uploaded Vinted HTML content is:
     - 'orders': My orders / sales transaction history
@@ -101,6 +101,15 @@ def detect_html_type(content: Union[str, bytes]) -> str:
     - 'active_closet': Public or member profile active listings tab
     - 'unknown': Unrecognized HTML
     """
+    fn_lower = filename.lower()
+    if fn_lower:
+        if any(k in fn_lower for k in ("order", "orders", "transaction", "sales")):
+            return "orders"
+        if any(k in fn_lower for k in ("sold", "closed")):
+            return "sold_closet"
+        if any(k in fn_lower for k in ("active", "wardrobe", "listings", "listing")):
+            return "active_closet"
+
     text = content.decode("utf-8", errors="ignore") if isinstance(content, bytes) else str(content)
 
     if "my-orders-item" in text or 'data-testid="my-orders-item"' in text or "/inbox/01" in text:
@@ -117,7 +126,7 @@ def detect_html_type(content: Union[str, bytes]) -> str:
         "member profile _ vinted_sold" in text.lower()
         or "_sold" in text.lower()[:1000]
         or bool(re.search(r"<title>[^<]*(?:sold|closed)[^<]*</title>", text, re.IGNORECASE))
-        or (sold_count > 10 and bump_count == 0)
+        or (sold_count > 15 and bump_count == 0)
     ):
         return "sold_closet"
     return "active_closet"
@@ -127,13 +136,13 @@ def parse_closet_html(
     html_content_or_path: Union[str, Path, bytes],
     default_lot: str = "",
     filter_sold_only: Optional[bool] = None,
+    filename: str = "",
 ) -> List[ItemListing]:
     """
     Parses a saved Vinted closet/profile HTML file, string, or bytes.
     Extracts all listings with title, asking price, Vinted ID, favorites, views, and status.
     Handles 'Listed', 'Sold', 'Hidden', and 'Reserved' status badges.
-    If filter_sold_only is True (or auto-detected from a sold_closet export), filters out
-    lingering active cards from SPA React background DOM.
+    If filter_sold_only is True (or auto-detected from a sold_closet export), treats items as sold.
     """
     if isinstance(html_content_or_path, bytes):
         html = html_content_or_path.decode("utf-8", errors="ignore")
@@ -143,17 +152,20 @@ def parse_closet_html(
     else:
         html = str(html_content_or_path)
 
-    detected_type = detect_html_type(html)
+    detected_type = detect_html_type(html, filename=filename)
     should_filter_sold = filter_sold_only if filter_sold_only is not None else (detected_type == "sold_closet")
+    is_sold_closet_export = (filter_sold_only is True) or (detected_type == "sold_closet" and filter_sold_only is not False)
 
     soup = BeautifulSoup(html, "html.parser")
     items: List[ItemListing] = []
     seen_ids = set()
 
-    # Strategy 1: Look for item cards via feed-grid or item box
-    cards = soup.select("[data-testid*='grid-item'], div[class*='feed-grid__item'], div[class*='ItemBox_item-box'], div[class*='web_ui__ItemBox__box']")
-    if not cards:
-        cards = soup.select("div[data-testid*='product-item-id-']")
+    # Look for item cards via all known Vinted card selectors
+    cards = soup.select(
+        "[data-testid*='grid-item'], div[class*='feed-grid__item'], "
+        "div[class*='ItemBox_item-box'], div[class*='web_ui__ItemBox__box'], "
+        "div[data-testid*='product-item-id-']"
+    )
     if not cards:
         cards = soup.select("a[href*='/items/']")
 
@@ -204,19 +216,25 @@ def parse_closet_html(
         views_count = int(views_match.group(1)) if views_match else 0
 
         # Check status (Sold, Hidden, Reserved, or Listed)
-        status_elem = card.select_one('[data-testid*="status"], [class*="status"], [class*="badge"]')
+        status_elem = card.select_one('[data-testid*="status"], [class*="status"], [class*="badge"], [class*="overlay"]')
         st_text = status_elem.get_text(" ", strip=True).lower() if status_elem else ""
 
-        if "sold" in st_text or "closed" in st_text or re.search(r"\b(?:sold|closed)\b", text, re.IGNORECASE):
+        # Check for standalone status tags (e.g. <span>Sold</span> or <p>Closed</p>)
+        standalone_badges = {
+            child.get_text(strip=True).lower()
+            for child in card.find_all(["span", "div", "p", "b", "strong"])
+            if child.get_text(strip=True).lower() in ("sold", "closed", "hidden", "reserved", "réservé", "vendu")
+        }
+
+        if any(k in st_text for k in ("sold", "closed", "vendu")) or "sold" in standalone_badges or "closed" in standalone_badges or "vendu" in standalone_badges:
             status = "Sold"
-        elif "hidden" in st_text or re.search(r"\bhidden\b", text, re.IGNORECASE):
+        elif "hidden" in st_text or "hidden" in standalone_badges:
             status = "Hidden"
-        elif "reserved" in st_text or "réservé" in st_text or re.search(r"\b(?:reserved|r[ée]serv[ée])\b", text, re.IGNORECASE):
+        elif any(k in st_text for k in ("reserved", "réservé")) or "reserved" in standalone_badges or "réservé" in standalone_badges:
             status = "Reserved"
         else:
             status = "Listed"
 
-        # Prevent SPA DOM bleed from sold profile pages containing lingering active items
         if should_filter_sold and status == "Listed":
             continue
 

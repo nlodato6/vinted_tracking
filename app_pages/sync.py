@@ -182,9 +182,13 @@ def render_sync_kpi_cards(
         st.session_state["sync_card_custom_border"] = "#3b82f6"
 
     # Style control bar
-    c_head, c_btn = st.columns([5, 1], vertical_alignment="center")
+    c_head, c_ref, c_btn = st.columns([4, 1.2, 1.2], vertical_alignment="center")
     with c_head:
         st.markdown("##### Sync Status & Metrics")
+    with c_ref:
+        if st.button("Refresh Live", icon=":material/refresh:", width="stretch", help="Fetch latest live counts from Google Sheets", key="sync_refresh_live_btn"):
+            st.cache_data.clear()
+            st.rerun()
     with c_btn:
         with st.popover("Card Style", icon=":material/palette:", help="Customize card background, text color, and themes"):
             st.markdown("**Metric Card Styling**")
@@ -688,7 +692,7 @@ def render_sync_page():
 
             for f in uploaded_files:
                 file_bytes = f.getvalue()
-                detected = detect_html_type(file_bytes)
+                detected = detect_html_type(file_bytes, filename=f.name)
                 
                 if detected == "orders":
                     completed_orders, cancelled_orders = parse_orders_and_cancellations(file_bytes)
@@ -696,12 +700,12 @@ def render_sync_page():
                     type_label = f"My Orders ({len(completed_orders)} sales, {len(cancelled_orders)} cancelled)"
                     files_info.append({"Filename": f.name, "Detected Type": type_label, "Items Found": len(completed_orders) + len(cancelled_orders)})
                 elif detected == "active_closet":
-                    items = parse_closet_html(file_bytes, default_lot=target_lot_id)
+                    items = parse_closet_html(file_bytes, default_lot=target_lot_id, filename=f.name)
                     active_items = [it for it in items if it.status != "Sold"]
                     parsed_active_closet.extend(active_items)
                     files_info.append({"Filename": f.name, "Detected Type": "Active Listings", "Items Found": len(active_items)})
                 elif detected == "sold_closet":
-                    items = parse_closet_html(file_bytes, default_lot=target_lot_id, filter_sold_only=True)
+                    items = parse_closet_html(file_bytes, default_lot=target_lot_id, filter_sold_only=True, filename=f.name)
                     sold_items = [it for it in items if it.status == "Sold"]
                     parsed_sold_closet.extend(sold_items)
                     files_info.append({"Filename": f.name, "Detected Type": "Sold Closet", "Items Found": len(sold_items)})
