@@ -151,6 +151,7 @@ class SheetsSyncEngine:
         sold_price: Optional[float] = None,
         sale_date: str = "",
         already_matched_indices: Optional[set] = None,
+        brand: str = "",
     ) -> Optional[int]:
         """
         Multi-factor duplicate detection to find an existing row in Sold_Items
@@ -162,8 +163,8 @@ class SheetsSyncEngine:
         3. Numeric Vinted Item ID (in URL or Title)
         4. Exact Vinted URL
         5. Item SKU match
-        6. Real Title match (neither record is a placeholder)
-        7. Fuzzy Price + Sale Date match (when existing row or incoming record has a placeholder title)
+        6. Real Title match (neither record is a placeholder, and brands do not differ)
+        7. Fuzzy Price + Sale Date match (when existing row or incoming record has a placeholder title, and brands do not differ)
         """
         if len(sold_rows) <= 1:
             return None
@@ -171,6 +172,7 @@ class SheetsSyncEngine:
         order_id_idx = headers.index("Order_ID") if "Order_ID" in headers else 21
         sku_idx = headers.index("Item_SKU") if "Item_SKU" in headers else 0
         title_idx = headers.index("Title") if "Title" in headers else 2
+        brand_idx = headers.index("Brand") if "Brand" in headers else 3
         url_idx = headers.index("Vinted_URL") if "Vinted_URL" in headers else 22
         price_idx = headers.index("Sold_Price") if "Sold_Price" in headers else 11
         date_idx = headers.index("Sale_Date") if "Sale_Date" in headers else 14
@@ -185,6 +187,8 @@ class SheetsSyncEngine:
         clean_title = str(title).strip() if (title is not None and str(title).strip()) else ""
         clean_price = round(float(sold_price), 2) if (sold_price is not None and float(sold_price) > 0) else None
         clean_date = normalize_date_str(sale_date) if sale_date else ""
+        clean_brand = str(brand).strip().lower() if brand is not None else ""
+        eff_incoming_b = clean_brand if not is_placeholder_brand(clean_brand) else (infer_brand(clean_title) or "").strip().lower()
 
         # --- Tier 1: Exact High-Confidence Identifiers ---
         for r_idx, row in enumerate(sold_rows[1:], start=2):
@@ -223,7 +227,7 @@ class SheetsSyncEngine:
             if clean_sku and row_sku and clean_sku == row_sku.strip().upper():
                 return r_idx
 
-        # --- Tier 2: Real Title Match ---
+        # --- Tier 2: Real Title Match (Only if brands do not conflict) ---
         if clean_title and not is_placeholder_title(clean_title):
             c_low = clean_title.lower()
             for r_idx, row in enumerate(sold_rows[1:], start=2):
@@ -232,9 +236,15 @@ class SheetsSyncEngine:
                 row_t = str(row[title_idx]).strip() if (len(row) > title_idx and row[title_idx] is not None) else ""
                 if not is_placeholder_title(row_t):
                     r_low = row_t.lower()
-                    if c_low == r_low:
-                        return r_idx
-                    if len(c_low) >= 10 and (c_low in r_low or r_low in c_low):
+                    if c_low == r_low or (len(c_low) >= 10 and (c_low in r_low or r_low in c_low)):
+                        row_b = str(row[brand_idx]).strip().lower() if (brand_idx != -1 and len(row) > brand_idx and row[brand_idx] is not None) else ""
+                        eff_row_b = row_b if not is_placeholder_brand(row_b) else (infer_brand(row_t) or "").strip().lower()
+                        if (
+                            not is_placeholder_brand(eff_incoming_b)
+                            and not is_placeholder_brand(eff_row_b)
+                            and eff_incoming_b != eff_row_b
+                        ):
+                            continue
                         return r_idx
 
         # --- Tier 3: Price + Sale Date Match for Incomplete / Placeholder Rows ---
@@ -244,6 +254,14 @@ class SheetsSyncEngine:
                     continue
                 row_t = str(row[title_idx]).strip() if (len(row) > title_idx and row[title_idx] is not None) else ""
                 if is_placeholder_title(row_t) or is_placeholder_title(clean_title):
+                    row_b = str(row[brand_idx]).strip().lower() if (brand_idx != -1 and len(row) > brand_idx and row[brand_idx] is not None) else ""
+                    eff_row_b = row_b if not is_placeholder_brand(row_b) else (infer_brand(row_t) or "").strip().lower()
+                    if (
+                        not is_placeholder_brand(eff_incoming_b)
+                        and not is_placeholder_brand(eff_row_b)
+                        and eff_incoming_b != eff_row_b
+                    ):
+                        continue
                     row_p = parse_price(row[price_idx]) if len(row) > price_idx else 0.0
                     if abs(clean_price - row_p) < 0.01:
                         row_d = normalize_date_str(row[date_idx]) if len(row) > date_idx else ""
@@ -998,6 +1016,7 @@ class SheetsSyncEngine:
             title=item_title,
             sold_price=sp_val,
             sale_date=s_date_str,
+            brand=brand,
         )
         if matched_sold_idx:
             enrich_updates = self.enrich_sold_row(
@@ -1260,6 +1279,7 @@ class SheetsSyncEngine:
                         title=item.title,
                         sold_price=item.sold_price if item.sold_price is not None else curr_val,
                         sale_date=item_date_str,
+                        brand=item.brand,
                     )
                     if target_sold_r_i:
                         enrich_updates = self.enrich_sold_row(
@@ -1530,6 +1550,7 @@ class SheetsSyncEngine:
                 sold_price=order.sold_price,
                 sale_date=sale_date_str,
                 already_matched_indices=matched_sold_rows,
+                brand=order.brand,
             )
 
             if matched_r_i:
@@ -1786,6 +1807,7 @@ class SheetsSyncEngine:
                         sold_price=event.sold_price,
                         sale_date=sale_date_str,
                         already_matched_indices=matched_sold_indices,
+                        brand=brand,
                     )
                     if matched_sold_r_i:
                         enrich_updates = self.enrich_sold_row(
@@ -1840,6 +1862,7 @@ class SheetsSyncEngine:
                         sold_price=event.sold_price,
                         sale_date=sale_date_str,
                         already_matched_indices=matched_sold_indices,
+                        brand=getattr(event, "brand", "") or "",
                     )
                     if matched_sold_r_i:
                         assigned_lot = getattr(event, "lot_id", "") or default_lot
@@ -2369,11 +2392,20 @@ class SheetsSyncEngine:
                         is_dup = True
                         reason = "Identical Vinted URL"
 
-                # Check 5: Real Title match with same price
+                # Check 5: Real Title match with same price (only if brands do not conflict)
                 if not is_dup:
                     t_a = a["title"].strip().lower()
                     t_b = b["title"].strip().lower()
-                    if t_a and t_b and not is_placeholder_title(t_a) and not is_placeholder_title(t_b):
+                    b_a = a["brand"].strip().lower()
+                    b_b = b["brand"].strip().lower()
+                    eff_b_a = b_a if not is_placeholder_brand(b_a) else (infer_brand(a["title"]) or "").strip().lower()
+                    eff_b_b = b_b if not is_placeholder_brand(b_b) else (infer_brand(b["title"]) or "").strip().lower()
+                    brands_differ = (
+                        not is_placeholder_brand(eff_b_a)
+                        and not is_placeholder_brand(eff_b_b)
+                        and eff_b_a != eff_b_b
+                    )
+                    if not brands_differ and t_a and t_b and not is_placeholder_title(t_a) and not is_placeholder_title(t_b):
                         if t_a == t_b:
                             if a["price"] == 0 or b["price"] == 0 or abs(a["price"] - b["price"]) < 0.01:
                                 is_dup = True
@@ -2385,24 +2417,34 @@ class SheetsSyncEngine:
 
                 # Check 6: Matching Sold Price & Date with at least one placeholder title
                 if not is_dup:
-                    if is_placeholder_title(a["title"]) or is_placeholder_title(b["title"]):
-                        if a["price"] > 0 and b["price"] > 0 and abs(a["price"] - b["price"]) < 0.01:
-                            d_a = a["date"]
-                            d_b = b["date"]
-                            if d_a and d_b:
-                                try:
-                                    dt_a = datetime.strptime(d_a, "%Y-%m-%d")
-                                    dt_b = datetime.strptime(d_b, "%Y-%m-%d")
-                                    if abs((dt_a - dt_b).days) <= 2:
-                                        is_dup = True
-                                        reason = f"Same Price (${a['price']:.2f}) & Date ({d_a}) with placeholder title"
-                                except Exception:
-                                    if d_a == d_b:
-                                        is_dup = True
-                                        reason = f"Same Price (${a['price']:.2f}) & Date ({d_a}) with placeholder title"
-                            elif not d_a or not d_b:
-                                is_dup = True
-                                reason = f"Same Price (${a['price']:.2f}) with placeholder title"
+                    b_a = a["brand"].strip().lower()
+                    b_b = b["brand"].strip().lower()
+                    eff_b_a = b_a if not is_placeholder_brand(b_a) else (infer_brand(a["title"]) or "").strip().lower()
+                    eff_b_b = b_b if not is_placeholder_brand(b_b) else (infer_brand(b["title"]) or "").strip().lower()
+                    brands_differ = (
+                        not is_placeholder_brand(eff_b_a)
+                        and not is_placeholder_brand(eff_b_b)
+                        and eff_b_a != eff_b_b
+                    )
+                    if not brands_differ:
+                        if is_placeholder_title(a["title"]) or is_placeholder_title(b["title"]):
+                            if a["price"] > 0 and b["price"] > 0 and abs(a["price"] - b["price"]) < 0.01:
+                                d_a = a["date"]
+                                d_b = b["date"]
+                                if d_a and d_b:
+                                    try:
+                                        dt_a = datetime.strptime(d_a, "%Y-%m-%d")
+                                        dt_b = datetime.strptime(d_b, "%Y-%m-%d")
+                                        if abs((dt_a - dt_b).days) <= 2:
+                                            is_dup = True
+                                            reason = f"Same Price (${a['price']:.2f}) & Date ({d_a}) with placeholder title"
+                                    except Exception:
+                                        if d_a == d_b:
+                                            is_dup = True
+                                            reason = f"Same Price (${a['price']:.2f}) & Date ({d_a}) with placeholder title"
+                                elif not d_a or not d_b:
+                                    is_dup = True
+                                    reason = f"Same Price (${a['price']:.2f}) with placeholder title"
 
                 if is_dup:
                     graph.setdefault(r_a, set()).add(r_b)

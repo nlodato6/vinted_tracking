@@ -1401,6 +1401,98 @@ def test_resolve_duplicates_item_listings_preserves_active_status(mock_sheets_en
     assert kept[15] == "Active"
 
 
+def test_find_duplicate_groups_different_brands_same_title_not_duplicates(mock_sheets_env):
+    """When titles are identical but brands are different, items MUST NOT be flagged as duplicates."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_sold.rows = [list(SOLD_ITEMS_HEADERS)]
+
+    # Row 2: Nike Graphic T-Shirt
+    row1 = [""] * len(SOLD_ITEMS_HEADERS)
+    row1[0] = "SKU-NK-1"
+    row1[2] = "Vintage Graphic T-Shirt"
+    row1[3] = "Nike"
+    row1[11] = 25.00
+    ws_sold.append_row(row1)
+
+    # Row 3: Adidas Graphic T-Shirt with identical title and price
+    row2 = [""] * len(SOLD_ITEMS_HEADERS)
+    row2[0] = "SKU-AD-2"
+    row2[2] = "Vintage Graphic T-Shirt"
+    row2[3] = "Adidas"
+    row2[11] = 25.00
+    ws_sold.append_row(row2)
+
+    groups = engine.find_duplicate_groups(tab_name=TAB_SOLD_ITEMS)
+    # MUST NOT be flagged as duplicates because brands differ!
+    assert len(groups) == 0
+
+
+def test_find_duplicate_groups_same_brand_same_title_is_duplicate(mock_sheets_env):
+    """When titles and brands are identical, items MUST be flagged as duplicates."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_sold.rows = [list(SOLD_ITEMS_HEADERS)]
+
+    # Row 2: Nike Graphic T-Shirt
+    row1 = [""] * len(SOLD_ITEMS_HEADERS)
+    row1[0] = "SKU-NK-1"
+    row1[2] = "Vintage Graphic T-Shirt"
+    row1[3] = "Nike"
+    row1[11] = 25.00
+    ws_sold.append_row(row1)
+
+    # Row 3: Another Nike Graphic T-Shirt with same title and price
+    row2 = [""] * len(SOLD_ITEMS_HEADERS)
+    row2[0] = "SKU-NK-2"
+    row2[2] = "Vintage Graphic T-Shirt"
+    row2[3] = "Nike"
+    row2[11] = 25.00
+    ws_sold.append_row(row2)
+
+    groups = engine.find_duplicate_groups(tab_name=TAB_SOLD_ITEMS)
+    assert len(groups) == 1
+    assert len(groups[0]["rows"]) == 2
+
+
+def test_find_matching_sold_row_different_brand_not_matched(mock_sheets_env):
+    """find_matching_sold_row MUST NOT match an existing row if both have distinct brands that differ."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_sold.rows = [list(SOLD_ITEMS_HEADERS)]
+
+    row1 = [""] * len(SOLD_ITEMS_HEADERS)
+    row1[0] = "SKU-NK-99"
+    row1[2] = "Heavyweight Fleece Hoodie"
+    row1[3] = "Nike"
+    row1[11] = 45.00
+    row1[14] = "2026-10-20"
+    ws_sold.append_row(row1)
+
+    # Matching title and price, but brand is Carhartt
+    matched = engine.find_matching_sold_row(
+        sold_rows=ws_sold.rows,
+        headers=ws_sold.rows[0],
+        title="Heavyweight Fleece Hoodie",
+        sold_price=45.00,
+        sale_date="2026-10-20",
+        brand="Carhartt",
+    )
+    assert matched is None
+
+    # Matching title and price with same brand (Nike) MUST match
+    matched_same = engine.find_matching_sold_row(
+        sold_rows=ws_sold.rows,
+        headers=ws_sold.rows[0],
+        title="Heavyweight Fleece Hoodie",
+        sold_price=45.00,
+        sale_date="2026-10-20",
+        brand="Nike",
+    )
+    assert matched_same == 2
+
+
+
 
 
 
