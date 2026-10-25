@@ -1898,6 +1898,86 @@ def test_sync_orders_routes_cancellations(mock_sheets_env):
     assert ws_cancelled.rows[1][9] == "indecisive_buyer"
 
 
+def test_reconcile_active_closet_snapshot_ignores_sold_items(mock_sheets_env):
+    """Verifies that items with status=='Sold' are never treated as active or added to Item_Listings."""
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+
+    # Initial state: 2 active items (SKU-1001, SKU-1002)
+    assert len(ws_listings.rows) == 3  # Header + 2 items
+
+    active_item = ItemListing(
+        item_sku="SKU-1001",
+        title="Vintage Carhartt Jacket",
+        brand="Carhartt",
+        category="Outerwear",
+        current_price=60.0,
+        posted_price=70.0,
+        vinted_id="vinted_111",
+        status="Listed",
+    )
+    # Sold item that might have been passed in accidentally
+    sold_item = ItemListing(
+        item_sku="",
+        title="Sold Denim Jacket",
+        brand="Levi's",
+        category="Outerwear",
+        current_price=25.0,
+        posted_price=25.0,
+        vinted_id="vinted_999",
+        status="Sold",
+    )
+
+    res = engine.reconcile_active_closet_snapshot([active_item, sold_item])
+    # The sold item should NOT be added as active
+    assert res["new_active_added"] == 0
+    assert res["final_active_count"] == 1
+    # ws_listings must only contain the active item
+    assert len(ws_listings.rows) == 2
+    assert ws_listings.rows[1][0] == "SKU-1001"
+
+
+def test_reconcile_sold_closet_moves_item_from_listings(mock_sheets_env):
+    """Verifies that reconcile_sold_closet moves matching active listings to Sold_Items and never adds to Item_Listings."""
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Initial listings: SKU-1001 (Carhartt, vinted_111), SKU-1002 (Nike, vinted_222)
+    assert len(ws_listings.rows) == 3
+
+    sold_closet_items = [
+        ItemListing(
+            item_sku="",
+            title="Vintage Carhartt Jacket",
+            brand="Carhartt",
+            category="Outerwear",
+            current_price=50.0,
+            vinted_id="vinted_111",
+            status="Sold",
+        ),
+        ItemListing(
+            item_sku="",
+            title="Unrelated Sold Item",
+            brand="Adidas",
+            category="Outerwear",
+            current_price=15.0,
+            vinted_id="vinted_888",
+            status="Sold",
+        ),
+    ]
+
+    res = engine.reconcile_sold_closet(sold_closet_items)
+    assert res["moved_to_sold"] == 1
+
+    # Carhartt jacket should now be in ws_sold
+    assert any(r[0] == "SKU-1001" for r in ws_sold.rows[1:])
+    # And removed from ws_listings
+    assert not any(r[0] == "SKU-1001" for r in ws_listings.rows[1:])
+    # ws_listings should not have grown
+    assert len(ws_listings.rows) == 2
+
+
 
 
 

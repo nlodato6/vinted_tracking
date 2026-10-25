@@ -683,7 +683,8 @@ def render_sync_page():
             st.markdown("#### Detected Files & Content Analysis")
             files_info = []
             parsed_orders = []
-            parsed_closet = []
+            parsed_active_closet = []
+            parsed_sold_closet = []
 
             for f in uploaded_files:
                 file_bytes = f.getvalue()
@@ -694,11 +695,16 @@ def render_sync_page():
                     parsed_orders.extend(completed_orders + cancelled_orders)
                     type_label = f"My Orders ({len(completed_orders)} sales, {len(cancelled_orders)} cancelled)"
                     files_info.append({"Filename": f.name, "Detected Type": type_label, "Items Found": len(completed_orders) + len(cancelled_orders)})
-                elif detected in ("active_closet", "sold_closet"):
+                elif detected == "active_closet":
                     items = parse_closet_html(file_bytes, default_lot=target_lot_id)
-                    parsed_closet.extend(items)
-                    type_label = "Active Listings" if detected == "active_closet" else "Sold Closet"
-                    files_info.append({"Filename": f.name, "Detected Type": type_label, "Items Found": len(items)})
+                    active_items = [it for it in items if it.status != "Sold"]
+                    parsed_active_closet.extend(active_items)
+                    files_info.append({"Filename": f.name, "Detected Type": "Active Listings", "Items Found": len(active_items)})
+                elif detected == "sold_closet":
+                    items = parse_closet_html(file_bytes, default_lot=target_lot_id, filter_sold_only=True)
+                    sold_items = [it for it in items if it.status == "Sold"]
+                    parsed_sold_closet.extend(sold_items)
+                    files_info.append({"Filename": f.name, "Detected Type": "Sold Closet", "Items Found": len(sold_items)})
                 else:
                     files_info.append({"Filename": f.name, "Detected Type": "Unknown", "Items Found": 0})
 
@@ -707,7 +713,7 @@ def render_sync_page():
             # -------------------------------------------------------------
             # 3. Reconciliation Preview (Zero-Duplication & Interactive Editing)
             # -------------------------------------------------------------
-            if parsed_orders or parsed_closet:
+            if parsed_orders or parsed_active_closet or parsed_sold_closet:
                 st.divider()
                 lot_preview_header = f" (Default Lot: {target_lot_id})" if target_lot_id else " (Default Lot: None)"
                 st.markdown(f"#### Reconciliation Preview{lot_preview_header}")
@@ -718,8 +724,15 @@ def render_sync_page():
                     canc_orders = [o for o in parsed_orders if getattr(o, "vinted_status", "") == "Cancelled"]
                     valid_orders = [o for o in parsed_orders if getattr(o, "vinted_status", "") != "Cancelled"]
 
-                    new_listings = [it for it in parsed_closet if it.status != "Sold" and it.title.strip().lower() not in curr_active_titles and it.title.strip().lower() not in curr_sold_titles]
-                    sold_transitions = [it for it in valid_orders if it.item_title.strip().lower() in curr_active_titles]
+                    new_listings = [
+                        it for it in parsed_active_closet
+                        if it.status != "Sold"
+                        and it.title.strip().lower() not in curr_active_titles
+                        and it.title.strip().lower() not in curr_sold_titles
+                    ]
+                    sold_order_transitions = [it for it in valid_orders if it.item_title.strip().lower() in curr_active_titles]
+                    sold_closet_transitions = [it for it in parsed_sold_closet if it.title.strip().lower() in curr_active_titles]
+                    total_sold_transitions = len(sold_order_transitions) + len(sold_closet_transitions)
                     already_sold = [it for it in valid_orders if it.item_title.strip().lower() in curr_sold_titles]
 
                     # Assign target lot ID to new items in preview if not already populated
@@ -729,9 +742,9 @@ def render_sync_page():
 
                     p1, p2, p3, p4 = st.columns(4)
                     p1.metric("New Active to Add", len(new_listings), f"Default Lot: {target_lot_id or 'None'}", border=True)
-                    p2.metric("Active Moving to Sold", len(sold_transitions), border=True)
+                    p2.metric("Active Moving to Sold", total_sold_transitions, border=True)
                     p3.metric("Cancelled Orders", len(canc_orders), border=True)
-                    p4.metric("Duplicates Skipped", len(already_sold) + (len(parsed_closet) - len(new_listings)), border=True)
+                    p4.metric("Duplicates Skipped", len(already_sold) + (len(parsed_active_closet) - len(new_listings)), border=True)
 
                     if canc_orders:
                         with st.expander(f"View Cancelled Orders Detected ({len(canc_orders)} orders)", expanded=False):
@@ -743,9 +756,22 @@ def render_sync_page():
                                 "Buyer": getattr(o, "buyer_username", ""),
                             } for o in canc_orders]), width="stretch")
 
-                    if sold_transitions:
-                        with st.expander("View Items Moving to Sold", expanded=False):
-                            st.dataframe(pd.DataFrame([{"Title": o.item_title, "Price": f"${o.sold_price:.2f}", "Order ID": o.order_id} for o in sold_transitions]), width="stretch")
+                    if sold_order_transitions or sold_closet_transitions:
+                        with st.expander(f"View Items Moving to Sold ({total_sold_transitions} items)", expanded=False):
+                            trans_rows = [{"Title": o.item_title, "Price": f"${o.sold_price:.2f}", "Order ID": o.order_id, "Source": "Orders HTML"} for o in sold_order_transitions]
+                            trans_rows.extend([{"Title": it.title, "Price": f"${it.current_price:.2f}", "Order ID": "-", "Source": "Sold Closet"} for it in sold_closet_transitions])
+                            st.dataframe(pd.DataFrame(trans_rows), width="stretch")
+
+                    if parsed_sold_closet:
+                        with st.expander(f"View Sold Closet Items Detected ({len(parsed_sold_closet)} items)", expanded=False):
+                            st.caption("These items were detected from your Vinted Sold Closet export. They will be reconciled into Sold_Items and will never be added to active listings.")
+                            st.dataframe(pd.DataFrame([{
+                                "Title": it.title,
+                                "Brand": it.brand or "",
+                                "Price": f"${it.current_price:.2f}" if it.current_price else "$0.00",
+                                "Category": it.category or "",
+                                "Vinted ID": it.vinted_id or "",
+                            } for it in parsed_sold_closet]), width="stretch")
 
                     edited_listings_df = None
                     if new_listings:
@@ -842,7 +868,7 @@ def render_sync_page():
                                 
                                 st.session_state.selected_lot = target_lot_id
 
-                                # 2. Apply user edits from st.data_editor to new_listings and parsed_closet
+                                # 2. Apply user edits from st.data_editor to new_listings and parsed_active_closet
                                 if edited_listings_df is not None and not edited_listings_df.empty:
                                     for idx, row in edited_listings_df.iterrows():
                                         if idx < len(new_listings):
@@ -853,33 +879,38 @@ def render_sync_page():
                                                 new_listings[idx].title = edited_title
                                             new_listings[idx].lot_id = edited_lot
 
-                                # 3. For any other items in parsed_closet, set target_lot_id only if unassigned and target_lot_id is non-empty
-                                for it in parsed_closet:
+                                # 3. For any other items in parsed_active_closet, set target_lot_id only if unassigned and target_lot_id is non-empty
+                                for it in parsed_active_closet:
                                     if it not in new_listings:
                                         if not it.lot_id and target_lot_id:
                                             it.lot_id = target_lot_id
 
-                                # 4. Synchronize listings and orders
+                                # 4. Synchronize orders, active listings, and sold closet
                                 res_orders = engine.sync_orders(parsed_orders, default_lot=target_lot_id, auto_assign_lot=False) if parsed_orders else {"synced_orders": 0, "cancelled_orders": 0}
                                 
-                                has_active_export = any("Active Listings" in f.get("Detected Type", "") for f in files_info)
-                                if has_active_export and parsed_closet:
-                                    res_closet = engine.reconcile_active_closet_snapshot(parsed_closet, default_lot=target_lot_id, auto_assign_lot=False)
-                                else:
-                                    res_closet = engine.sync_listings(parsed_closet, auto_assign_lot=False) if parsed_closet else {"updated": 0, "created": 0}
+                                res_closet = {"final_active_count": 0, "new_active_added": 0, "moved_to_sold": 0, "moved_to_hidden": 0, "updated_active": 0}
+                                if parsed_active_closet:
+                                    res_closet = engine.reconcile_active_closet_snapshot(parsed_active_closet, default_lot=target_lot_id, auto_assign_lot=False)
+
+                                res_sold_closet = {"moved_to_sold": 0, "enriched": 0}
+                                if parsed_sold_closet:
+                                    res_sold_closet = engine.reconcile_sold_closet(parsed_sold_closet, default_lot=target_lot_id)
 
                                 # 5. Record event and clear cache
-                                record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id or 'None'})", client=client)
-                                log_event(u_email, "html_import", f"HTML import: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id or 'None'})", spreadsheet_id=st.session_state.get("spreadsheet_id"))
+                                record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_active_closet)} active, {len(parsed_sold_closet)} sold closet, Lot: {target_lot_id or 'None'})", client=client)
+                                log_event(u_email, "html_import", f"HTML import: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_active_closet)} active, {len(parsed_sold_closet)} sold closet, Lot: {target_lot_id or 'None'})", spreadsheet_id=st.session_state.get("spreadsheet_id"))
                                 st.cache_data.clear()
 
-                            lot_msg = f" (New lot {target_lot_id} created in Inventory_Lots)" if is_new_lot else (f" (Assigned to {target_lot_id})" if target_lot_id else " (No lot assigned)")
-                            if has_active_export:
-                                closet_summary_msg = f"{res_closet.get('final_active_count', 0)} active listings reconciled ({res_closet.get('new_active_added', 0)} added, {res_closet.get('moved_to_sold', 0)} moved to sold, {res_closet.get('moved_to_hidden', 0)} hidden)"
-                            else:
-                                closet_summary_msg = f"{res_closet.get('created', 0)} listings added{lot_msg}, {res_closet.get('updated', 0)} listings refreshed"
+                            summary_parts = []
+                            if parsed_active_closet:
+                                summary_parts.append(f"{res_closet.get('final_active_count', 0)} active listings in closet ({res_closet.get('new_active_added', 0)} added, {res_closet.get('moved_to_sold', 0)} moved to sold, {res_closet.get('moved_to_hidden', 0)} hidden)")
+                            if parsed_orders:
+                                summary_parts.append(f"{res_orders.get('synced_orders', 0)} sales orders synced, {res_orders.get('cancelled_orders', 0)} cancellations recorded")
+                            if parsed_sold_closet and res_sold_closet.get("moved_to_sold", 0) > 0:
+                                summary_parts.append(f"{res_sold_closet.get('moved_to_sold', 0)} sold closet items moved from active to sold")
                             
-                            st.success(f"Sync Complete! {closet_summary_msg}. {res_orders.get('synced_orders', 0)} sales orders synced, {res_orders.get('cancelled_orders', 0)} cancellations recorded.", icon=":material/check_circle:")
+                            sync_summary_msg = " • ".join(summary_parts) if summary_parts else "Sync completed successfully."
+                            st.success(f"Sync Complete! {sync_summary_msg}", icon=":material/check_circle:")
                             st.balloons()
                             time.sleep(1.5)
                             st.rerun()

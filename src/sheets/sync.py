@@ -1365,9 +1365,8 @@ class SheetsSyncEngine:
            - Items that are known sold (found in Sold_Items, Orders, or marked Sold) are moved to Sold_Items.
            - Items that are hidden (marked Hidden, swimsuits, or inactive) are moved to Hidden_Items.
         2. Updates existing active listings with current prices, views, and favorites.
-        3. Appends new active listings that are on Vinted but missing from Item_Listings.
-        4. Guarantees that Item_Listings count matches the exact active count of the closet snapshot.
         """
+        active_items = [it for it in active_items if getattr(it, "status", "Listed") != "Sold"]
         ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
         ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
         ws_hidden = self.get_worksheet(TAB_HIDDEN_ITEMS)
@@ -1489,6 +1488,8 @@ class SheetsSyncEngine:
         new_active_added = 0
 
         for item in active_items:
+            if getattr(item, "status", "Listed") == "Sold":
+                continue
             v_id = item.vinted_id.strip().replace(",", "") if item.vinted_id else ""
             if (v_id and v_id in matched_snapshot_vids) or (id(item) in matched_item_objects):
                 continue
@@ -1570,7 +1571,7 @@ class SheetsSyncEngine:
                     r_title,                                                         # C: Title
                     r_brand,                                                         # D: Brand
                     r_cat,                                                           # E: Category
-                    f'=IFERROR(VLOOKUP(B{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)', # F: Unit_Cost
+                    f"=IFERROR(VLOOKUP(B{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)", # F: Unit_Cost
                     r_post,                                                          # G: Posted_Price
                     r_curr,                                                          # H: Current_Price
                     f'=IF(OR(G{next_sold_row}="", H{next_sold_row}=""), "", IF(AND(ISNUMBER(G{next_sold_row}), ISNUMBER(H{next_sold_row}), H{next_sold_row}<G{next_sold_row}), "YES", "NO"))', # I: Price_Lowered
@@ -1631,6 +1632,78 @@ class SheetsSyncEngine:
             "moved_to_sold": sold_appended,
             "moved_to_hidden": hidden_appended,
         }
+
+    def reconcile_sold_closet(
+        self,
+        sold_items: List[ItemListing],
+        default_lot: str = "",
+    ) -> Dict[str, int]:
+        """
+        Reconciles items extracted from a Sold Closet HTML export:
+        1. If an item in sold_items matches an active listing in Item_Listings (by Vinted ID or Title),
+           moves it from Item_Listings to Sold_Items.
+        2. Never appends sold items to Item_Listings.
+        """
+        if not sold_items:
+            return {"moved_to_sold": 0, "enriched": 0}
+
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
+        ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
+        self._ensure_headers(ws_listings, LISTINGS_HEADERS)
+        self._ensure_headers(ws_sold, SOLD_ITEMS_HEADERS)
+
+        listings_rows = ws_listings.get_all_values()
+        if len(listings_rows) <= 1:
+            return {"moved_to_sold": 0, "enriched": 0}
+
+        l_headers = listings_rows[0]
+        l_sku_idx = l_headers.index("Item_SKU") if "Item_SKU" in l_headers else 0
+        l_title_idx = l_headers.index("Title") if "Title" in l_headers else 2
+        l_id_idx = l_headers.index("Vinted_ID") if "Vinted_ID" in l_headers else 13
+
+        active_by_vid: Dict[str, str] = {}
+        active_by_title: Dict[str, str] = {}
+        for r in listings_rows[1:]:
+            sku = r[l_sku_idx].strip() if len(r) > l_sku_idx else ""
+            vid = r[l_id_idx].strip().replace(",", "") if len(r) > l_id_idx else ""
+            title = r[l_title_idx].strip().lower() if len(r) > l_title_idx else ""
+            if vid:
+                active_by_vid[vid] = sku
+            if title:
+                active_by_title[title] = sku
+
+        moved_count = 0
+        for item in sold_items:
+            vid = item.vinted_id.strip().replace(",", "") if item.vinted_id else ""
+            title = item.title.strip().lower() if item.title else ""
+            match_sku = None
+            if vid and vid in active_by_vid:
+                match_sku = active_by_vid[vid]
+            elif title and title in active_by_title:
+                match_sku = active_by_title[title]
+
+            if match_sku:
+                res = self.move_listing_to_sold(
+                    sku=match_sku,
+                    status="Sold",
+                    sold_price=item.current_price,
+                    platform="Vinted",
+                    sync_lots_after=False,
+                )
+                if res:
+                    moved_count += 1
+                    if vid:
+                        active_by_vid.pop(vid, None)
+                    if title:
+                        active_by_title.pop(title, None)
+
+        if moved_count > 0:
+            try:
+                self.sync_lots()
+            except Exception:
+                pass
+
+        return {"moved_to_sold": moved_count, "enriched": 0}
 
     def reconcile_sold_listings(self) -> int:
         """
