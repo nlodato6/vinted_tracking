@@ -1116,6 +1116,436 @@ class SheetsSyncEngine:
 
         return {SOLD_ITEMS_HEADERS[i]: sold_row_data[i] for i in range(len(SOLD_ITEMS_HEADERS))}
 
+    def move_listing_to_hidden(
+        self,
+        sku: Optional[str] = None,
+        vinted_id: Optional[str] = None,
+        title: Optional[str] = None,
+        sync_lots_after: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Finds an active listing in Item_Listings by SKU, Vinted ID, or Title,
+        moves it to Hidden_Items with listing metadata, and removes it from Item_Listings.
+        """
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
+        ws_hidden = self.get_worksheet(TAB_HIDDEN_ITEMS)
+
+        self._ensure_headers(ws_listings, LISTINGS_HEADERS)
+        self._ensure_headers(ws_hidden, HIDDEN_ITEMS_HEADERS)
+
+        listings_rows = ws_listings.get_all_values()
+        if len(listings_rows) <= 1:
+            return None
+
+        headers = listings_rows[0]
+        sku_idx = headers.index("Item_SKU") if "Item_SKU" in headers else 0
+        title_idx = headers.index("Title") if "Title" in headers else 2
+        id_idx = headers.index("Vinted_ID") if "Vinted_ID" in headers else 13
+
+        clean_sku = sku.strip().upper() if sku else ""
+        clean_id = vinted_id.strip().replace(",", "") if vinted_id else ""
+        clean_title = title.strip().lower() if title else ""
+
+        target_row_idx = None
+        target_row_data = None
+
+        for r_idx, r in enumerate(listings_rows[1:], start=2):
+            r_sku = r[sku_idx].strip().upper() if len(r) > sku_idx else ""
+            r_id = r[id_idx].strip().replace(",", "") if len(r) > id_idx else ""
+            r_title = r[title_idx].strip().lower() if len(r) > title_idx else ""
+
+            if (clean_sku and r_sku == clean_sku) or \
+               (clean_id and r_id == clean_id) or \
+               (clean_title and r_title == clean_title):
+                target_row_idx = r_idx
+                target_row_data = list(r)
+                break
+
+        if not target_row_idx or not target_row_data:
+            return None
+
+        hidden_rows = ws_hidden.get_all_values()
+        next_hidden_row = len(hidden_rows) + 1
+
+        lot_id = target_row_data[headers.index("Lot_ID")] if "Lot_ID" in headers and len(target_row_data) > headers.index("Lot_ID") else ""
+        item_title = target_row_data[title_idx] if len(target_row_data) > title_idx else ""
+        brand = target_row_data[headers.index("Brand")] if "Brand" in headers and len(target_row_data) > headers.index("Brand") else ""
+        category = target_row_data[headers.index("Category")] if "Category" in headers and len(target_row_data) > headers.index("Category") else ""
+        posted_price = target_row_data[headers.index("Posted_Price")] if "Posted_Price" in headers and len(target_row_data) > headers.index("Posted_Price") else ""
+        curr_price = target_row_data[headers.index("Current_Price")] if "Current_Price" in headers and len(target_row_data) > headers.index("Current_Price") else ""
+        price_hist = target_row_data[headers.index("Price_History")] if "Price_History" in headers and len(target_row_data) > headers.index("Price_History") else ""
+        favs = target_row_data[headers.index("Favorites")] if "Favorites" in headers and len(target_row_data) > headers.index("Favorites") else 0
+        views = target_row_data[headers.index("Views")] if "Views" in headers and len(target_row_data) > headers.index("Views") else 0
+        v_id_val = target_row_data[id_idx] if len(target_row_data) > id_idx else ""
+        v_url = target_row_data[headers.index("Vinted_URL")] if "Vinted_URL" in headers and len(target_row_data) > headers.index("Vinted_URL") else ""
+        dt_listed = target_row_data[headers.index("Date_Listed")] if "Date_Listed" in headers and len(target_row_data) > headers.index("Date_Listed") else ""
+        l_source_idx = headers.index("Source") if "Source" in headers else 18
+        source_val = target_row_data[l_source_idx] if len(target_row_data) > l_source_idx else "HTML"
+
+        hidden_row_data = [
+            target_row_data[sku_idx],                                                # A: Item_SKU
+            lot_id,                                                                  # B: Lot_ID
+            item_title,                                                              # C: Title
+            brand,                                                                   # D: Brand
+            category,                                                                # E: Category
+            f'=IFERROR(VLOOKUP(B{next_hidden_row}, Inventory_Lots!A:F, 6, FALSE), 0)', # F: Unit_Cost
+            posted_price,                                                            # G: Posted_Price
+            curr_price,                                                              # H: Current_Price
+            f'=IF(OR(G{next_hidden_row}="", H{next_hidden_row}=""), "", IF(AND(ISNUMBER(G{next_hidden_row}), ISNUMBER(H{next_hidden_row}), H{next_hidden_row}<G{next_hidden_row}), "YES", "NO"))', # I: Price_Lowered
+            f'=IF(OR(G{next_hidden_row}="", H{next_hidden_row}=""), "", IF(AND(ISNUMBER(G{next_hidden_row}), ISNUMBER(H{next_hidden_row}), H{next_hidden_row}<G{next_hidden_row}), G{next_hidden_row}-H{next_hidden_row}, 0))', # J: Price_Drop
+            price_hist,                                                              # K: Price_History
+            favs,                                                                    # L: Favorites
+            views,                                                                   # M: Views
+            v_id_val,                                                                # N: Vinted_ID
+            v_url,                                                                   # O: Vinted_URL
+            "Hidden",                                                                # P: Status
+            dt_listed,                                                               # Q: Date_Listed
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),                            # R: Last_Synced
+            source_val,                                                              # S: Source
+        ]
+
+        already_in_hidden = False
+        for hr in hidden_rows[1:]:
+            h_sku = hr[0].strip().upper() if len(hr) > 0 else ""
+            h_vid = hr[13].strip().replace(",", "") if len(hr) > 13 else ""
+            h_title = hr[2].strip().lower() if len(hr) > 2 else ""
+            if (clean_sku and h_sku == clean_sku) or \
+               (clean_id and h_vid == clean_id) or \
+               (clean_title and h_title == clean_title):
+                already_in_hidden = True
+                break
+
+        if not already_in_hidden:
+            ws_hidden.append_row(hidden_row_data, value_input_option="USER_ENTERED")
+
+        ws_listings.delete_rows(target_row_idx)
+
+        if sync_lots_after:
+            try:
+                self.sync_lots()
+            except Exception:
+                pass
+
+        return {HIDDEN_ITEMS_HEADERS[i]: hidden_row_data[i] for i in range(len(HIDDEN_ITEMS_HEADERS))}
+
+    def append_cancelled_orders(self, cancelled_orders: List[SalesOrder]) -> int:
+        """
+        Appends cancelled orders to the Cancelled_Orders worksheet.
+        Deduplicates by Order_ID so repeat syncs do not duplicate records.
+        """
+        if not cancelled_orders:
+            return 0
+        ws = self.get_worksheet(TAB_CANCELLED_ORDERS)
+        self._ensure_headers(ws, CANCELLED_ORDERS_HEADERS)
+        existing = ws.get_all_values()
+        existing_order_ids = {r[0].strip() for r in existing[1:] if len(r) > 0 and r[0].strip()}
+
+        rows_to_add = []
+        for o in cancelled_orders:
+            if o.order_id and o.order_id in existing_order_ids:
+                continue
+            sale_date_str = o.sale_date.strftime("%Y-%m-%d") if o.sale_date else datetime.now().strftime("%Y-%m-%d")
+            row = [
+                o.order_id,
+                o.item_sku or "",
+                o.item_title,
+                o.brand or "",
+                o.category or "",
+                o.sold_price,
+                o.sold_price,
+                sale_date_str,
+                getattr(o, "cancellation_reason", "") or "Order cancelled. Refund processed.",
+                getattr(o, "buyer_username", "") or "",
+                getattr(o, "vinted_url", "") or "",
+                getattr(o, "source", "HTML") or "HTML",
+            ]
+            rows_to_add.append(row)
+            if o.order_id:
+                existing_order_ids.add(o.order_id)
+
+        if rows_to_add:
+            ws.append_rows(rows_to_add, value_input_option="USER_ENTERED")
+        return len(rows_to_add)
+
+    def reconcile_active_closet_snapshot(
+        self,
+        active_items: List[ItemListing],
+        default_lot: str = "",
+        auto_assign_lot: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Reconciles the uploaded active closet HTML export with Item_Listings:
+        1. Identifies listings currently in Item_Listings that are not present in active_items:
+           - Items that are known sold (found in Sold_Items, Orders, or marked Sold) are moved to Sold_Items.
+           - Items that are hidden (marked Hidden, swimsuits, or inactive) are moved to Hidden_Items.
+        2. Updates existing active listings with current prices, views, and favorites.
+        3. Appends new active listings that are on Vinted but missing from Item_Listings.
+        4. Guarantees that Item_Listings count matches the exact active count of the closet snapshot.
+        """
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
+        ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
+        ws_hidden = self.get_worksheet(TAB_HIDDEN_ITEMS)
+
+        self._ensure_headers(ws_listings, LISTINGS_HEADERS)
+        self._ensure_headers(ws_sold, SOLD_ITEMS_HEADERS)
+        self._ensure_headers(ws_hidden, HIDDEN_ITEMS_HEADERS)
+
+        listings_rows = ws_listings.get_all_values()
+        sold_rows = ws_sold.get_all_values()
+        hidden_rows = ws_hidden.get_all_values()
+
+        l_headers = listings_rows[0] if listings_rows else LISTINGS_HEADERS
+        sku_idx = l_headers.index("Item_SKU") if "Item_SKU" in l_headers else 0
+        lot_idx = l_headers.index("Lot_ID") if "Lot_ID" in l_headers else 1
+        title_idx = l_headers.index("Title") if "Title" in l_headers else 2
+        brand_idx = l_headers.index("Brand") if "Brand" in l_headers else 3
+        cat_idx = l_headers.index("Category") if "Category" in l_headers else 4
+        posted_idx = l_headers.index("Posted_Price") if "Posted_Price" in l_headers else 6
+        curr_idx = l_headers.index("Current_Price") if "Current_Price" in l_headers else 7
+        hist_idx = l_headers.index("Price_History") if "Price_History" in l_headers else 10
+        fav_idx = l_headers.index("Favorites") if "Favorites" in l_headers else 11
+        views_idx = l_headers.index("Views") if "Views" in l_headers else 12
+        id_idx = l_headers.index("Vinted_ID") if "Vinted_ID" in l_headers else 13
+        url_idx = l_headers.index("Vinted_URL") if "Vinted_URL" in l_headers else 14
+        status_idx = l_headers.index("Status") if "Status" in l_headers else 15
+        date_idx = l_headers.index("Date_Listed") if "Date_Listed" in l_headers else 16
+        synced_col_idx = l_headers.index("Last_Synced") if "Last_Synced" in l_headers else 17
+        source_idx = l_headers.index("Source") if "Source" in l_headers else 18
+
+        snapshot_by_vid: Dict[str, ItemListing] = {}
+        snapshot_by_title: Dict[str, List[ItemListing]] = {}
+        for item in active_items:
+            v_id = item.vinted_id.strip().replace(",", "") if item.vinted_id else ""
+            if v_id:
+                snapshot_by_vid[v_id] = item
+            if item.title:
+                t = item.title.strip().lower()
+                snapshot_by_title.setdefault(t, []).append(item)
+
+        known_sold_titles = {
+            "lacy hemmed spaghetti strap",
+            "casual tank top",
+            "usa hockey hat",
+            "collared shirt",
+            "flannel button down collar",
+            "rolling stones tee",
+            "super high rise baggy straight",
+            "lavender snakeskin heels",
+            "patent leather heels",
+            "tom’s suede wedge booties",
+            "tom's suede wedge booties",
+        }
+        for sr in sold_rows[1:]:
+            if len(sr) > 2 and sr[2].strip():
+                known_sold_titles.add(sr[2].strip().lower())
+
+        matched_snapshot_vids = set()
+        matched_item_objects = set()
+
+        kept_active_rows = []
+        rows_to_sold = []
+        rows_to_hidden = []
+        updated_count = 0
+
+        for r in listings_rows[1:]:
+            r_vid = r[id_idx].strip().replace(",", "") if len(r) > id_idx else ""
+            r_title = r[title_idx].strip().lower() if len(r) > title_idx else ""
+            r_status = r[status_idx].strip() if len(r) > status_idx else ""
+
+            matched_item = None
+            if r_vid:
+                if r_vid in snapshot_by_vid:
+                    matched_item = snapshot_by_vid[r_vid]
+            elif r_title and r_title in snapshot_by_title:
+                for cand in snapshot_by_title[r_title]:
+                    cand_vid = cand.vinted_id.strip().replace(",", "") if cand.vinted_id else ""
+                    if cand_vid and cand_vid not in matched_snapshot_vids:
+                        matched_item = cand
+                        break
+                    elif not cand_vid and id(cand) not in matched_item_objects:
+                        matched_item = cand
+                        break
+
+            if matched_item:
+                if matched_item.vinted_id:
+                    matched_snapshot_vids.add(matched_item.vinted_id.strip().replace(",", ""))
+                matched_item_objects.add(id(matched_item))
+
+                row_copy = list(r)
+                if matched_item.current_price > 0 and len(row_copy) > curr_idx:
+                    row_copy[curr_idx] = matched_item.current_price
+                if matched_item.favorites is not None and len(row_copy) > fav_idx:
+                    row_copy[fav_idx] = matched_item.favorites
+                if matched_item.views is not None and len(row_copy) > views_idx:
+                    row_copy[views_idx] = matched_item.views
+                if len(row_copy) > status_idx:
+                    row_copy[status_idx] = "Listed"
+                if len(row_copy) > synced_col_idx:
+                    row_copy[synced_col_idx] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                kept_active_rows.append(row_copy)
+                updated_count += 1
+            else:
+                is_swimsuit_or_hidden = (
+                    "hidden" in r_status.lower()
+                    or "swimsuit" in r_title
+                    or "bikini" in r_title
+                    or "bean’s clothes" in r_title
+                    or "bean's clothes" in r_title
+                )
+                if is_swimsuit_or_hidden:
+                    rows_to_hidden.append(r)
+                else:
+                    rows_to_sold.append(r)
+
+        date_to_lot_id = self.get_date_to_lot_map()
+        max_sku_num = self.get_max_sku_num(cached_rows=listings_rows + sold_rows)
+        new_active_added = 0
+
+        for item in active_items:
+            v_id = item.vinted_id.strip().replace(",", "") if item.vinted_id else ""
+            if (v_id and v_id in matched_snapshot_vids) or (id(item) in matched_item_objects):
+                continue
+
+            max_sku_num += 1
+            new_sku = f"SKU-{max_sku_num}"
+            assigned_lot = item.lot_id or default_lot or (date_to_lot_id.get(item.date_listed.strftime("%Y-%m-%d"), "") if (auto_assign_lot and item.date_listed) else "")
+            item_date_str = item.date_listed.strftime("%Y-%m-%d") if item.date_listed else datetime.now().strftime("%Y-%m-%d")
+
+            posted_val = item.posted_price if (item.posted_price and item.posted_price > 0) else item.current_price
+            curr_val = item.current_price
+
+            new_row = [
+                new_sku,
+                assigned_lot,
+                item.title,
+                item.brand or "",
+                item.category or "",
+                f"=IFERROR(VLOOKUP(B{len(kept_active_rows) + 2}, Inventory_Lots!A:F, 6, FALSE), 0)",
+                posted_val,
+                curr_val,
+                f'=IF(OR(G{len(kept_active_rows) + 2}="", H{len(kept_active_rows) + 2}=""), "", IF(AND(ISNUMBER(G{len(kept_active_rows) + 2}), ISNUMBER(H{len(kept_active_rows) + 2}), H{len(kept_active_rows) + 2}<G{len(kept_active_rows) + 2}), "YES", "NO"))',
+                f'=IF(OR(G{len(kept_active_rows) + 2}="", H{len(kept_active_rows) + 2}=""), "", IF(AND(ISNUMBER(G{len(kept_active_rows) + 2}), ISNUMBER(H{len(kept_active_rows) + 2}), H{len(kept_active_rows) + 2}<G{len(kept_active_rows) + 2}), G{len(kept_active_rows) + 2}-H{len(kept_active_rows) + 2}, 0))',
+                "",
+                item.favorites or 0,
+                item.views or 0,
+                item.vinted_id or "",
+                item.vinted_url or "",
+                "Listed",
+                item_date_str,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                getattr(item, "source", "HTML") or "HTML",
+            ]
+            kept_active_rows.append(new_row)
+            new_active_added += 1
+            if v_id:
+                matched_snapshot_vids.add(v_id)
+            matched_item_objects.add(id(item))
+
+        final_listings_matrix = []
+        for idx, row in enumerate(kept_active_rows, start=2):
+            r_c = list(row)
+            while len(r_c) < len(LISTINGS_HEADERS):
+                r_c.append("")
+            r_c[5] = f"=IFERROR(VLOOKUP(B{idx}, Inventory_Lots!A:F, 6, FALSE), 0)"
+            r_c[8] = f'=IF(OR(G{idx}="", H{idx}=""), "", IF(AND(ISNUMBER(G{idx}), ISNUMBER(H{idx}), H{idx}<G{idx}), "YES", "NO"))'
+            r_c[9] = f'=IF(OR(G{idx}="", H{idx}=""), "", IF(AND(ISNUMBER(G{idx}), ISNUMBER(H{idx}), H{idx}<G{idx}), G{idx}-H{idx}, 0))'
+            final_listings_matrix.append(r_c)
+
+        # 1. Update Item_Listings in 1 single batch write
+        ws_listings.clear()
+        ws_listings.update("A1", [LISTINGS_HEADERS] + final_listings_matrix, value_input_option="USER_ENTERED")
+
+        # 2. Append moved items to Sold_Items
+        sold_appended = 0
+        if rows_to_sold:
+            sold_batch_rows = []
+            cur_sold_total = len(sold_rows)
+            for r in rows_to_sold:
+                next_sold_row = cur_sold_total + len(sold_batch_rows) + 1
+                r_sku = r[sku_idx] if len(r) > sku_idx else ""
+                r_lot = r[lot_idx] if len(r) > lot_idx else default_lot
+                r_title = r[title_idx] if len(r) > title_idx else ""
+                r_brand = r[brand_idx] if len(r) > brand_idx else ""
+                r_cat = r[cat_idx] if len(r) > cat_idx else ""
+                r_post = r[posted_idx] if len(r) > posted_idx else ""
+                r_curr = r[curr_idx] if len(r) > curr_idx else ""
+                r_fav = r[fav_idx] if len(r) > fav_idx else 0
+                r_view = r[views_idx] if len(r) > views_idx else 0
+                r_url = r[url_idx] if len(r) > url_idx else ""
+                r_dt = r[date_idx] if len(r) > date_idx else datetime.now().strftime("%Y-%m-%d")
+                r_src = r[source_idx] if len(r) > source_idx else "HTML"
+
+                sp_val = parse_price(r_curr) or parse_price(r_post)
+
+                sold_row_data = [
+                    r_sku,                                                           # A: Item_SKU
+                    r_lot,                                                           # B: Lot_ID
+                    r_title,                                                         # C: Title
+                    r_brand,                                                         # D: Brand
+                    r_cat,                                                           # E: Category
+                    f'=IFERROR(VLOOKUP(B{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)', # F: Unit_Cost
+                    r_post,                                                          # G: Posted_Price
+                    r_curr,                                                          # H: Current_Price
+                    f'=IF(OR(G{next_sold_row}="", H{next_sold_row}=""), "", IF(AND(ISNUMBER(G{next_sold_row}), ISNUMBER(H{next_sold_row}), H{next_sold_row}<G{next_sold_row}), "YES", "NO"))', # I: Price_Lowered
+                    f'=IF(OR(G{next_sold_row}="", H{next_sold_row}=""), "", IF(AND(ISNUMBER(G{next_sold_row}), ISNUMBER(H{next_sold_row}), H{next_sold_row}<G{next_sold_row}), G{next_sold_row}-H{next_sold_row}, 0))', # J: Price_Drop
+                    "",                                                              # K: Price_History
+                    sp_val,                                                          # L: Sold_Price
+                    f'=IF(OR(G{next_sold_row}="", L{next_sold_row}=""), "", IF(AND(ISNUMBER(G{next_sold_row}), ISNUMBER(L{next_sold_row}), G{next_sold_row}>L{next_sold_row}), G{next_sold_row}-L{next_sold_row}, 0))', # M: Price_Discount
+                    f'=IF(OR(G{next_sold_row}="", L{next_sold_row}=""), "", IF(L{next_sold_row}>=G{next_sold_row}, "Original Price", IF(L{next_sold_row}=H{next_sold_row}, "Lowered Price", "Accepted Offer")))', # N: Sale_Type
+                    datetime.now().strftime("%Y-%m-%d"),                             # O: Sale_Date
+                    "Vinted",                                                        # P: Platform
+                    f'=IF(P{next_sold_row}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)', # Q: Packaging_Cost
+                    f'=IF(AND(ISNUMBER(L{next_sold_row}), ISNUMBER(F{next_sold_row}), ISNUMBER(Q{next_sold_row})), L{next_sold_row}-F{next_sold_row}-Q{next_sold_row}, IF(ISNUMBER(L{next_sold_row}), L{next_sold_row}, 0))', # R: Net_Profit
+                    f'=IF(AND(ISNUMBER(L{next_sold_row}), L{next_sold_row}>0), R{next_sold_row}/L{next_sold_row}, 0)', # S: Margin_%
+                    r_fav,                                                           # T: Favorites
+                    r_view,                                                          # U: Views
+                    "",                                                              # V: Order_ID
+                    r_url,                                                           # W: Vinted_URL
+                    "Sold",                                                          # X: Status
+                    r_dt,                                                            # Y: Date_Listed
+                    r_src,                                                           # Z: Source
+                ]
+                sold_batch_rows.append(sold_row_data)
+
+            if sold_batch_rows:
+                ws_sold.append_rows(sold_batch_rows, value_input_option="USER_ENTERED")
+                sold_appended = len(sold_batch_rows)
+
+        # 3. Append moved items to Hidden_Items
+        hidden_appended = 0
+        if rows_to_hidden:
+            hidden_batch_rows = []
+            cur_hidden_total = len(hidden_rows)
+            for r in rows_to_hidden:
+                next_h_row = cur_hidden_total + len(hidden_batch_rows) + 1
+                r_c = list(r)
+                while len(r_c) < len(HIDDEN_ITEMS_HEADERS):
+                    r_c.append("")
+                r_c[5] = f"=IFERROR(VLOOKUP(B{next_h_row}, Inventory_Lots!A:F, 6, FALSE), 0)"
+                r_c[8] = f'=IF(OR(G{next_h_row}="", H{next_h_row}=""), "", IF(AND(ISNUMBER(G{next_h_row}), ISNUMBER(H{next_h_row}), H{next_h_row}<G{next_h_row}), "YES", "NO"))'
+                r_c[9] = f'=IF(OR(G{next_h_row}="", H{next_h_row}=""), "", IF(AND(ISNUMBER(G{next_h_row}), ISNUMBER(H{next_h_row}), H{next_h_row}<G{next_h_row}), G{next_h_row}-H{next_h_row}, 0))'
+                r_c[15] = "Hidden"
+                hidden_batch_rows.append(r_c)
+
+            if hidden_batch_rows:
+                ws_hidden.append_rows(hidden_batch_rows, value_input_option="USER_ENTERED")
+                hidden_appended = len(hidden_batch_rows)
+
+        # 4. Sync inventory lots
+        try:
+            self.sync_lots()
+        except Exception:
+            pass
+
+        return {
+            "final_active_count": len(final_listings_matrix),
+            "updated_active": updated_count,
+            "new_active_added": new_active_added,
+            "moved_to_sold": sold_appended,
+            "moved_to_hidden": hidden_appended,
+        }
+
     def reconcile_sold_listings(self) -> int:
         """
         Finds any listings in Item_Listings where Status contains 'Sold' (e.g. manually set by user)
@@ -1539,6 +1969,7 @@ class SheetsSyncEngine:
                     existing_order_ids.add(row[order_id_idx].strip())
 
         synced_count = 0
+        cancelled_count = 0
         max_sku_num = self.get_max_sku_num()
         batch_new_rows = []
         batch_cell_updates = []
@@ -1576,14 +2007,24 @@ class SheetsSyncEngine:
             if not clean_title or (order.sold_price is not None and order.sold_price <= 0):
                 continue
 
+            if getattr(order, "vinted_status", "Completed") == "Cancelled":
+                self.append_cancelled_orders([order])
+                cancelled_count += 1
+                continue
+
             sale_date_str = order.sale_date.strftime("%Y-%m-%d") if order.sale_date else datetime.now().strftime("%Y-%m-%d")
             clean_low = clean_title.lower()
 
             # 1. Check if present in active listings FIRST and move it to Sold_Items
-            has_active_match = (
-                (order.item_sku and order.item_sku.strip().upper() in active_sku_to_row)
-                or (clean_low in active_title_to_row)
-            )
+            # ONLY for NEW orders that are not already recorded in Sold_Items!
+            is_already_in_sold = bool(order.order_id and order.order_id in existing_order_ids)
+
+            has_active_match = False
+            if not is_already_in_sold:
+                has_active_match = (
+                    (order.item_sku and order.item_sku.strip().upper() in active_sku_to_row)
+                    or (clean_low in active_title_to_row)
+                )
 
             if has_active_match:
                 moved_item = self.move_listing_to_sold(
@@ -1601,6 +2042,8 @@ class SheetsSyncEngine:
                     if order.item_sku:
                         active_sku_to_row.pop(order.item_sku.strip().upper(), None)
                     active_title_to_row.pop(clean_low, None)
+                    if order.order_id:
+                        existing_order_ids.add(order.order_id)
                     continue
 
             # 2. Check for duplicate in Sold_Items before appending (enrich existing row if found)
@@ -1689,7 +2132,7 @@ class SheetsSyncEngine:
         # Update Inventory_Lots
         self.sync_lots()
 
-        return {"synced_orders": synced_count}
+        return {"synced_orders": synced_count, "cancelled_orders": cancelled_count}
 
     def process_email_batch(self, events: List[Any], default_lot: str = "") -> List[Dict[str, Any]]:
         """
@@ -1833,8 +2276,8 @@ class SheetsSyncEngine:
                 else:
                     results.append({"status": "item_not_found"})
 
-            # 3. SALE
-            elif event.event_type == "sale":
+            # 3. SALE & BUNDLE SALE
+            elif event.event_type in ("sale", "bundle_sale"):
                 sale_date_str = event.timestamp.strftime("%Y-%m-%d")
                 clean_target_vid = clean_target_id or extract_vinted_id_from_text(event.vinted_url) or extract_vinted_id_from_text(event.item_title) or ""
                 next_sold_row = cur_sold_count + len(rows_to_append_to_sold) + 1
@@ -1987,6 +2430,24 @@ class SheetsSyncEngine:
                     if event.order_id:
                         existing_orders.add(event.order_id)
                     results.append({"status": "appended_to_sold", "title": assigned_title, "sku": new_sku, "lot": assigned_lot})
+
+            # 4. CANCELLATION
+            elif event.event_type == "cancellation":
+                canc_order = SalesOrder(
+                    order_id=event.order_id or f"ORD-{int(event.timestamp.timestamp())}",
+                    item_title=event.item_title or f"Cancelled Order {event.order_id}",
+                    sold_price=event.sold_price,
+                    sale_date=event.timestamp.date(),
+                    platform="Vinted",
+                    brand=event.brand or infer_brand(event.item_title or ""),
+                    category=event.category or infer_clothing_category(event.item_title or ""),
+                    vinted_status="Cancelled",
+                    source="Email",
+                    buyer_username=event.buyer_username or "",
+                    cancellation_reason=getattr(event, "cancellation_reason", "") or "Order cancelled. Refund processed.",
+                )
+                self.append_cancelled_orders([canc_order])
+                results.append({"status": "cancellation_recorded", "order_id": canc_order.order_id, "title": canc_order.item_title})
 
             else:
                 results.append({"status": "ignored"})

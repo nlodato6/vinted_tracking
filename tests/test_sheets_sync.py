@@ -9,11 +9,15 @@ from src.sheets.sync import SheetsSyncEngine, normalize_date_str
 from src.sheets.schemas import (
     TAB_ITEM_LISTINGS,
     TAB_SOLD_ITEMS,
+    TAB_HIDDEN_ITEMS,
+    TAB_CANCELLED_ORDERS,
     TAB_SALES_LOG,
     TAB_INVENTORY_LOTS,
     TAB_SHIPPING_SUPPLIES,
     LISTINGS_HEADERS,
+    HIDDEN_ITEMS_HEADERS,
     SOLD_ITEMS_HEADERS,
+    CANCELLED_ORDERS_HEADERS,
     SALES_HEADERS,
     LOTS_HEADERS,
     SUPPLIES_HEADERS,
@@ -50,6 +54,9 @@ class MockWorksheet:
 
     def delete_rows(self, index, count=1):
         del self.rows[index - 1 : index - 1 + count]
+
+    def clear(self):
+        self.rows = []
 
     def batch_update(self, updates, value_input_option=None):
         for u in updates:
@@ -160,6 +167,8 @@ def mock_sheets_env():
         ],
     )
     ws_sold = MockWorksheet(TAB_SOLD_ITEMS, headers=SOLD_ITEMS_HEADERS)
+    ws_hidden = MockWorksheet(TAB_HIDDEN_ITEMS, headers=HIDDEN_ITEMS_HEADERS)
+    ws_cancelled = MockWorksheet(TAB_CANCELLED_ORDERS, headers=CANCELLED_ORDERS_HEADERS)
     ws_sales = MockWorksheet(TAB_SALES_LOG, headers=SALES_HEADERS)
     ws_supplies = MockWorksheet(
         TAB_SHIPPING_SUPPLIES,
@@ -174,6 +183,8 @@ def mock_sheets_env():
         TAB_INVENTORY_LOTS: ws_lots,
         TAB_ITEM_LISTINGS: ws_listings,
         TAB_SOLD_ITEMS: ws_sold,
+        TAB_HIDDEN_ITEMS: ws_hidden,
+        TAB_CANCELLED_ORDERS: ws_cancelled,
         TAB_SALES_LOG: ws_sales,
         TAB_SHIPPING_SUPPLIES: ws_supplies,
     })
@@ -1638,6 +1649,239 @@ def test_find_duplicate_groups_includes_source(mock_sheets_env):
     assert len(rows) == 2
     sources = {r["source"] for r in rows}
     assert sources == {"Email", "HTML"}
+
+
+def test_move_listing_to_hidden(mock_sheets_env):
+    """Verifies moving an active listing to Hidden_Items preserves metadata and removes it from Item_Listings."""
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+    ws_hidden = sh.worksheet(TAB_HIDDEN_ITEMS)
+
+    # Initial state: 2 listings in Item_Listings, 0 in Hidden_Items
+    assert len(ws_listings.rows) == 3  # header + 2 items
+    assert len(ws_hidden.rows) == 1    # header only
+
+    # Move SKU-1001
+    moved = engine.move_listing_to_hidden(sku="SKU-1001")
+    assert moved is not None
+    assert moved["Item_SKU"] == "SKU-1001"
+    assert moved["Status"] == "Hidden"
+
+    # Verify ws_listings has only SKU-1002 remaining
+    assert len(ws_listings.rows) == 2
+    assert ws_listings.rows[1][0] == "SKU-1002"
+
+    # Verify ws_hidden has SKU-1001
+    assert len(ws_hidden.rows) == 2
+    assert ws_hidden.rows[1][0] == "SKU-1001"
+    assert ws_hidden.rows[1][2] == "Vintage Carhartt Jacket"
+    assert ws_hidden.rows[1][15] == "Hidden"
+
+    # Second attempt to move SKU-1001 returns None
+    assert engine.move_listing_to_hidden(sku="SKU-1001") is None
+
+    # Move by Title
+    moved2 = engine.move_listing_to_hidden(title="Nike Swoosh Hoodie")
+    assert moved2 is not None
+    assert moved2["Item_SKU"] == "SKU-1002"
+    assert len(ws_listings.rows) == 1  # Only headers left
+
+
+def test_append_cancelled_orders(mock_sheets_env):
+    """Verifies appending and deduplicating cancelled orders in Cancelled_Orders."""
+    engine, sh = mock_sheets_env
+    ws_cancelled = sh.worksheet(TAB_CANCELLED_ORDERS)
+
+    assert len(ws_cancelled.rows) == 1
+
+    o1 = SalesOrder(
+        order_id="ORD-CANCEL-1",
+        item_sku="SKU-2001",
+        item_title="Vintage Jacket",
+        brand="Carhartt",
+        category="Outerwear",
+        sold_price=35.0,
+        sale_date=datetime(2026, 10, 20),
+        cancellation_reason="Buyer requested cancellation",
+        buyer_username="coolbuyer",
+        vinted_status="Cancelled",
+        source="HTML",
+    )
+    o2 = SalesOrder(
+        order_id="ORD-CANCEL-2",
+        item_sku="",
+        item_title="Leather Boots",
+        brand="Timberland",
+        category="Shoes",
+        sold_price=50.0,
+        sale_date=datetime(2026, 10, 21),
+        cancellation_reason="Damaged in transit",
+        buyer_username="shoefan",
+        vinted_status="Cancelled",
+        source="Email",
+    )
+
+    added = engine.append_cancelled_orders([o1, o2])
+    assert added == 2
+    assert len(ws_cancelled.rows) == 3
+
+    # Check row data
+    r1 = ws_cancelled.rows[1]
+    assert r1[0] == "ORD-CANCEL-1"
+    assert r1[1] == "SKU-2001"
+    assert r1[2] == "Vintage Jacket"
+    assert r1[5] == 35.0
+    assert r1[8] == "Buyer requested cancellation"
+    assert r1[9] == "coolbuyer"
+    assert r1[11] == "HTML"
+
+    # Deduplication test: re-appending the same orders should add 0 rows
+    added_again = engine.append_cancelled_orders([o1, o2])
+    assert added_again == 0
+    assert len(ws_cancelled.rows) == 3
+
+
+def test_reconcile_active_closet_snapshot(mock_sheets_env):
+    """Verifies reconciling active closet snapshot moves sold items to Sold_Items, hidden items to Hidden_Items, and updates active count."""
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_hidden = sh.worksheet(TAB_HIDDEN_ITEMS)
+
+    # Setup initial listings:
+    # Row 1: SKU-1001 (Carhartt, active)
+    # Row 2: SKU-1002 (Nike, active)
+    # Row 3: SKU-1003 (Lacy hemmed spaghetti strap, known sold)
+    # Row 4: SKU-1004 (Floral Swimsuit, swimsuit -> hidden)
+    ws_listings.append_row([
+        "SKU-1003", "", "Lacy Hemmed Spaghetti Strap", "Zara", "Tops",
+        "", "15.00", "12.00", "NO", "0.00", "", "5", "40", "vinted_333",
+        "https://vinted.com/items/333", "Listed", "2026-10-15", "2026-10-19 12:00:00", "HTML"
+    ])
+    ws_listings.append_row([
+        "SKU-1004", "", "Floral Bikini Swimsuit", "Speedo", "Swimwear",
+        "", "20.00", "20.00", "NO", "0.00", "", "3", "20", "vinted_444",
+        "https://vinted.com/items/444", "Listed", "2026-10-15", "2026-10-19 12:00:00", "HTML"
+    ])
+
+    assert len(ws_listings.rows) == 5  # headers + 4 items
+
+    # Incoming active snapshot contains:
+    # 1. Carhartt Jacket with updated price 65.00, fav=25, views=180
+    # 2. Nike Hoodie with updated price 38.00, fav=12, views=90
+    # 3. New item: Levis 501 Jeans (date 2026-10-19 -> matches LOT-002)
+    item1 = ItemListing(
+        item_sku="SKU-1001",
+        title="Vintage Carhartt Jacket",
+        brand="Carhartt",
+        category="Outerwear",
+        current_price=65.0,
+        posted_price=75.0,
+        favorites=25,
+        views=180,
+        vinted_id="vinted_111",
+        status="Listed",
+    )
+    item2 = ItemListing(
+        item_sku="SKU-1002",
+        title="Nike Swoosh Hoodie",
+        brand="Nike",
+        category="Sweaters & Hoodies",
+        current_price=38.0,
+        posted_price=45.0,
+        favorites=12,
+        views=90,
+        vinted_id="vinted_222",
+        status="Listed",
+    )
+    item_new = ItemListing(
+        item_sku="",
+        title="Levis 501 Jeans",
+        brand="Levi's",
+        category="Jeans",
+        current_price=55.0,
+        posted_price=55.0,
+        vinted_id="vinted_555",
+        status="Listed",
+        date_listed=date(2026, 10, 19),
+    )
+
+    res = engine.reconcile_active_closet_snapshot([item1, item2, item_new])
+
+    assert res["final_active_count"] == 3
+    assert res["updated_active"] == 2
+    assert res["new_active_added"] == 1
+    assert res["moved_to_sold"] == 1
+    assert res["moved_to_hidden"] == 1
+
+    # Check ws_listings has exactly headers + 3 rows
+    assert len(ws_listings.rows) == 4
+    # Item 1 updated
+    assert ws_listings.rows[1][0] == "SKU-1001"
+    assert ws_listings.rows[1][7] == 65.0
+    assert ws_listings.rows[1][11] == 25
+    assert ws_listings.rows[1][12] == 180
+
+    # Item 2 updated
+    assert ws_listings.rows[2][0] == "SKU-1002"
+    assert ws_listings.rows[2][7] == 38.0
+
+    # New item added with auto-assigned lot LOT-002
+    assert ws_listings.rows[3][2] == "Levis 501 Jeans"
+    assert ws_listings.rows[3][1] == "LOT-002"
+
+    # Sold items has 1 moved item
+    assert len(ws_sold.rows) == 2
+    assert ws_sold.rows[1][2] == "Lacy Hemmed Spaghetti Strap"
+    assert ws_sold.rows[1][23] == "Sold"
+
+    # Hidden items has 1 moved item
+    assert len(ws_hidden.rows) == 2
+    assert ws_hidden.rows[1][2] == "Floral Bikini Swimsuit"
+    assert ws_hidden.rows[1][15] == "Hidden"
+
+
+def test_sync_orders_routes_cancellations(mock_sheets_env):
+    """Verifies that sync_orders routes cancelled orders to Cancelled_Orders and completed orders to Sold_Items."""
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_cancelled = sh.worksheet(TAB_CANCELLED_ORDERS)
+
+    completed_order = SalesOrder(
+        order_id="ORD-COMP-999",
+        item_title="Vintage Carhartt Jacket",
+        item_sku="SKU-1001",
+        sold_price=70.0,
+        sale_date=datetime(2026, 10, 20),
+        vinted_status="Completed",
+        platform="Vinted",
+    )
+    cancelled_order = SalesOrder(
+        order_id="ORD-CANC-888",
+        item_title="Nike Swoosh Hoodie",
+        item_sku="SKU-1002",
+        sold_price=40.0,
+        sale_date=datetime(2026, 10, 21),
+        vinted_status="Cancelled",
+        cancellation_reason="Buyer changed mind",
+        buyer_username="indecisive_buyer",
+        platform="Vinted",
+    )
+
+    res = engine.sync_orders([completed_order, cancelled_order])
+    assert res["synced_orders"] == 1
+    assert res["cancelled_orders"] == 1
+
+    # Completed order moved from Item_Listings to Sold_Items
+    assert len(ws_sold.rows) == 2
+    assert ws_sold.rows[1][21] == "ORD-COMP-999"
+
+    # Cancelled order appended to Cancelled_Orders
+    assert len(ws_cancelled.rows) == 2
+    assert ws_cancelled.rows[1][0] == "ORD-CANC-888"
+    assert ws_cancelled.rows[1][8] == "Buyer changed mind"
+    assert ws_cancelled.rows[1][9] == "indecisive_buyer"
 
 
 
