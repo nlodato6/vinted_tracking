@@ -5,13 +5,17 @@ from src.sheets.client import GoogleSheetsClient
 from src.sheets.schemas import (
     TAB_INVENTORY_LOTS,
     TAB_ITEM_LISTINGS,
+    TAB_HIDDEN_ITEMS,
     TAB_SOLD_ITEMS,
+    TAB_CANCELLED_ORDERS,
     TAB_SALES_LOG,
     TAB_SHIPPING_SUPPLIES,
     TAB_ANALYTICS_DASHBOARD,
     LOTS_HEADERS,
     LISTINGS_HEADERS,
+    HIDDEN_ITEMS_HEADERS,
     SOLD_ITEMS_HEADERS,
+    CANCELLED_ORDERS_HEADERS,
     SALES_HEADERS,
     SUPPLIES_HEADERS,
 )
@@ -39,6 +43,20 @@ def ensure_col_count(worksheet: gspread.Worksheet, min_cols: int):
     """Ensures worksheet has at least min_cols columns, expanding if necessary."""
     if worksheet.col_count < min_cols:
         worksheet.add_cols(min_cols - worksheet.col_count)
+
+
+def safe_batch_format(worksheet: gspread.Worksheet, formats: list):
+    """Executes multiple formatting requests in a single batch API call to conserve rate limits."""
+    if not formats:
+        return
+    try:
+        worksheet.batch_format(formats)
+    except Exception:
+        for f in formats:
+            try:
+                worksheet.format(f["range"], f["format"])
+            except Exception:
+                pass
 
 
 def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
@@ -84,7 +102,16 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
     ws_listings.update(range_name="A1", values=[LISTINGS_HEADERS])
     format_header_row(ws_listings, len(LISTINGS_HEADERS))
 
-    # 3. Sold_Items (Consolidated sales ledger and sold archive)
+    # 3. Hidden_Items (Temporarily hidden listings, off-market/seasonal)
+    if TAB_HIDDEN_ITEMS not in existing_worksheets:
+        ws_hidden = sh.add_worksheet(title=TAB_HIDDEN_ITEMS, rows=500, cols=len(HIDDEN_ITEMS_HEADERS))
+    else:
+        ws_hidden = existing_worksheets[TAB_HIDDEN_ITEMS]
+    ensure_col_count(ws_hidden, len(HIDDEN_ITEMS_HEADERS))
+    ws_hidden.update(range_name="A1", values=[HIDDEN_ITEMS_HEADERS])
+    format_header_row(ws_hidden, len(HIDDEN_ITEMS_HEADERS))
+
+    # 4. Sold_Items (Consolidated sales ledger and sold archive)
     if TAB_SOLD_ITEMS not in existing_worksheets:
         ws_sold = sh.add_worksheet(title=TAB_SOLD_ITEMS, rows=500, cols=len(SOLD_ITEMS_HEADERS))
     else:
@@ -93,25 +120,56 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
     ws_sold.update(range_name="A1", values=[SOLD_ITEMS_HEADERS])
     format_header_row(ws_sold, len(SOLD_ITEMS_HEADERS))
 
+    # 5. Cancelled_Orders (Aborted, failed, or refunded transactions)
+    if TAB_CANCELLED_ORDERS not in existing_worksheets:
+        ws_cancelled = sh.add_worksheet(title=TAB_CANCELLED_ORDERS, rows=300, cols=len(CANCELLED_ORDERS_HEADERS))
+    else:
+        ws_cancelled = existing_worksheets[TAB_CANCELLED_ORDERS]
+    ensure_col_count(ws_cancelled, len(CANCELLED_ORDERS_HEADERS))
+    ws_cancelled.update(range_name="A1", values=[CANCELLED_ORDERS_HEADERS])
+    format_header_row(ws_cancelled, len(CANCELLED_ORDERS_HEADERS))
+
     # Format Item_Listings
-    ws_listings.format("F2:H500", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_listings.format("I2:I500", {"horizontalAlignment": "CENTER"})
-    ws_listings.format("J2:J500", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_listings.format("L2:M500", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
-    ws_listings.format("P2:P500", {"horizontalAlignment": "CENTER"})
-    ws_listings.format("S2:S500", {"horizontalAlignment": "CENTER"})
+    safe_batch_format(ws_listings, [
+        {"range": "F2:H500", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "I2:I500", "format": {"horizontalAlignment": "CENTER"}},
+        {"range": "J2:J500", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "L2:M500", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+        {"range": "P2:P500", "format": {"horizontalAlignment": "CENTER"}},
+        {"range": "S2:S500", "format": {"horizontalAlignment": "CENTER"}},
+    ])
+
+    # Format Hidden_Items
+    safe_batch_format(ws_hidden, [
+        {"range": "F2:H500", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "I2:I500", "format": {"horizontalAlignment": "CENTER"}},
+        {"range": "J2:J500", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "L2:M500", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+        {"range": "P2:P500", "format": {"horizontalAlignment": "CENTER"}},
+        {"range": "S2:S500", "format": {"horizontalAlignment": "CENTER"}},
+    ])
 
     # Format Sold_Items
-    ws_sold.format("F2:H500", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_sold.format("I2:I500", {"horizontalAlignment": "CENTER"})
-    ws_sold.format("J2:J500", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_sold.format("L2:M500", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_sold.format("N2:P500", {"horizontalAlignment": "CENTER"})
-    ws_sold.format("Q2:R500", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_sold.format("S2:S500", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
-    ws_sold.format("T2:U500", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
-    ws_sold.format("X2:X500", {"horizontalAlignment": "CENTER"})
-    ws_sold.format("Z2:Z500", {"horizontalAlignment": "CENTER"})
+    safe_batch_format(ws_sold, [
+        {"range": "F2:H500", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "I2:I500", "format": {"horizontalAlignment": "CENTER"}},
+        {"range": "J2:J500", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "L2:M500", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "N2:P500", "format": {"horizontalAlignment": "CENTER"}},
+        {"range": "Q2:R500", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "S2:S500", "format": {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}},
+        {"range": "T2:U500", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+        {"range": "X2:X500", "format": {"horizontalAlignment": "CENTER"}},
+        {"range": "Z2:Z500", "format": {"horizontalAlignment": "CENTER"}},
+    ])
+
+    # Format Cancelled_Orders
+    safe_batch_format(ws_cancelled, [
+        {"range": "F2:G300", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "H2:H300", "format": {"horizontalAlignment": "CENTER"}},
+        {"range": "I2:I300", "format": {"horizontalAlignment": "CENTER"}},
+        {"range": "L2:L300", "format": {"horizontalAlignment": "CENTER"}},
+    ])
 
     # 4. Shipping_Supplies
     if TAB_SHIPPING_SUPPLIES not in existing_worksheets:
@@ -237,67 +295,60 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
     ]
     ws_dash.update(range_name="A1", values=dashboard_layout, value_input_option="USER_ENTERED")
 
-    # Format Main Dashboard Header
-    ws_dash.format(
-        "A1:I1",
+    # Format Main Dashboard and Sections
+    dash_formats = [
         {
-            "backgroundColor": {"red": 0.08, "green": 0.44, "blue": 0.65},  # Teal blue
-            "textFormat": {"foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}, "bold": True, "fontSize": 13},
-            "horizontalAlignment": "CENTER",
+            "range": "A1:I1",
+            "format": {
+                "backgroundColor": {"red": 0.08, "green": 0.44, "blue": 0.65},  # Teal blue
+                "textFormat": {"foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}, "bold": True, "fontSize": 13},
+                "horizontalAlignment": "CENTER",
+            },
         }
-    )
-
-    # Section Headers
-    section_ranges = ["A3:F4", "A13:F14", "A20:F21", "A27:I28", "A38:H39", "A46:F47", "A55:E56"]
-    for s_range in section_ranges:
-        ws_dash.format(
-            s_range,
-            {
+    ]
+    for s_range in ["A3:F4", "A13:F14", "A20:F21", "A27:I28", "A38:H39", "A46:F47", "A55:E56"]:
+        dash_formats.append({
+            "range": s_range,
+            "format": {
                 "backgroundColor": {"red": 0.18, "green": 0.24, "blue": 0.32},
                 "textFormat": {"foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}, "bold": True, "fontSize": 10},
                 "horizontalAlignment": "CENTER",
-            }
-        )
-
-    # Format numeric/currency/percent columns
-    # Section 1
-    ws_dash.format("B5:B9", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_dash.format("B10", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
-    ws_dash.format("B11", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-
-    ws_dash.format("E5:E7", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_dash.format("E8:E9", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
-    ws_dash.format("E10:E11", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-
-    # Section 2
-    ws_dash.format("B15:B18", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
-    ws_dash.format("C15:C18", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
-    ws_dash.format("E15", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_dash.format("E16:E17", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
-    ws_dash.format("E18", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
-
-    # Section 3
-    ws_dash.format("B22:B23", {"numberFormat": {"type": "NUMBER", "pattern": "0.0"}})
-    ws_dash.format("B24", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
-    ws_dash.format("B25", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
-
-    # Section 4
-    ws_dash.format("B29:C36", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
-    ws_dash.format("D29:D36", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
-    ws_dash.format("E29:H36", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_dash.format("I29:I36", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
-
-    # Section 5
-    ws_dash.format("E40:G44", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-
-    # Section 6
-    ws_dash.format("B48:B53", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
-    ws_dash.format("C48:E53", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-    ws_dash.format("F48:F53", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
-
-    # Section 7
-    ws_dash.format("B57:B59", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
-    ws_dash.format("C57:E59", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
+            },
+        })
+    dash_formats.extend([
+        # Section 1
+        {"range": "B5:B9", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "B10", "format": {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}},
+        {"range": "B11", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "E5:E7", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "E8:E9", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+        {"range": "E10:E11", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        # Section 2
+        {"range": "B15:B18", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+        {"range": "C15:C18", "format": {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}},
+        {"range": "E15", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "E16:E17", "format": {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}},
+        {"range": "E18", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+        # Section 3
+        {"range": "B22:B23", "format": {"numberFormat": {"type": "NUMBER", "pattern": "0.0"}}},
+        {"range": "B24", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+        {"range": "B25", "format": {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}},
+        # Section 4
+        {"range": "B29:C36", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+        {"range": "D29:D36", "format": {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}},
+        {"range": "E29:H36", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "I29:I36", "format": {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}},
+        # Section 5
+        {"range": "E40:G44", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        # Section 6
+        {"range": "B48:B53", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+        {"range": "C48:E53", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        {"range": "F48:F53", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+        # Section 7
+        {"range": "B57:B59", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+        {"range": "C57:E59", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+    ])
+    safe_batch_format(ws_dash, dash_formats)
 
     # Remove default "Sheet1" if it exists
     if "Sheet1" in existing_worksheets and len(sh.worksheets()) > 1:

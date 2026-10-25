@@ -2,7 +2,9 @@
 
 TAB_INVENTORY_LOTS = "Inventory_Lots"
 TAB_ITEM_LISTINGS = "Item_Listings"
+TAB_HIDDEN_ITEMS = "Hidden_Items"
 TAB_SOLD_ITEMS = "Sold_Items"
+TAB_CANCELLED_ORDERS = "Cancelled_Orders"
 TAB_SALES_LOG = "Sales_Log"
 TAB_SHIPPING_SUPPLIES = "Shipping_Supplies"
 TAB_ANALYTICS_DASHBOARD = "Analytics_Dashboard"
@@ -10,7 +12,9 @@ TAB_ANALYTICS_DASHBOARD = "Analytics_Dashboard"
 SHEET_TABS = [
     TAB_INVENTORY_LOTS,
     TAB_ITEM_LISTINGS,
+    TAB_HIDDEN_ITEMS,
     TAB_SOLD_ITEMS,
+    TAB_CANCELLED_ORDERS,
     TAB_SHIPPING_SUPPLIES,
     TAB_ANALYTICS_DASHBOARD,
 ]
@@ -91,3 +95,21 @@ SUPPLIES_HEADERS = [
     "Unit_Cost",
     "Avg_Cost_Per_Shipment",
 ]
+
+HIDDEN_ITEMS_HEADERS = list(LISTINGS_HEADERS)
+
+CANCELLED_ORDERS_HEADERS = [
+    "Order_ID",
+    "Item_SKU",
+    "Item_Title",
+    "Brand",
+    "Category",
+    "Lost_Revenue",
+    "Original_Price",
+    "Cancellation_Date",
+    "Status_Details",
+    "Buyer_Username",
+    "Vinted_URL",
+    "Source",
+]
+

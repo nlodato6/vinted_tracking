@@ -6,12 +6,16 @@ import gspread
 from src.sheets.client import GoogleSheetsClient
 from src.sheets.schemas import (
     TAB_ITEM_LISTINGS,
+    TAB_HIDDEN_ITEMS,
     TAB_SOLD_ITEMS,
+    TAB_CANCELLED_ORDERS,
     TAB_SALES_LOG,
     TAB_INVENTORY_LOTS,
     TAB_SHIPPING_SUPPLIES,
     LISTINGS_HEADERS,
+    HIDDEN_ITEMS_HEADERS,
     SOLD_ITEMS_HEADERS,
+    CANCELLED_ORDERS_HEADERS,
 )
 import re
 from src.models import ItemListing, SalesOrder
