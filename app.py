@@ -12,18 +12,20 @@ if str(ROOT_DIR) not in sys.path:
 
 # Refresh cached internal modules if updated by git pull on Streamlit Cloud
 import importlib
-for _mod in ("src.sheets.sync", "src.sheets", "src.analytics"):
+for _mod in (
+    "src.sheets.schemas",
+    "src.sheets.client",
+    "src.sheets.sync",
+    "src.sheets",
+    "src.analytics",
+    "src.html_parser",
+    "src.email_parser",
+):
     if _mod in sys.modules:
-        _m = sys.modules[_mod]
-        if _mod == "src.sheets.sync":
-            _cls = getattr(_m, "SheetsSyncEngine", None)
-            if not hasattr(_cls, "reconcile_missing_sold_metadata") or not hasattr(_cls, "clean_blank_rows"):
-                importlib.reload(_m)
-        else:
-            try:
-                importlib.reload(_m)
-            except Exception:
-                pass
+        try:
+            importlib.reload(sys.modules[_mod])
+        except Exception:
+            pass
 
 import streamlit as st
 
