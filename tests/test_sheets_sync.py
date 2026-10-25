@@ -1079,6 +1079,197 @@ def test_closet_sales_sync_listings_deduplicates_and_enriches_email_row(mock_she
     assert enriched[24] == "2026-10-01"  # Date_Listed enriched!
 
 
+def test_find_duplicate_groups_by_order_id(mock_sheets_env):
+    """Test find_duplicate_groups groups rows sharing an Order ID and scores completeness."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_sold.rows = [list(SOLD_ITEMS_HEADERS)]
+
+    # Row 2: Incomplete placeholder row from email
+    row_a = [""] * len(SOLD_ITEMS_HEADERS)
+    row_a[0] = "SKU-101"
+    row_a[2] = "Order sold"  # placeholder
+    row_a[6] = 45.00
+    row_a[11] = 45.00
+    row_a[14] = "2026-10-18"
+    row_a[21] = "ORD-998877"  # Order ID
+    ws_sold.append_row(row_a)
+
+    # Row 3: Enriched complete row from HTML import
+    row_b = [""] * len(SOLD_ITEMS_HEADERS)
+    row_b[0] = "SKU-102"
+    row_b[1] = "LOT-001"
+    row_b[2] = "Patagonia Better Sweater Fleece Quarter Zip"
+    row_b[3] = "Patagonia"
+    row_b[4] = "Fleece"
+    row_b[6] = 45.00
+    row_b[11] = 45.00
+    row_b[14] = "2026-10-18"
+    row_b[21] = "ORD-998877"  # Order ID match!
+    row_b[22] = "https://www.vinted.com/items/776655"
+    ws_sold.append_row(row_b)
+
+    groups = engine.find_duplicate_groups(tab_name=TAB_SOLD_ITEMS)
+    assert len(groups) == 1
+    g = groups[0]
+    assert "Matching Order ID" in g["reason"]
+    assert len(g["rows"]) == 2
+    # Row 3 is more complete than Row 2, so it should be the recommended keep row
+    assert g["recommended_keep_row_idx"] == 3
+
+
+def test_find_duplicate_groups_by_price_date_placeholder(mock_sheets_env):
+    """Test duplicate detection matches placeholder rows with real items by price and date."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_sold.rows = [list(SOLD_ITEMS_HEADERS)]
+
+    # Row 2: Real title
+    row_a = [""] * len(SOLD_ITEMS_HEADERS)
+    row_a[0] = "SKU-201"
+    row_a[2] = "Carhartt Detroit Duck Canvas Jacket"
+    row_a[3] = "Carhartt"
+    row_a[4] = "Jackets & Coats"
+    row_a[11] = 75.00
+    row_a[14] = "2026-10-19"
+    ws_sold.append_row(row_a)
+
+    # Row 3: Placeholder title with same price & date
+    row_b = [""] * len(SOLD_ITEMS_HEADERS)
+    row_b[0] = "SKU-202"
+    row_b[2] = "Vinted Item"
+    row_b[11] = 75.00
+    row_b[14] = "2026-10-19"
+    ws_sold.append_row(row_b)
+
+    groups = engine.find_duplicate_groups(tab_name=TAB_SOLD_ITEMS)
+    assert len(groups) == 1
+    assert groups[0]["recommended_keep_row_idx"] == 2
+
+
+def test_resolve_duplicates_keep_row(mock_sheets_env):
+    """Test resolve_duplicates removes the discarded row when action is keep_row."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_sold.rows = [list(SOLD_ITEMS_HEADERS)]
+
+    row_a = [""] * len(SOLD_ITEMS_HEADERS)
+    row_a[0] = "SKU-1"
+    row_a[2] = "Nike Hoodie"
+    row_a[11] = 20.00
+    row_a[21] = "ORD-001"
+    ws_sold.append_row(row_a)
+
+    row_b = [""] * len(SOLD_ITEMS_HEADERS)
+    row_b[0] = "SKU-2"
+    row_b[2] = "Nike Hoodie"
+    row_b[11] = 20.00
+    row_b[21] = "ORD-001"
+    ws_sold.append_row(row_b)
+
+    assert len(ws_sold.rows) == 3  # headers + 2 rows
+
+    res = engine.resolve_duplicates(
+        tab_name=TAB_SOLD_ITEMS,
+        decisions=[{
+            "group_id": "group_1",
+            "action": "keep_row",
+            "keep_row_idx": 2,
+            "discard_row_indices": [3],
+        }],
+    )
+
+    assert res["deleted_count"] == 1
+    assert len(ws_sold.rows) == 2
+    assert ws_sold.rows[1][0] == "SKU-1"
+
+
+def test_resolve_duplicates_merge_into(mock_sheets_env):
+    """Test resolve_duplicates enriches the kept row with missing fields before deleting the duplicate."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_sold.rows = [list(SOLD_ITEMS_HEADERS)]
+
+    # Row 2: Has Title and Price, but missing Brand and Category
+    row_a = [""] * len(SOLD_ITEMS_HEADERS)
+    row_a[0] = "SKU-10"
+    row_a[1] = "LOT-001"
+    row_a[2] = "Adidas Samba OG"
+    row_a[3] = ""  # Missing brand
+    row_a[4] = ""  # Missing category
+    row_a[11] = 50.00
+    row_a[14] = "2026-10-15"
+    row_a[21] = "ORD-SAMBA"
+    ws_sold.append_row(row_a)
+
+    # Row 3: Incomplete title, but has Brand and Category
+    row_b = [""] * len(SOLD_ITEMS_HEADERS)
+    row_b[0] = "SKU-11"
+    row_b[1] = ""
+    row_b[2] = "Vinted Item"
+    row_b[3] = "Adidas"
+    row_b[4] = "Shoes"
+    row_b[11] = 50.00
+    row_b[14] = "2026-10-15"
+    row_b[21] = "ORD-SAMBA"
+    ws_sold.append_row(row_b)
+
+    res = engine.resolve_duplicates(
+        tab_name=TAB_SOLD_ITEMS,
+        decisions=[{
+            "group_id": "group_1",
+            "action": "merge_into",
+            "keep_row_idx": 2,
+            "discard_row_indices": [3],
+        }],
+    )
+
+    assert res["deleted_count"] == 1
+    assert res["merged_count"] >= 1
+    assert len(ws_sold.rows) == 2
+    # Row 2 kept, and its brand and category were enriched!
+    kept = ws_sold.rows[1]
+    assert kept[2] == "Adidas Samba OG"
+    assert kept[3] == "Adidas"
+    assert kept[4] == "Shoes"
+
+
+def test_resolve_duplicates_keep_both(mock_sheets_env):
+    """Test resolve_duplicates preserves all rows when action is keep_both."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_sold.rows = [list(SOLD_ITEMS_HEADERS)]
+
+    row_a = [""] * len(SOLD_ITEMS_HEADERS)
+    row_a[0] = "SKU-1"
+    row_a[2] = "Vintage Tee"
+    row_a[11] = 15.00
+    ws_sold.append_row(row_a)
+
+    row_b = [""] * len(SOLD_ITEMS_HEADERS)
+    row_b[0] = "SKU-2"
+    row_b[2] = "Vintage Tee"
+    row_b[11] = 15.00
+    ws_sold.append_row(row_b)
+
+    assert len(ws_sold.rows) == 3
+
+    res = engine.resolve_duplicates(
+        tab_name=TAB_SOLD_ITEMS,
+        decisions=[{
+            "group_id": "group_1",
+            "action": "keep_both",
+            "keep_row_idx": None,
+            "discard_row_indices": [],
+        }],
+    )
+
+    assert res["deleted_count"] == 0
+    assert res["kept_both_count"] == 1
+    assert len(ws_sold.rows) == 3  # Both rows still intact!
+
+
+
 
 
 

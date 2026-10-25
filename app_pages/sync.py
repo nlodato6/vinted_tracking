@@ -40,7 +40,11 @@ def get_sheets_sync_engine(client: GoogleSheetsClient) -> SheetsSyncEngine:
     from src.sheets.sync import SheetsSyncEngine as EngineClass
 
     # Check if the class definition currently in sys.modules is stale
-    if not hasattr(EngineClass, "reconcile_missing_sold_metadata") or not hasattr(EngineClass, "clean_blank_rows"):
+    if (
+        not hasattr(EngineClass, "reconcile_missing_sold_metadata")
+        or not hasattr(EngineClass, "clean_blank_rows")
+        or not hasattr(EngineClass, "find_duplicate_groups")
+    ):
         try:
             importlib.reload(src.sheets.sync)
             importlib.reload(src.sheets)
@@ -405,7 +409,7 @@ def render_sync_page():
 
     # Quick Maintenance Tools
     with st.expander("🛠️ Spreadsheet Tools", expanded=False):
-        c_tool1, c_tool2, c_tool3 = st.columns(3)
+        c_tool1, c_tool2, c_tool3, c_tool4 = st.columns(4)
         with c_tool1:
             if st.button("🧹 Clean Blank Rows", type="secondary", width="stretch", icon=":material/cleaning_services:", key="clean_blank_rows_btn"):
                 with st.spinner("Scanning and purging blank rows from Google Sheets..."):
@@ -470,6 +474,11 @@ def render_sync_page():
             else:
                 st.caption("💡 Enter Gmail in **Direct Email Sync** tab to re-scan `Vinted-Processed` emails.")
         with c_tool3:
+            if st.button("🔍 Check Duplicates", type="secondary", width="stretch", icon=":material/difference:", key="quick_check_dups_btn"):
+                st.session_state.duplicate_scan_trigger = True
+                st.rerun()
+            st.caption("Scan sheets for duplicate items & placeholder rows.")
+        with c_tool4:
             if st.button("🔄 Force Refresh Data", type="secondary", width="stretch", icon=":material/refresh:", key="force_refresh_data_btn"):
                 st.cache_data.clear()
                 st.success("✔ Cache cleared! Reloading fresh data...")
@@ -477,11 +486,12 @@ def render_sync_page():
                 st.rerun()
 
     # -------------------------------------------------------------------------
-    # Main Tabs: HTML Import & Email Sync
+    # Main Tabs: HTML Import, Email Sync, Duplicate Checker, Supplies
     # -------------------------------------------------------------------------
-    tab_html, tab_email, tab_supplies = st.tabs([
+    tab_html, tab_email, tab_dups, tab_supplies = st.tabs([
         "📦 HTML Batch Import & Reconciliation",
         "📬 Direct Email Sync",
+        "🔍 Duplicate Checker & Resolver",
         "🏷️ Shipping Supplies",
     ])
 
@@ -1088,7 +1098,260 @@ def render_sync_page():
                     st.rerun()
 
     # ---------------------------------------------------------
-    # TAB 3: SHIPPING SUPPLIES
+    # TAB 3: DUPLICATE CHECKER & RESOLVER
+    # ---------------------------------------------------------
+    with tab_dups:
+        st.markdown("### 🔍 Duplicate Checker & Resolver")
+        st.caption(
+            "Scan your Google Sheet (`Sold_Items` or `Item_Listings`) for duplicate records caused by multiple imports, "
+            "email notifications, or placeholder rows. Compare matching items side-by-side and choose whether to keep one, "
+            "merge missing fields, or keep both."
+        )
+
+        dup_engine = get_sheets_sync_engine(client)
+
+        col_cfg1, col_cfg2 = st.columns([2, 1], vertical_alignment="bottom")
+        with col_cfg1:
+            sheet_options = {
+                "Sold Items (Sold_Items)": "Sold_Items",
+                "Active Listings (Item_Listings)": "Item_Listings",
+            }
+            selected_sheet_label = st.segmented_control(
+                "Select sheet to inspect:",
+                options=list(sheet_options.keys()),
+                default="Sold Items (Sold_Items)",
+                key="dup_target_sheet_choice",
+            ) or "Sold Items (Sold_Items)"
+            target_tab_name = sheet_options[selected_sheet_label]
+
+        with col_cfg2:
+            auto_scan = st.session_state.pop("duplicate_scan_trigger", False)
+            btn_scan = st.button(
+                "🔎 Scan for Duplicates",
+                type="primary",
+                width="stretch",
+                icon=":material/search:",
+                key="btn_run_duplicate_scan",
+            )
+
+        if btn_scan or auto_scan:
+            with st.spinner(f"Analyzing {selected_sheet_label} for duplicate entries, matching Order IDs, and placeholder rows..."):
+                try:
+                    dup_groups = dup_engine.find_duplicate_groups(tab_name=target_tab_name)
+                    st.session_state.duplicate_scan_results = {
+                        "tab_name": target_tab_name,
+                        "sheet_label": selected_sheet_label,
+                        "groups": dup_groups,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                    # Initialize default decisions for each group
+                    for g in dup_groups:
+                        rec_idx = g.get("recommended_keep_row_idx")
+                        g_id = g["group_id"]
+                        st.session_state[f"dup_decision_{g_id}"] = f"merge_into:{rec_idx}"
+                except Exception as e:
+                    log_error(u_email, "sync.py:find_duplicate_groups", e)
+                    st.error(f"Error scanning for duplicates: {e}")
+
+        scan_data = st.session_state.get("duplicate_scan_results")
+
+        if scan_data and scan_data.get("tab_name") == target_tab_name:
+            groups = scan_data.get("groups", [])
+            if not groups:
+                st.success(
+                    f"🎉 **No duplicates found in `{target_tab_name}`!** Every row has a unique Order ID, URL, or item details.",
+                    icon=":material/check_circle:",
+                )
+            else:
+                total_dup_rows = sum(len(g.get("rows", [])) for g in groups)
+                st.warning(
+                    f"⚠️ Found **{len(groups)} duplicate group(s)** involving **{total_dup_rows} total rows** in `{target_tab_name}`. "
+                    f"Review the side-by-side details below and select your decision for each group.",
+                    icon=":material/warning:",
+                )
+
+                # Bulk selection helpers
+                st.markdown("##### Quick Actions for All Groups")
+                b_c1, b_c2, b_c3 = st.columns(3)
+                with b_c1:
+                    if st.button("⭐ Merge into Best for All", width="stretch", icon=":material/auto_fix_high:", key="btn_bulk_merge"):
+                        for g in groups:
+                            rec_idx = g.get("recommended_keep_row_idx")
+                            st.session_state[f"dup_decision_{g['group_id']}"] = f"merge_into:{rec_idx}"
+                        st.rerun()
+                with b_c2:
+                    if st.button("🗑️ Keep Best Row Only for All", width="stretch", icon=":material/delete_forever:", key="btn_bulk_keep_best"):
+                        for g in groups:
+                            rec_idx = g.get("recommended_keep_row_idx")
+                            st.session_state[f"dup_decision_{g['group_id']}"] = f"keep_row:{rec_idx}"
+                        st.rerun()
+                with b_c3:
+                    if st.button("👥 Keep Both for All", width="stretch", icon=":material/people:", key="btn_bulk_keep_both"):
+                        for g in groups:
+                            st.session_state[f"dup_decision_{g['group_id']}"] = "keep_both"
+                        st.rerun()
+
+                st.divider()
+
+                # Render each duplicate group
+                for g_idx, g in enumerate(groups):
+                    g_id = g["group_id"]
+                    rec_idx = g.get("recommended_keep_row_idx")
+                    rows = g.get("rows", [])
+
+                    with st.container(border=True):
+                        # Group Header
+                        g_h1, g_h2 = st.columns([3, 1])
+                        with g_h1:
+                            st.markdown(f"#### 🔍 Group #{g_idx + 1}")
+                            st.caption(f"**Detection Reason:** {g.get('reason', 'Duplicate item match')}")
+                        with g_h2:
+                            st.metric("Duplicate Rows", len(rows), border=False)
+
+                        # Side-by-side comparison of items
+                        row_cols = st.columns(len(rows))
+                        for r_col_idx, (r_col, row_info) in enumerate(zip(row_cols, rows)):
+                            is_rec = (row_info["row_idx"] == rec_idx)
+                            with r_col:
+                                card_border = "2px solid #22c55e" if is_rec else "1px solid #334155"
+                                bg_color = "rgba(34, 197, 94, 0.08)" if is_rec else "rgba(30, 41, 59, 0.5)"
+                                badge_html = (
+                                    '<span style="background-color:#166534;color:#bbf7d0;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;">⭐ RECOMMENDED (MOST COMPLETE)</span>'
+                                    if is_rec else
+                                    '<span style="background-color:#334155;color:#94a3b8;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">DUPLICATE CANDIDATE</span>'
+                                )
+
+                                price_display = f"${row_info['price']:.2f}" if row_info['price'] > 0 else "—"
+                                order_display = row_info['order_id'] or "—"
+                                sku_display = row_info['sku'] or "—"
+                                lot_display = row_info['lot_id'] or "—"
+                                brand_display = row_info['brand'] or "—"
+                                cat_display = row_info['category'] or "—"
+                                date_display = row_info['date'] or "—"
+                                title_display = row_info['title'] or "*(No Title)*"
+
+                                st.markdown(
+                                    f"""
+                                    <div style="border:{card_border};background:{bg_color};border-radius:8px;padding:12px;margin-bottom:8px;">
+                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                                            <span style="font-weight:700;font-size:14px;color:#f8fafc;">Row #{row_info['row_idx']}</span>
+                                            {badge_html}
+                                        </div>
+                                        <div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;">{html.escape(title_display)}</div>
+                                        <div style="font-size:12px;color:#94a3b8;line-height:1.5;">
+                                            <div><strong>Price:</strong> <span style="color:#38bdf8;">{price_display}</span> &nbsp;|&nbsp; <strong>Date:</strong> {date_display}</div>
+                                            <div><strong>Brand:</strong> {html.escape(brand_display)} &nbsp;|&nbsp; <strong>Cat:</strong> {html.escape(cat_display)}</div>
+                                            <div><strong>Lot:</strong> {html.escape(lot_display)} &nbsp;|&nbsp; <strong>SKU:</strong> {html.escape(sku_display)}</div>
+                                            <div><strong>Order ID:</strong> <code>{html.escape(order_display)}</code></div>
+                                            <div><strong>Completeness Score:</strong> {row_info['completeness_score']}/8</div>
+                                        </div>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
+
+                        # Decision Radio / Options for this group
+                        choice_options = {}
+                        # Merge option
+                        choice_options[f"merge_into:{rec_idx}"] = f"🔄 Merge missing fields into Row #{rec_idx} & delete other row(s) (Recommended)"
+                        # Keep Row X options
+                        for row_info in rows:
+                            r_i = row_info["row_idx"]
+                            other_indices = [r["row_idx"] for r in rows if r["row_idx"] != r_i]
+                            others_str = ", ".join(f"#{x}" for x in other_indices)
+                            choice_options[f"keep_row:{r_i}"] = f"🗑️ Keep Row #{r_i} only (delete {others_str})"
+                        # Keep Both option
+                        choice_options["keep_both"] = "👥 Keep Both rows (do not delete or change anything)"
+
+                        current_val = st.session_state.get(f"dup_decision_{g_id}", f"merge_into:{rec_idx}")
+                        if current_val not in choice_options:
+                            current_val = f"merge_into:{rec_idx}"
+
+                        chosen_key = st.radio(
+                            f"Decision for Group #{g_idx + 1}:",
+                            options=list(choice_options.keys()),
+                            format_func=lambda k: choice_options[k],
+                            index=list(choice_options.keys()).index(current_val),
+                            key=f"dup_decision_{g_id}",
+                        )
+
+                st.divider()
+
+                # Action buttons
+                act_c1, act_c2 = st.columns([2, 1])
+                with act_c1:
+                    if st.button(
+                        f"🚀 Apply Decisions & Resolve Duplicates in {target_tab_name}",
+                        type="primary",
+                        width="stretch",
+                        icon=":material/check:",
+                        key="btn_apply_duplicate_resolutions",
+                    ):
+                        with st.spinner(f"Applying resolutions, merging records, and cleaning {target_tab_name}..."):
+                            decisions_payload = []
+                            for g in groups:
+                                g_id = g["group_id"]
+                                dec_val = st.session_state.get(f"dup_decision_{g_id}", f"merge_into:{g.get('recommended_keep_row_idx')}")
+                                all_indices = [r["row_idx"] for r in g.get("rows", [])]
+
+                                if dec_val == "keep_both":
+                                    decisions_payload.append({
+                                        "group_id": g_id,
+                                        "action": "keep_both",
+                                        "keep_row_idx": None,
+                                        "discard_row_indices": [],
+                                    })
+                                elif dec_val.startswith("merge_into:"):
+                                    k_idx = int(dec_val.split(":")[1])
+                                    d_indices = [idx for idx in all_indices if idx != k_idx]
+                                    decisions_payload.append({
+                                        "group_id": g_id,
+                                        "action": "merge_into",
+                                        "keep_row_idx": k_idx,
+                                        "discard_row_indices": d_indices,
+                                    })
+                                elif dec_val.startswith("keep_row:"):
+                                    k_idx = int(dec_val.split(":")[1])
+                                    d_indices = [idx for idx in all_indices if idx != k_idx]
+                                    decisions_payload.append({
+                                        "group_id": g_id,
+                                        "action": "keep_row",
+                                        "keep_row_idx": k_idx,
+                                        "discard_row_indices": d_indices,
+                                    })
+
+                            try:
+                                res = dup_engine.resolve_duplicates(
+                                    tab_name=target_tab_name,
+                                    decisions=decisions_payload,
+                                )
+                                log_event(
+                                    u_email,
+                                    "duplicate_resolution",
+                                    f"Resolved {len(decisions_payload)} groups: deleted {res['deleted_count']} rows, merged {res['merged_count']} field sets, kept both for {res['kept_both_count']}",
+                                    spreadsheet_id=st.session_state.get("spreadsheet_id"),
+                                )
+                                st.cache_data.clear()
+                                st.session_state.duplicate_scan_results = None
+                                st.success(
+                                    f"✔ Successfully resolved duplicates! Deleted {res['deleted_count']} redundant row(s), "
+                                    f"merged missing details for {res['merged_count']} item(s), and preserved {res['kept_both_count']} group(s) intact.",
+                                    icon=":material/task_alt:",
+                                )
+                                st.balloons()
+                                time.sleep(1.5)
+                                st.rerun()
+                            except Exception as e:
+                                log_error(u_email, "sync.py:resolve_duplicates", e)
+                                st.error(f"Error applying duplicate resolutions: {e}")
+
+                with act_c2:
+                    if st.button("❌ Clear Results / Cancel", type="secondary", width="stretch", key="btn_cancel_dup_scan"):
+                        st.session_state.duplicate_scan_results = None
+                        st.rerun()
+
+    # ---------------------------------------------------------
+    # TAB 4: SHIPPING SUPPLIES
     # ---------------------------------------------------------
     with tab_supplies:
         st.markdown("### 🏷️ Shipping Supplies & Packaging Costs")

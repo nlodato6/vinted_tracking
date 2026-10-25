@@ -58,11 +58,11 @@ def is_placeholder_title(title: Any) -> bool:
     if title is None:
         return True
     t = str(title).strip().lower()
-    if not t or t in ("untitled", "none", "item", "nan", "null", "blank", "unbranded", "unknown"):
+    if not t or t in ("untitled", "none", "item", "vinted item", "nan", "null", "blank", "unbranded", "unknown", "order sold", "sold"):
         return True
-    if re.match(r"^(order|item|transaction|sale)\s*(#|id)?\s*[:\-]?\s*[\w\-]+$", t):
+    if re.match(r"^(order|item|transaction|sale)\b", t):
         return True
-    if re.match(r"^vinted\s+item\s*(#|id)?\s*[:\-]?\s*[\w\-]+$", t):
+    if re.match(r"^vinted\s+item\b", t):
         return True
     if t.startswith("ord-") and any(c.isdigit() for c in t):
         return True
@@ -2235,6 +2235,311 @@ class SheetsSyncEngine:
             "categories_fixed": categories_fixed,
             "emails_scanned": len(emails),
             "emails_matched": emails_matched,
+        }
+
+    def find_duplicate_groups(self, tab_name: str = TAB_SOLD_ITEMS) -> List[Dict[str, Any]]:
+        """
+        Scans worksheet rows to detect duplicate item groups based on:
+        - Matching Order_ID
+        - Matching Transaction/Order UUID
+        - Matching Vinted Item ID
+        - Matching Vinted URL
+        - Matching descriptive Title + Price
+        - Matching Sold_Price + Sale_Date with at least one placeholder title
+        Returns a list of duplicate groups with comparison metrics and recommended keep row.
+        """
+        ws = self.get_worksheet(tab_name)
+        rows = ws.get_all_values()
+        if len(rows) <= 1:
+            return []
+
+        headers = rows[0]
+        sku_idx = headers.index("Item_SKU") if "Item_SKU" in headers else 0
+        lot_idx = headers.index("Lot_ID") if "Lot_ID" in headers else 1
+        title_idx = headers.index("Title") if "Title" in headers else 2
+        brand_idx = headers.index("Brand") if "Brand" in headers else 3
+        cat_idx = headers.index("Category") if "Category" in headers else 4
+        price_idx = headers.index("Sold_Price") if "Sold_Price" in headers else (headers.index("Current_Price") if "Current_Price" in headers else -1)
+        date_idx = headers.index("Sale_Date") if "Sale_Date" in headers else (headers.index("Date_Listed") if "Date_Listed" in headers else -1)
+        order_idx = headers.index("Order_ID") if "Order_ID" in headers else -1
+        vid_idx = headers.index("Vinted_ID") if "Vinted_ID" in headers else -1
+        url_idx = headers.index("Vinted_URL") if "Vinted_URL" in headers else -1
+
+        items: List[Dict[str, Any]] = []
+        for r_i, r in enumerate(rows[1:], start=2):
+            sku_val = r[sku_idx].strip() if len(r) > sku_idx else ""
+            title_val = r[title_idx].strip() if len(r) > title_idx else ""
+            lot_val = r[lot_idx].strip() if len(r) > lot_idx else ""
+            brand_val = r[brand_idx].strip() if len(r) > brand_idx else ""
+            cat_val = r[cat_idx].strip() if len(r) > cat_idx else ""
+            price_val = parse_price(r[price_idx]) if (price_idx != -1 and len(r) > price_idx) else 0.0
+            date_val = normalize_date_str(r[date_idx]) if (date_idx != -1 and len(r) > date_idx) else ""
+            ord_val = r[order_idx].strip() if (order_idx != -1 and len(r) > order_idx) else ""
+            vid_val = r[vid_idx].strip() if (vid_idx != -1 and len(r) > vid_idx) else ""
+            url_val = r[url_idx].strip() if (url_idx != -1 and len(r) > url_idx) else ""
+
+            # Skip empty rows
+            if not sku_val and not title_val and not ord_val and not url_val and price_val == 0.0:
+                continue
+
+            # Completeness score (higher = more populated & higher fidelity)
+            score = 0
+            if not is_placeholder_title(title_val):
+                score += 4
+            elif title_val:
+                score += 1
+            if not is_placeholder_brand(brand_val):
+                score += 2
+            if not is_placeholder_category(cat_val):
+                score += 2
+            if not is_placeholder_lot(lot_val):
+                score += 2
+            if not is_placeholder_order_id(ord_val):
+                score += 3
+            if url_val and url_val.startswith("http"):
+                score += 2
+            if price_val > 0:
+                score += 1
+            if date_val:
+                score += 1
+
+            items.append({
+                "row_idx": r_i,
+                "sku": sku_val,
+                "lot": lot_val,
+                "title": title_val,
+                "brand": brand_val,
+                "category": cat_val,
+                "price": price_val,
+                "date": date_val,
+                "order_id": ord_val,
+                "vinted_id": vid_val,
+                "url": url_val,
+                "completeness_score": score,
+                "raw_row": list(r),
+            })
+
+        graph: Dict[int, set] = {}
+        edge_reasons: Dict[tuple, str] = {}
+        item_by_row: Dict[int, Dict[str, Any]] = {it["row_idx"]: it for it in items}
+
+        for i in range(len(items)):
+            for j in range(i + 1, len(items)):
+                a = items[i]
+                b = items[j]
+                r_a = a["row_idx"]
+                r_b = b["row_idx"]
+
+                is_dup = False
+                reason = ""
+
+                # Check 1: Matching non-empty Order_ID
+                if a["order_id"] and b["order_id"] and a["order_id"].lower() not in ("none", "nan", "null"):
+                    if a["order_id"].lower() == b["order_id"].lower():
+                        is_dup = True
+                        reason = f"Matching Order ID: {a['order_id']}"
+
+                # Check 2: Matching UUID
+                if not is_dup:
+                    uuid_a = extract_uuid(a["order_id"]) or extract_uuid(a["url"]) or extract_uuid(a["title"])
+                    uuid_b = extract_uuid(b["order_id"]) or extract_uuid(b["url"]) or extract_uuid(b["title"])
+                    if uuid_a and uuid_b and uuid_a == uuid_b:
+                        is_dup = True
+                        reason = f"Matching Transaction UUID: {uuid_a}"
+
+                # Check 3: Matching numeric Vinted ID
+                if not is_dup:
+                    vid_a = a["vinted_id"] or extract_vinted_id_from_text(a["url"]) or extract_vinted_id_from_text(a["title"])
+                    vid_b = b["vinted_id"] or extract_vinted_id_from_text(b["url"]) or extract_vinted_id_from_text(b["title"])
+                    if vid_a and vid_b and vid_a == vid_b:
+                        is_dup = True
+                        reason = f"Matching Vinted Item ID: {vid_a}"
+
+                # Check 4: Exact Vinted URL
+                if not is_dup:
+                    u_a = a["url"].strip().lower()
+                    u_b = b["url"].strip().lower()
+                    if u_a and u_b and (u_a == u_b or u_a.split("?")[0] == u_b.split("?")[0]):
+                        is_dup = True
+                        reason = "Identical Vinted URL"
+
+                # Check 5: Real Title match with same price
+                if not is_dup:
+                    t_a = a["title"].strip().lower()
+                    t_b = b["title"].strip().lower()
+                    if t_a and t_b and not is_placeholder_title(t_a) and not is_placeholder_title(t_b):
+                        if t_a == t_b:
+                            if a["price"] == 0 or b["price"] == 0 or abs(a["price"] - b["price"]) < 0.01:
+                                is_dup = True
+                                reason = f"Identical Title: '{a['title']}'"
+                        elif len(t_a) >= 12 and (t_a in t_b or t_b in t_a):
+                            if a["price"] > 0 and abs(a["price"] - b["price"]) < 0.01:
+                                is_dup = True
+                                reason = f"Matching Title: '{a['title']}'"
+
+                # Check 6: Matching Sold Price & Date with at least one placeholder title
+                if not is_dup:
+                    if is_placeholder_title(a["title"]) or is_placeholder_title(b["title"]):
+                        if a["price"] > 0 and b["price"] > 0 and abs(a["price"] - b["price"]) < 0.01:
+                            d_a = a["date"]
+                            d_b = b["date"]
+                            if d_a and d_b:
+                                try:
+                                    dt_a = datetime.strptime(d_a, "%Y-%m-%d")
+                                    dt_b = datetime.strptime(d_b, "%Y-%m-%d")
+                                    if abs((dt_a - dt_b).days) <= 2:
+                                        is_dup = True
+                                        reason = f"Same Price (${a['price']:.2f}) & Date ({d_a}) with placeholder title"
+                                except Exception:
+                                    if d_a == d_b:
+                                        is_dup = True
+                                        reason = f"Same Price (${a['price']:.2f}) & Date ({d_a}) with placeholder title"
+                            elif not d_a or not d_b:
+                                is_dup = True
+                                reason = f"Same Price (${a['price']:.2f}) with placeholder title"
+
+                if is_dup:
+                    graph.setdefault(r_a, set()).add(r_b)
+                    graph.setdefault(r_b, set()).add(r_a)
+                    edge_reasons[(min(r_a, r_b), max(r_a, r_b))] = reason
+
+        # Find connected components
+        visited = set()
+        groups: List[Dict[str, Any]] = []
+        group_counter = 1
+
+        for r_start in sorted(graph.keys()):
+            if r_start in visited:
+                continue
+
+            comp = []
+            queue = [r_start]
+            visited.add(r_start)
+
+            while queue:
+                curr = queue.pop(0)
+                comp.append(curr)
+                for neighbor in graph.get(curr, []):
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append(neighbor)
+
+            comp.sort()
+            reasons = set()
+            for x_i in range(len(comp)):
+                for y_i in range(x_i + 1, len(comp)):
+                    key = (min(comp[x_i], comp[y_i]), max(comp[x_i], comp[y_i]))
+                    if key in edge_reasons:
+                        reasons.add(edge_reasons[key])
+
+            comp_items = [item_by_row[r] for r in comp]
+            best_row = max(comp_items, key=lambda it: (it["completeness_score"], -it["row_idx"]))
+
+            groups.append({
+                "group_id": f"group_{group_counter}",
+                "reason": " • ".join(sorted(reasons)) if reasons else "Duplicate item detected",
+                "rows": comp_items,
+                "recommended_keep_row_idx": best_row["row_idx"],
+            })
+            group_counter += 1
+
+        return groups
+
+    def resolve_duplicates(
+        self,
+        tab_name: str,
+        decisions: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Executes user decisions on duplicate groups:
+        - "keep_row": retains keep_row_idx, deletes discard_row_indices
+        - "merge_into": enriches keep_row_idx with fields from discard rows, then deletes discard rows
+        - "keep_both": keeps all rows in the group without deleting anything
+        """
+        ws = self.get_worksheet(tab_name)
+        all_rows = ws.get_all_values()
+        headers = all_rows[0] if all_rows else (SOLD_ITEMS_HEADERS if tab_name == TAB_SOLD_ITEMS else LISTINGS_HEADERS)
+
+        deleted_rows = set()
+        merged_count = 0
+        kept_both_count = 0
+        cell_updates = []
+
+        for dec in decisions:
+            action = dec.get("action", "keep_row")
+            if action == "keep_both":
+                kept_both_count += 1
+                continue
+
+            keep_idx = dec.get("keep_row_idx")
+            discard_indices = dec.get("discard_row_indices", [])
+
+            if not keep_idx or not discard_indices:
+                continue
+
+            if action == "merge_into" and keep_idx <= len(all_rows):
+                keep_row_data = all_rows[keep_idx - 1]
+                for d_idx in discard_indices:
+                    if d_idx <= len(all_rows):
+                        d_row_data = all_rows[d_idx - 1]
+                        inc = {}
+                        title_i = headers.index("Title") if "Title" in headers else 2
+                        brand_i = headers.index("Brand") if "Brand" in headers else 3
+                        cat_i = headers.index("Category") if "Category" in headers else 4
+                        lot_i = headers.index("Lot_ID") if "Lot_ID" in headers else 1
+                        ord_i = headers.index("Order_ID") if "Order_ID" in headers else -1
+                        url_i = headers.index("Vinted_URL") if "Vinted_URL" in headers else -1
+                        sp_i = headers.index("Sold_Price") if "Sold_Price" in headers else -1
+                        date_i = headers.index("Sale_Date") if "Sale_Date" in headers else -1
+
+                        if len(d_row_data) > title_i and d_row_data[title_i].strip():
+                            inc["item_title"] = d_row_data[title_i].strip()
+                        if len(d_row_data) > brand_i and d_row_data[brand_i].strip():
+                            inc["brand"] = d_row_data[brand_i].strip()
+                        if len(d_row_data) > cat_i and d_row_data[cat_i].strip():
+                            inc["category"] = d_row_data[cat_i].strip()
+                        if len(d_row_data) > lot_i and d_row_data[lot_i].strip():
+                            inc["lot_id"] = d_row_data[lot_i].strip()
+                        if ord_i != -1 and len(d_row_data) > ord_i and d_row_data[ord_i].strip():
+                            inc["order_id"] = d_row_data[ord_i].strip()
+                        if url_i != -1 and len(d_row_data) > url_i and d_row_data[url_i].strip():
+                            inc["vinted_url"] = d_row_data[url_i].strip()
+                        if sp_i != -1 and len(d_row_data) > sp_i and parse_price(d_row_data[sp_i]) > 0:
+                            inc["sold_price"] = parse_price(d_row_data[sp_i])
+                        if date_i != -1 and len(d_row_data) > date_i and d_row_data[date_i].strip():
+                            inc["sale_date"] = d_row_data[date_i].strip()
+
+                        enrich_u = self.enrich_sold_row(keep_row_data, headers, keep_idx, inc)
+                        if enrich_u:
+                            cell_updates.extend(enrich_u)
+                            merged_count += 1
+
+            for d_idx in discard_indices:
+                deleted_rows.add(d_idx)
+
+        # Apply cell updates first if any
+        if cell_updates:
+            ws.batch_update(cell_updates, value_input_option="USER_ENTERED")
+
+        # Delete discarded rows in descending order
+        deleted_count = 0
+        for r_del in sorted(deleted_rows, reverse=True):
+            try:
+                ws.delete_rows(r_del)
+                deleted_count += 1
+            except Exception as e:
+                print(f"Error deleting row {r_del}: {e}")
+
+        if tab_name == TAB_SOLD_ITEMS:
+            try:
+                self.sync_lots()
+            except Exception:
+                pass
+
+        return {
+            "deleted_count": deleted_count,
+            "merged_count": merged_count,
+            "kept_both_count": kept_both_count,
         }
 
 
