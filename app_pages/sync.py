@@ -413,7 +413,7 @@ def render_sync_page():
 
     # Quick Maintenance Tools
     with st.expander("Spreadsheet Tools", icon=":material/build:", expanded=False):
-        c_tool1, c_tool2, c_tool3, c_tool4 = st.columns(4)
+        c_tool1, c_tool2, c_tool3, c_tool4, c_tool5 = st.columns(5)
         with c_tool1:
             if st.button("Clean Blank Rows", type="secondary", width="stretch", icon=":material/cleaning_services:", key="clean_blank_rows_btn"):
                 with st.spinner("Scanning and purging blank rows from Google Sheets..."):
@@ -484,6 +484,19 @@ def render_sync_page():
                 st.rerun()
             st.caption("Scan sheets for duplicate items & placeholder rows.")
         with c_tool4:
+            if st.button("Provision Missing Tabs", type="secondary", width="stretch", icon=":material/tab:", key="ensure_tabs_btn"):
+                with st.spinner("Checking and provisioning all template worksheets..."):
+                    engine = get_sheets_sync_engine(client)
+                    created = engine.ensure_required_tabs()
+                    st.cache_data.clear()
+                    if created:
+                        st.success(f"Provisioned {len(created)} missing tab(s): {', '.join(created)} with schema headers!", icon=":material/check_circle:")
+                    else:
+                        st.info("All required tabs (including Cancelled_Orders & Hidden_Items) already exist!", icon=":material/check_circle:")
+                    time.sleep(1.2)
+                    st.rerun()
+            st.caption("Auto-create Cancelled_Orders, Hidden_Items, etc.")
+        with c_tool5:
             if st.button("Force Refresh Data", type="secondary", width="stretch", icon=":material/refresh:", key="force_refresh_data_btn"):
                 st.cache_data.clear()
                 st.success("Cache cleared! Reloading fresh data...", icon=":material/check_circle:")
@@ -812,6 +825,9 @@ def render_sync_page():
                     if st.button("Commit & Synchronize to Google Sheets", icon=":material/cloud_upload:", type="primary", width="stretch"):
                         try:
                             with st.spinner("Synchronizing to Google Sheets..."):
+                                # Ensure all required worksheets (including Cancelled_Orders & Hidden_Items) exist
+                                engine.ensure_required_tabs()
+
                                 # 1. If new lot, create it in Inventory_Lots if not already created
                                 if is_new_lot and target_lot_id:
                                     engine.add_inventory_lot(

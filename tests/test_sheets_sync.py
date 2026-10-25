@@ -97,6 +97,12 @@ class MockWorksheet:
                         self.rows[curr_r].append("")
                     self.rows[curr_r][curr_c] = v
 
+    def format(self, *args, **kwargs):
+        pass
+
+    def batch_format(self, *args, **kwargs):
+        pass
+
 
 class MockSpreadsheet:
     def __init__(self, worksheets_dict):
@@ -106,6 +112,14 @@ class MockSpreadsheet:
         if title not in self.worksheets_dict:
             raise KeyError(f"Worksheet '{title}' not found")
         return self.worksheets_dict[title]
+
+    def add_worksheet(self, title, rows=100, cols=20):
+        new_ws = MockWorksheet(title, headers=[])
+        self.worksheets_dict[title] = new_ws
+        return new_ws
+
+    def worksheets(self):
+        return list(self.worksheets_dict.values())
 
 
 @pytest.fixture

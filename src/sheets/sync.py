@@ -1,5 +1,5 @@
-"""Synchronization logic for reconciling scraped Vinted data with Google Sheets."""
-
+import logging
+import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import gspread
@@ -16,10 +16,14 @@ from src.sheets.schemas import (
     HIDDEN_ITEMS_HEADERS,
     SOLD_ITEMS_HEADERS,
     CANCELLED_ORDERS_HEADERS,
+    LOTS_HEADERS,
+    SUPPLIES_HEADERS,
+    SALES_HEADERS,
 )
-import re
 from src.models import ItemListing, SalesOrder
 from src.html_parser import infer_brand, infer_clothing_category
+
+logger = logging.getLogger(__name__)
 
 
 def parse_price(price_val: Any) -> float:
@@ -515,11 +519,93 @@ class SheetsSyncEngine:
             logger.warning(f"Could not auto-ensure headers on worksheet: {e}")
 
     def get_worksheet(self, tab_name: str) -> Any:
-        """Caches worksheet objects to prevent redundant fetch_sheet_metadata network calls."""
+        """Caches worksheet objects to prevent redundant fetch_sheet_metadata network calls.
+        If the worksheet does not exist in the spreadsheet (e.g. an existing sheet created before
+        Cancelled_Orders or Hidden_Items tabs were introduced), it automatically creates the worksheet
+        with schema headers and formatting.
+        """
         if tab_name not in self._ws_cache:
             sh = self.client.get_spreadsheet()
-            self._ws_cache[tab_name] = sh.worksheet(tab_name)
+            try:
+                self._ws_cache[tab_name] = sh.worksheet(tab_name)
+            except Exception as e:
+                headers_map = {
+                    TAB_INVENTORY_LOTS: (LOTS_HEADERS, 200),
+                    TAB_ITEM_LISTINGS: (LISTINGS_HEADERS, 500),
+                    TAB_HIDDEN_ITEMS: (HIDDEN_ITEMS_HEADERS, 500),
+                    TAB_SOLD_ITEMS: (SOLD_ITEMS_HEADERS, 500),
+                    TAB_CANCELLED_ORDERS: (CANCELLED_ORDERS_HEADERS, 300),
+                    TAB_SHIPPING_SUPPLIES: (SUPPLIES_HEADERS, 200),
+                    TAB_SALES_LOG: (SALES_HEADERS, 500),
+                }
+                if tab_name in headers_map and hasattr(sh, "add_worksheet"):
+                    headers, num_rows = headers_map[tab_name]
+                    try:
+                        new_ws = sh.add_worksheet(title=tab_name, rows=num_rows, cols=max(len(headers), 15))
+                        new_ws.update(range_name="A1", values=[headers])
+                        try:
+                            from src.sheets.templates import format_header_row, safe_batch_format
+                            format_header_row(new_ws, len(headers))
+                            if tab_name == TAB_CANCELLED_ORDERS:
+                                safe_batch_format(new_ws, [
+                                    {"range": "F2:G300", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+                                    {"range": "H2:H300", "format": {"horizontalAlignment": "CENTER"}},
+                                    {"range": "I2:I300", "format": {"horizontalAlignment": "CENTER"}},
+                                    {"range": "L2:L300", "format": {"horizontalAlignment": "CENTER"}},
+                                ])
+                            elif tab_name == TAB_HIDDEN_ITEMS:
+                                safe_batch_format(new_ws, [
+                                    {"range": "F2:H500", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+                                    {"range": "I2:I500", "format": {"horizontalAlignment": "CENTER"}},
+                                    {"range": "J2:J500", "format": {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}}},
+                                    {"range": "L2:M500", "format": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+                                    {"range": "P2:P500", "format": {"horizontalAlignment": "CENTER"}},
+                                    {"range": "S2:S500", "format": {"horizontalAlignment": "CENTER"}},
+                                ])
+                        except Exception:
+                            pass
+                        self._ws_cache[tab_name] = new_ws
+                    except Exception as create_err:
+                        logger.error(f"Failed to auto-create missing worksheet '{tab_name}': {create_err}")
+                        raise e
+                else:
+                    raise e
         return self._ws_cache[tab_name]
+
+    def ensure_required_tabs(self) -> List[str]:
+        """
+        Verifies that all required worksheets exist in the Google Spreadsheet.
+        If any (such as Cancelled_Orders or Hidden_Items) are missing, creates them
+        immediately with schema headers and proper formatting.
+        Returns a list of tab names that were newly created.
+        """
+        sh = self.client.get_spreadsheet()
+        try:
+            if hasattr(sh, "worksheets"):
+                existing_tabs = {ws.title for ws in sh.worksheets()}
+            elif hasattr(sh, "worksheets_dict"):
+                existing_tabs = set(sh.worksheets_dict.keys())
+            else:
+                existing_tabs = set()
+        except Exception:
+            existing_tabs = set()
+
+        created = []
+        for tab_name in [
+            TAB_ITEM_LISTINGS,
+            TAB_SOLD_ITEMS,
+            TAB_INVENTORY_LOTS,
+            TAB_CANCELLED_ORDERS,
+            TAB_HIDDEN_ITEMS,
+            TAB_SHIPPING_SUPPLIES,
+        ]:
+            if tab_name not in existing_tabs:
+                try:
+                    self.get_worksheet(tab_name)
+                    created.append(tab_name)
+                except Exception as e:
+                    logger.warning(f"Could not provision tab {tab_name}: {e}")
+        return created
 
     def clear_worksheet_cache(self):
         self._ws_cache.clear()
