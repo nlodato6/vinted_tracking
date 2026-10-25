@@ -1407,22 +1407,15 @@ class SheetsSyncEngine:
                 t = item.title.strip().lower()
                 snapshot_by_title.setdefault(t, []).append(item)
 
-        known_sold_titles = {
-            "lacy hemmed spaghetti strap",
-            "casual tank top",
-            "usa hockey hat",
-            "collared shirt",
-            "flannel button down collar",
-            "rolling stones tee",
-            "super high rise baggy straight",
-            "lavender snakeskin heels",
-            "patent leather heels",
-            "tom’s suede wedge booties",
-            "tom's suede wedge booties",
-        }
+        known_sold_titles = set()
+        known_sold_vids = set()
         for sr in sold_rows[1:]:
             if len(sr) > 2 and sr[2].strip():
                 known_sold_titles.add(sr[2].strip().lower())
+            if len(sr) > 22 and sr[22].strip():
+                m_vid = re.search(r"/items/(\d+)", sr[22].strip())
+                if m_vid:
+                    known_sold_vids.add(m_vid.group(1))
 
         matched_snapshot_vids = set()
         matched_item_objects = set()
@@ -1436,6 +1429,12 @@ class SheetsSyncEngine:
             r_vid = r[id_idx].strip().replace(",", "") if len(r) > id_idx else ""
             r_title = r[title_idx].strip().lower() if len(r) > title_idx else ""
             r_status = r[status_idx].strip() if len(r) > status_idx else ""
+            r_url = r[url_idx].strip() if len(r) > url_idx else ""
+            r_vid_from_url = ""
+            if r_url:
+                m_url = re.search(r"/items/(\d+)", r_url)
+                if m_url:
+                    r_vid_from_url = m_url.group(1)
 
             matched_item = None
             if r_vid:
@@ -1478,10 +1477,24 @@ class SheetsSyncEngine:
                     or "bean’s clothes" in r_title
                     or "bean's clothes" in r_title
                 )
+                is_already_sold = (
+                    r_title in known_sold_titles
+                    or (r_vid and r_vid in known_sold_vids)
+                    or (r_vid_from_url and r_vid_from_url in known_sold_vids)
+                )
                 if is_swimsuit_or_hidden:
                     rows_to_hidden.append(r)
+                elif is_already_sold:
+                    # Already recorded in Sold_Items; drop from listings without duplicating into Sold_Items
+                    pass
                 else:
                     rows_to_sold.append(r)
+                    if r_title:
+                        known_sold_titles.add(r_title)
+                    if r_vid:
+                        known_sold_vids.add(r_vid)
+                    if r_vid_from_url:
+                        known_sold_vids.add(r_vid_from_url)
 
         date_to_lot_id = self.get_date_to_lot_map()
         max_sku_num = self.get_max_sku_num(cached_rows=listings_rows + sold_rows)
