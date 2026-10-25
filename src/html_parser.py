@@ -3,7 +3,7 @@
 import re
 from datetime import date, datetime
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple
 from bs4 import BeautifulSoup
 from src.models import ItemListing, SalesOrder
 
@@ -113,15 +113,27 @@ def detect_html_type(content: Union[str, bytes]) -> str:
     sold_count = len(re.findall(r"\b(?:Sold|Closed)\b", text, re.IGNORECASE))
     bump_count = len(re.findall(r"\bBump\b", text, re.IGNORECASE))
 
-    if "member profile _ Vinted_sold" in text or (sold_count > 10 and bump_count == 0):
+    if (
+        "member profile _ vinted_sold" in text.lower()
+        or "_sold" in text.lower()[:1000]
+        or bool(re.search(r"<title>[^<]*(?:sold|closed)[^<]*</title>", text, re.IGNORECASE))
+        or (sold_count > 10 and bump_count == 0)
+    ):
         return "sold_closet"
     return "active_closet"
 
 
-def parse_closet_html(html_content_or_path: Union[str, Path, bytes], default_lot: str = "") -> List[ItemListing]:
+def parse_closet_html(
+    html_content_or_path: Union[str, Path, bytes],
+    default_lot: str = "",
+    filter_sold_only: Optional[bool] = None,
+) -> List[ItemListing]:
     """
     Parses a saved Vinted closet/profile HTML file, string, or bytes.
     Extracts all listings with title, asking price, Vinted ID, favorites, views, and status.
+    Handles 'Listed', 'Sold', 'Hidden', and 'Reserved' status badges.
+    If filter_sold_only is True (or auto-detected from a sold_closet export), filters out
+    lingering active cards from SPA React background DOM.
     """
     if isinstance(html_content_or_path, bytes):
         html = html_content_or_path.decode("utf-8", errors="ignore")
@@ -130,6 +142,9 @@ def parse_closet_html(html_content_or_path: Union[str, Path, bytes], default_lot
             html = f.read()
     else:
         html = str(html_content_or_path)
+
+    detected_type = detect_html_type(html)
+    should_filter_sold = filter_sold_only if filter_sold_only is not None else (detected_type == "sold_closet")
 
     soup = BeautifulSoup(html, "html.parser")
     items: List[ItemListing] = []
@@ -188,9 +203,24 @@ def parse_closet_html(html_content_or_path: Union[str, Path, bytes], default_lot
         views_match = re.search(r"(\d+)\s*views?", text, re.IGNORECASE)
         views_count = int(views_match.group(1)) if views_match else 0
 
-        # Check status
-        is_sold = bool(re.search(r"\b(?:sold|closed)\b", text, re.IGNORECASE))
-        status = "Sold" if is_sold else "Listed"
+        # Check status (Sold, Hidden, Reserved, or Listed)
+        status_elem = card.select_one('[data-testid*="status"], [class*="status"], [class*="badge"]')
+        st_text = status_elem.get_text(" ", strip=True).lower() if status_elem else ""
+
+        if "sold" in st_text or "closed" in st_text or re.search(r"\b(?:sold|closed)\b", text, re.IGNORECASE):
+            status = "Sold"
+        elif "hidden" in st_text or re.search(r"\bhidden\b", text, re.IGNORECASE):
+            status = "Hidden"
+        elif "reserved" in st_text or "réservé" in st_text or re.search(r"\b(?:reserved|r[ée]serv[ée])\b", text, re.IGNORECASE):
+            status = "Reserved"
+        else:
+            status = "Listed"
+
+        # Prevent SPA DOM bleed from sold profile pages containing lingering active items
+        if should_filter_sold and status == "Listed":
+            continue
+
+        is_sold = status == "Sold"
 
         if not brand:
             brand = infer_brand(title, text)
@@ -219,10 +249,14 @@ def parse_closet_html(html_content_or_path: Union[str, Path, bytes], default_lot
     return items
 
 
-def parse_orders_html(html_content_or_path: Union[str, Path, bytes]) -> List[SalesOrder]:
+def parse_orders_html(
+    html_content_or_path: Union[str, Path, bytes],
+    filter_cancelled: bool = False,
+) -> List[SalesOrder]:
     """
     Parses a saved Vinted 'My orders' / sales history HTML page.
-    Extracts Order IDs, item titles, sold prices, and sale dates.
+    Extracts Order IDs, item titles, sold prices, sale dates, transaction statuses,
+    bundle quantities, and cancellation reasons.
     """
     if isinstance(html_content_or_path, bytes):
         html = html_content_or_path.decode("utf-8", errors="ignore")
@@ -256,13 +290,41 @@ def parse_orders_html(html_content_or_path: Union[str, Path, bytes]) -> List[Sal
         strings = list(elem.stripped_strings)
         title = ""
         sold_price = 0.0
+        vinted_status = "Completed"
+        status_details = ""
 
         for s in strings:
+            s_lower = s.lower()
+            if s_lower.startswith("transaction status:"):
+                raw_st = s.split(":", 1)[1].strip()
+                if raw_st.lower() in ("failed", "canceled", "cancelled"):
+                    vinted_status = "Cancelled"
+                elif raw_st.lower() in ("actions required", "in progress"):
+                    vinted_status = "In Progress"
+                elif raw_st.lower() == "completed":
+                    vinted_status = "Completed"
+                else:
+                    vinted_status = raw_st
+            elif any(k in s_lower for k in ("refund processed", "canceled", "cancelled", "shipping label", "buyer accepted", "order completed")):
+                status_details = s.strip()
+                if "refund" in s_lower or "canceled" in s_lower or "cancelled" in s_lower:
+                    vinted_status = "Cancelled"
+
             if re.search(r"^\$\s*\d+", s):
                 p_m = re.search(r"\$\s*(\d+(?:\.\d{2})?)", s)
                 if p_m:
                     sold_price = float(p_m.group(1))
-            elif not title and not s.lower().startswith("transaction") and not s.lower().startswith("order") and not "shipping label" in s.lower() and not "tracking" in s.lower() and not "delivered" in s.lower() and not "cancelled" in s.lower():
+            elif (
+                not title
+                and not s_lower.startswith("transaction")
+                and not s_lower.startswith("order")
+                and not "shipping label" in s_lower
+                and not "tracking" in s_lower
+                and not "delivered" in s_lower
+                and not "cancelled" in s_lower
+                and not "canceled" in s_lower
+                and not "refund" in s_lower
+            ):
                 title = s
 
         # Item link if present always provides the specific product title
@@ -279,6 +341,22 @@ def parse_orders_html(html_content_or_path: Union[str, Path, bytes]) -> List[Sal
         if not title and len(strings) > 1:
             title = strings[1]
 
+        # Extract bundle quantity
+        quantity = 1
+        m_bundle = re.search(r"bundle\s+(\d+)\s+items", title, re.IGNORECASE)
+        if m_bundle:
+            quantity = int(m_bundle.group(1))
+        else:
+            m_pack = re.search(r"\((\d+)\)", title)
+            if m_pack:
+                try:
+                    quantity = int(m_pack.group(1))
+                except ValueError:
+                    quantity = 1
+
+        if filter_cancelled and vinted_status == "Cancelled":
+            continue
+
         order = SalesOrder(
             order_id=order_id,
             item_title=title or f"Order {order_id}",
@@ -287,7 +365,22 @@ def parse_orders_html(html_content_or_path: Union[str, Path, bytes]) -> List[Sal
             platform="Vinted",
             brand=infer_brand(title, " ".join(strings)),
             category=infer_clothing_category(title),
+            vinted_status=vinted_status,
+            quantity=quantity,
+            cancellation_reason=status_details,
         )
         orders.append(order)
 
     return orders
+
+
+def parse_orders_and_cancellations(
+    html_content_or_path: Union[str, Path, bytes]
+) -> Tuple[List[SalesOrder], List[SalesOrder]]:
+    """
+    Parses orders HTML and splits orders into (completed_or_in_progress, cancelled).
+    """
+    all_orders = parse_orders_html(html_content_or_path, filter_cancelled=False)
+    valid_sales = [o for o in all_orders if o.vinted_status != "Cancelled"]
+    cancelled = [o for o in all_orders if o.vinted_status == "Cancelled"]
+    return valid_sales, cancelled

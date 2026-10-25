@@ -19,6 +19,9 @@ class SalesOrder(BaseModel):
     packaging_cost: float = Field(0.0, ge=0, description="Allocated packaging & shipping supply cost")
     vinted_status: str = Field("Completed", description="In Transit, Delivered, Completed, Cancelled")
     source: str = Field("HTML", description="Originating source: HTML, Email, etc.")
+    quantity: int = Field(1, ge=1, description="Quantity of garments in transaction (e.g. 2 for Bundle 2 items)")
+    buyer_username: str = Field("", description="Buyer username if present")
+    cancellation_reason: str = Field("", description="Reason or status details if transaction was cancelled/refunded")
 
     @computed_field
     def net_profit(self) -> float:
