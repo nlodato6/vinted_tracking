@@ -10,6 +10,7 @@ from src.sheets.schemas import (
     TAB_SALES_LOG,
     TAB_INVENTORY_LOTS,
     TAB_SHIPPING_SUPPLIES,
+    LISTINGS_HEADERS,
     SOLD_ITEMS_HEADERS,
 )
 import re
@@ -314,8 +315,9 @@ class SheetsSyncEngine:
         url_idx = headers.index("Vinted_URL") if "Vinted_URL" in headers else 22
         status_idx = headers.index("Status") if "Status" in headers else 23
         dl_idx = headers.index("Date_Listed") if "Date_Listed" in headers else 24
+        source_idx = headers.index("Source") if "Source" in headers else 25
 
-        while len(existing_row) <= 24:
+        while len(existing_row) <= 25:
             existing_row.append("")
         for idx in range(len(existing_row)):
             if existing_row[idx] is None:
@@ -465,7 +467,48 @@ class SheetsSyncEngine:
             updates.append({"range": f"{col_s}{row_idx}", "values": [[s_f]]})
             existing_row[margin_idx] = s_f
 
+        # 12. Source (HTML, Email, or Email + HTML)
+        existing_source = (existing_row[source_idx] or "").strip() if source_idx != -1 and len(existing_row) > source_idx else ""
+        incoming_source = str(incoming.get("source") or "").strip()
+        if incoming_source:
+            if not existing_source:
+                merged_source = incoming_source
+            elif existing_source == incoming_source:
+                merged_source = existing_source
+            elif ("Email" in existing_source and "HTML" in incoming_source) or ("HTML" in existing_source and "Email" in incoming_source):
+                merged_source = "Email + HTML"
+            else:
+                merged_source = existing_source
+
+            if merged_source and merged_source != existing_source:
+                updates.append({"range": f"{col_letter(source_idx)}{row_idx}", "values": [[merged_source]]})
+                existing_row[source_idx] = merged_source
+
         return updates
+
+    def _ensure_headers(self, ws: Any, expected_headers: List[str]):
+        """Ensures that the worksheet header row contains all expected headers (including newly added columns like 'Source')."""
+        try:
+            rows = ws.get_all_values()
+            if not rows:
+                ws.update(range_name="A1", values=[expected_headers])
+                return
+            current_headers = rows[0]
+            if len(current_headers) < len(expected_headers):
+                from src.sheets.templates import ensure_col_count, format_header_row
+                try:
+                    ensure_col_count(ws, len(expected_headers))
+                except Exception:
+                    pass
+                for idx in range(len(current_headers), len(expected_headers)):
+                    col_l = col_letter(idx)
+                    ws.update(range_name=f"{col_l}1", values=[[expected_headers[idx]]])
+                try:
+                    format_header_row(ws, len(expected_headers))
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Could not auto-ensure headers on worksheet: {e}")
 
     def get_worksheet(self, tab_name: str) -> Any:
         """Caches worksheet objects to prevent redundant fetch_sheet_metadata network calls."""
@@ -976,6 +1019,13 @@ class SheetsSyncEngine:
         plat_str = platform or "Vinted"
         ord_ref = order_id or ""
 
+        l_source_idx = headers.index("Source") if "Source" in headers else 18
+        origin_source = (target_row_data[l_source_idx] if len(target_row_data) > l_source_idx and target_row_data[l_source_idx] else "").strip()
+        if ord_ref.lower().startswith("ord-"):
+            final_source = "Email + HTML" if ("HTML" in origin_source or not origin_source) else "Email"
+        else:
+            final_source = origin_source or "HTML"
+
         sold_row_data = [
             target_row_data[sku_idx],                                         # A: Item_SKU
             lot_id,                                                           # B: Lot_ID
@@ -1002,6 +1052,7 @@ class SheetsSyncEngine:
             v_url,                                                            # W: Vinted_URL
             status,                                                           # X: Status
             dt_listed,                                                        # Y: Date_Listed
+            final_source,                                                     # Z: Source
         ]
 
         s_headers = sold_rows[0] if sold_rows else SOLD_ITEMS_HEADERS
@@ -1037,6 +1088,7 @@ class SheetsSyncEngine:
                     "views": views,
                     "date_listed": dt_listed,
                     "sale_date": s_date_str,
+                    "source": final_source,
                 }
             )
             if enrich_updates:
@@ -1165,6 +1217,9 @@ class SheetsSyncEngine:
         """
         ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
         ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
+
+        self._ensure_headers(ws_listings, LISTINGS_HEADERS)
+        self._ensure_headers(ws_sold, SOLD_ITEMS_HEADERS)
 
         listings_rows = ws_listings.get_all_values()
         sold_rows = ws_sold.get_all_values()
@@ -1298,6 +1353,7 @@ class SheetsSyncEngine:
                                 "favorites": item.favorites,
                                 "views": item.views,
                                 "date_listed": item_date_str,
+                                "source": getattr(item, "source", "HTML") or "HTML",
                             }
                         )
                         if enrich_updates:
@@ -1341,6 +1397,7 @@ class SheetsSyncEngine:
                             item.vinted_url,
                             "Sold",
                             item_date_str,
+                            getattr(item, "source", "HTML") or "HTML",
                         ]
                         new_sold_rows.append(sold_row_data)
             else:
@@ -1421,6 +1478,7 @@ class SheetsSyncEngine:
                         item.status or "Listed",
                         item_date_str,
                         now_str,
+                        getattr(item, "source", "HTML") or "HTML",
                     ]
                     new_active_rows.append(active_row_data)
 
@@ -1460,6 +1518,7 @@ class SheetsSyncEngine:
         Moves matching Item_Listings to Sold_Items, or appends directly if not currently in active listings.
         """
         ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
+        self._ensure_headers(ws_sold, SOLD_ITEMS_HEADERS)
         date_to_lot_id = self.get_date_to_lot_map()
 
         sold_rows = ws_sold.get_all_values()
@@ -1568,6 +1627,7 @@ class SheetsSyncEngine:
                         "sold_price": order.sold_price,
                         "favorites": order.favorites,
                         "sale_date": sale_date_str,
+                        "source": getattr(order, "source", "HTML") or "HTML",
                     },
                 )
                 if enrich_updates:
@@ -1608,6 +1668,7 @@ class SheetsSyncEngine:
                 "",                                                           # W: Vinted_URL
                 "Sold",                                                       # X: Status
                 sale_date_str,                                                # Y: Date_Listed
+                getattr(order, "source", "HTML") or "HTML",                   # Z: Source
             ]
             batch_new_rows.append(new_sold_data)
             synced_count += 1
@@ -1644,8 +1705,11 @@ class SheetsSyncEngine:
         ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
         ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
 
+        self._ensure_headers(ws_listings, LISTINGS_HEADERS)
+        self._ensure_headers(ws_sold, SOLD_ITEMS_HEADERS)
+
         # 1. Single batch get for both listings and sold items (1 read request!)
-        batch_ranges = [f"{TAB_ITEM_LISTINGS}!A:N", f"{TAB_SOLD_ITEMS}!A:Y"]
+        batch_ranges = [f"{TAB_ITEM_LISTINGS}!A:S", f"{TAB_SOLD_ITEMS}!A:Z"]
         try:
             batch_res = sh.values_batch_get(batch_ranges)
             value_ranges = batch_res.get("valueRanges", [])
@@ -1825,6 +1889,7 @@ class SheetsSyncEngine:
                                 "favorites": fav_val,
                                 "views": view_val,
                                 "sale_date": sale_date_str,
+                                "source": "Email",
                             },
                         )
                         if enrich_updates:
@@ -1844,6 +1909,7 @@ class SheetsSyncEngine:
                         f'=IF(AND(ISNUMBER(L{next_sold_row}), ISNUMBER(F{next_sold_row}), ISNUMBER(Q{next_sold_row})), L{next_sold_row}-F{next_sold_row}-Q{next_sold_row}, IF(ISNUMBER(L{next_sold_row}), L{next_sold_row}, 0))',
                         f'=IF(AND(ISNUMBER(L{next_sold_row}), L{next_sold_row}>0), R{next_sold_row}/L{next_sold_row}, 0)',
                         fav_val, view_val, event.order_id, v_url, "Sold", sale_date_str,
+                        "Email + HTML",
                     ]
                     rows_to_append_to_sold.append(sold_row)
                     if event.order_id:
@@ -1879,6 +1945,7 @@ class SheetsSyncEngine:
                                 "vinted_url": event.vinted_url,
                                 "sold_price": event.sold_price,
                                 "sale_date": sale_date_str,
+                                "source": "Email",
                             },
                         )
                         if enrich_updates:
@@ -1910,6 +1977,7 @@ class SheetsSyncEngine:
                         f'=IF(AND(ISNUMBER(L{next_sold_row}), ISNUMBER(F{next_sold_row}), ISNUMBER(Q{next_sold_row})), L{next_sold_row}-F{next_sold_row}-Q{next_sold_row}, IF(ISNUMBER(L{next_sold_row}), L{next_sold_row}, 0))',
                         f'=IF(AND(ISNUMBER(L{next_sold_row}), L{next_sold_row}>0), R{next_sold_row}/L{next_sold_row}, 0)',
                         0, 0, event.order_id, event.vinted_url, "Sold", sale_date_str,
+                        getattr(event, "source", "Email") or "Email",
                     ]
                     rows_to_append_to_sold.append(sold_row)
                     if event.order_id:
@@ -1977,6 +2045,8 @@ class SheetsSyncEngine:
         ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
         ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
 
+        self._ensure_headers(ws_sold, SOLD_ITEMS_HEADERS)
+
         sold_rows = ws_sold.get_all_values()
         listings_rows = ws_listings.get_all_values()
 
@@ -2001,6 +2071,7 @@ class SheetsSyncEngine:
         date_idx = s_headers.index("Sale_Date") if "Sale_Date" in s_headers else 14
         order_idx = s_headers.index("Order_ID") if "Order_ID" in s_headers else 21
         url_idx = s_headers.index("Vinted_URL") if "Vinted_URL" in s_headers else 22
+        source_idx = s_headers.index("Source") if "Source" in s_headers else -1
 
         # 1. Optionally scan Gmail for Vinted notification emails (including Vinted-Processed tag)
         emails = []
@@ -2077,6 +2148,7 @@ class SheetsSyncEngine:
             cur_date = normalize_date_str(str(row[date_idx]).strip()) if len(row) > date_idx else ""
             cur_order = str(row[order_idx]).strip() if len(row) > order_idx else ""
             cur_url = str(row[url_idx]).strip() if len(row) > url_idx else ""
+            cur_source = str(row[source_idx]).strip() if (source_idx != -1 and len(row) > source_idx) else ""
 
             # Check if this row is an empty phantom duplicate row lacking all item identity
             if not cur_title and not cur_brand and not cur_cat and not cur_lot and not cur_url:
@@ -2090,8 +2162,9 @@ class SheetsSyncEngine:
             needs_cat = not cur_cat or cur_cat.lower() in ("other apparel", "none", "unknown")
             needs_order = not cur_order
             needs_url = not cur_url
+            needs_source = (source_idx != -1 and not cur_source)
 
-            if not (needs_title or needs_lot or needs_brand or needs_cat or needs_order or needs_url):
+            if not (needs_title or needs_lot or needs_brand or needs_cat or needs_order or needs_url or needs_source):
                 continue
 
             matched_ev: Any = None
@@ -2239,6 +2312,18 @@ class SheetsSyncEngine:
                 updates.append({"range": f"{col_u}{r_i}", "values": [[cur_url]]})
                 row_changed = True
 
+            # 7. Backfill Source if missing
+            if needs_source:
+                if matched_ev and matched_listing:
+                    new_source = "Email + HTML"
+                elif matched_ev or cur_order.lower().startswith("ord-"):
+                    new_source = "Email"
+                else:
+                    new_source = "HTML"
+                col_s = col_letter(source_idx)
+                updates.append({"range": f"{col_s}{r_i}", "values": [[new_source]]})
+                row_changed = True
+
             if row_changed:
                 fixed_rows += 1
 
@@ -2292,6 +2377,7 @@ class SheetsSyncEngine:
         order_idx = headers.index("Order_ID") if "Order_ID" in headers else -1
         vid_idx = headers.index("Vinted_ID") if "Vinted_ID" in headers else -1
         url_idx = headers.index("Vinted_URL") if "Vinted_URL" in headers else -1
+        source_idx = headers.index("Source") if "Source" in headers else -1
 
         items: List[Dict[str, Any]] = []
         for r_i, r in enumerate(rows[1:], start=2):
@@ -2305,6 +2391,14 @@ class SheetsSyncEngine:
             ord_val = str(r[order_idx]).strip() if (order_idx != -1 and len(r) > order_idx and r[order_idx] is not None) else ""
             vid_val = str(r[vid_idx]).strip() if (vid_idx != -1 and len(r) > vid_idx and r[vid_idx] is not None) else ""
             url_val = str(r[url_idx]).strip() if (url_idx != -1 and len(r) > url_idx and r[url_idx] is not None) else ""
+            source_val = str(r[source_idx]).strip() if (source_idx != -1 and len(r) > source_idx and r[source_idx] is not None) else ""
+            if not source_val:
+                if ord_val.lower().startswith("ord-"):
+                    source_val = "Email"
+                elif ord_val or url_val:
+                    source_val = "HTML"
+                else:
+                    source_val = "—"
 
             # Skip empty rows
             if not sku_val and not title_val and not ord_val and not url_val and price_val == 0.0:
@@ -2344,6 +2438,7 @@ class SheetsSyncEngine:
                 "order_id": ord_val,
                 "vinted_id": vid_val,
                 "url": url_val,
+                "source": source_val,
                 "completeness_score": score,
                 "raw_row": list(r),
             })
@@ -2539,6 +2634,7 @@ class SheetsSyncEngine:
                         url_i = headers.index("Vinted_URL") if "Vinted_URL" in headers else -1
                         sp_i = headers.index("Sold_Price") if "Sold_Price" in headers else -1
                         date_i = headers.index("Sale_Date") if "Sale_Date" in headers else -1
+                        src_i = headers.index("Source") if "Source" in headers else -1
 
                         if len(d_row_data) > title_i and d_row_data[title_i] is not None and str(d_row_data[title_i]).strip():
                             inc["item_title"] = str(d_row_data[title_i]).strip()
@@ -2556,6 +2652,8 @@ class SheetsSyncEngine:
                             inc["sold_price"] = parse_price(d_row_data[sp_i])
                         if date_i != -1 and len(d_row_data) > date_i and d_row_data[date_i] is not None and str(d_row_data[date_i]).strip():
                             inc["sale_date"] = str(d_row_data[date_i]).strip()
+                        if src_i != -1 and len(d_row_data) > src_i and d_row_data[src_i] is not None and str(d_row_data[src_i]).strip():
+                            inc["source"] = str(d_row_data[src_i]).strip()
 
                         if tab_name == TAB_SOLD_ITEMS:
                             enrich_u = self.enrich_sold_row(keep_row_data, headers, keep_idx, inc)
@@ -2619,6 +2717,15 @@ class SheetsSyncEngine:
                                     while len(keep_row_data) <= vid_i:
                                         keep_row_data.append("")
                                     keep_row_data[vid_i] = d_vid
+
+                            if src_i != -1:
+                                cur_src = str(keep_row_data[src_i] if len(keep_row_data) > src_i else "").strip()
+                                new_src = inc.get("source", "")
+                                if new_src and not cur_src:
+                                    list_u.append({"range": f"{col_letter(src_i)}{keep_idx}", "values": [[new_src]]})
+                                    while len(keep_row_data) <= src_i:
+                                        keep_row_data.append("")
+                                    keep_row_data[src_i] = new_src
 
                             if list_u:
                                 cell_updates.extend(list_u)

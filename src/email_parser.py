@@ -29,6 +29,7 @@ class ParsedEmailEvent(BaseModel):
     brand: Optional[str] = ""
     category: Optional[str] = ""
     lot_id: Optional[str] = ""
+    source: Optional[str] = "Email"
 
 
 

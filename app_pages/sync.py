@@ -1241,6 +1241,16 @@ def render_sync_page():
                                     title_display = row_info.get("title") or "*(No Title)*"
                                     comp_score = row_info.get("completeness_score", 0)
 
+                                    source_val = row_info.get("source") or "—"
+                                    if "Email" in source_val and "HTML" in source_val:
+                                        source_badge = '<span style="background-color:#4338ca;color:#c7d2fe;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">📧 Email + 🌐 HTML</span>'
+                                    elif "Email" in source_val:
+                                        source_badge = '<span style="background-color:#0369a1;color:#bae6fd;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">📧 Email</span>'
+                                    elif "HTML" in source_val:
+                                        source_badge = '<span style="background-color:#0f766e;color:#99f6e4;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">🌐 HTML</span>'
+                                    else:
+                                        source_badge = f'<span style="background-color:#334155;color:#94a3b8;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">{html.escape(source_val)}</span>'
+
                                     st.markdown(
                                         f"""
                                         <div style="border:{card_border};background:{bg_color};border-radius:8px;padding:12px;margin-bottom:8px;">
@@ -1253,7 +1263,7 @@ def render_sync_page():
                                                 <div><strong>Price:</strong> <span style="color:#38bdf8;">{price_display}</span> &nbsp;|&nbsp; <strong>Date:</strong> {date_display}</div>
                                                 <div><strong>Brand:</strong> {html.escape(brand_display)} &nbsp;|&nbsp; <strong>Cat:</strong> {html.escape(cat_display)}</div>
                                                 <div><strong>Lot:</strong> {html.escape(lot_display)} &nbsp;|&nbsp; <strong>SKU:</strong> {html.escape(sku_display)}</div>
-                                                <div><strong>Order ID:</strong> <code>{html.escape(order_display)}</code></div>
+                                                <div><strong>Order ID:</strong> <code>{html.escape(order_display)}</code> &nbsp;|&nbsp; <strong>Source:</strong> {source_badge}</div>
                                                 <div><strong>Completeness Score:</strong> {comp_score}/8</div>
                                             </div>
                                         </div>

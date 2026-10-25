@@ -46,6 +46,7 @@ LISTINGS_HEADERS = [
     "Status",
     "Date_Listed",
     "Last_Synced",
+    "Source",
 ]
 
 SOLD_ITEMS_HEADERS = [
@@ -74,6 +75,7 @@ SOLD_ITEMS_HEADERS = [
     "Vinted_URL",
     "Status",
     "Date_Listed",
+    "Source",
 ]
 
 # Kept for backward compatibility if referenced

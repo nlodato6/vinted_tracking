@@ -99,6 +99,7 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
     ws_listings.format("J2:J500", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
     ws_listings.format("L2:M500", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
     ws_listings.format("P2:P500", {"horizontalAlignment": "CENTER"})
+    ws_listings.format("S2:S500", {"horizontalAlignment": "CENTER"})
 
     # Format Sold_Items
     ws_sold.format("F2:H500", {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}})
@@ -110,6 +111,7 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
     ws_sold.format("S2:S500", {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}})
     ws_sold.format("T2:U500", {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}})
     ws_sold.format("X2:X500", {"horizontalAlignment": "CENTER"})
+    ws_sold.format("Z2:Z500", {"horizontalAlignment": "CENTER"})
 
     # 4. Shipping_Supplies
     if TAB_SHIPPING_SUPPLIES not in existing_worksheets:
@@ -208,7 +210,7 @@ def initialize_all_tabs(client: GoogleSheetsClient) -> gspread.Spreadsheet:
         # Section 5: Top 5 Garments Lowered The Most (Rows 38-45)
         ["🏆 TOP 5 GARMENTS LOWERED THE MOST (BIGGEST PRICE CUTS BEFORE SALE)", "", "", "", "", "", "", "", ""],
         ["Item SKU", "Title", "Brand", "Category", "Posted Price ($)", "Sold Price ($)", "Total Drop ($)", "Sale Type", ""],
-        ['=IFERROR(QUERY(Sold_Items!A2:Y, "SELECT A, C, D, E, G, L, M, N WHERE M > 0 ORDER BY M DESC LIMIT 5 LABEL A \'\', C \'\', D \'\', E \'\', G \'\', L \'\', M \'\', N \'\'", 0), {"No discounted sales yet", "", "", "", "", "", "", ""})', "", "", "", "", "", "", "", ""],
+        ['=IFERROR(QUERY(Sold_Items!A2:Z, "SELECT A, C, D, E, G, L, M, N WHERE M > 0 ORDER BY M DESC LIMIT 5 LABEL A \'\', C \'\', D \'\', E \'\', G \'\', L \'\', M \'\', N \'\'", 0), {"No discounted sales yet", "", "", "", "", "", "", ""})', "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", ""],
         ["", "", "", "", "", "", "", "", ""],

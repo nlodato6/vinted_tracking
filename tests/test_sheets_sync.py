@@ -134,6 +134,7 @@ def mock_sheets_env():
                 "Listed",
                 "2026-10-15",
                 "2026-10-19 12:00:00",
+                "HTML",
             ],
             [
                 "SKU-1002",
@@ -154,6 +155,7 @@ def mock_sheets_env():
                 "Listed",
                 "2026-10-19",
                 "2026-10-19 12:00:00",
+                "HTML",
             ],
         ],
     )
@@ -1490,6 +1492,153 @@ def test_find_matching_sold_row_different_brand_not_matched(mock_sheets_env):
         brand="Nike",
     )
     assert matched_same == 2
+
+
+def test_source_tracking_sync_listings_and_orders(mock_sheets_env):
+    """Verifies that HTML listings and orders track Source='HTML' in sheets."""
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # 1. New active listing from HTML scraper
+    new_item = ItemListing(
+        item_sku="",
+        title="Arc'teryx Beta LT Jacket",
+        brand="Arc'teryx",
+        category="Outerwear",
+        current_price=220.00,
+        status="Listed",
+        vinted_id="vinted_999",
+        vinted_url="https://www.vinted.com/items/999",
+        source="HTML",
+    )
+    engine.sync_listings([new_item])
+    l_headers = ws_listings.rows[0]
+    l_src_idx = l_headers.index("Source")
+    created_row = [r for r in ws_listings.rows[1:] if "Arc'teryx" in r[2]][0]
+    assert created_row[l_src_idx] == "HTML"
+
+    # 2. Moving to sold preserves/tracks source
+    moved = engine.move_listing_to_sold(sku=created_row[0], status="Sold", sold_price=210.00)
+    assert moved["Source"] == "HTML"
+    s_headers = ws_sold.rows[0]
+    s_src_idx = s_headers.index("Source")
+    assert ws_sold.rows[-1][s_src_idx] == "HTML"
+
+
+def test_source_tracking_email_and_cross_enrichment(mock_sheets_env):
+    """Verifies email sync sets 'Email' and cross-enrichment merges to 'Email + HTML'."""
+    from src.email_parser import ParsedEmailEvent
+
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # 1. Email event for a brand new item not in active listings
+    email_event = ParsedEmailEvent(
+        event_type="sale",
+        timestamp=datetime(2026, 10, 25, 14, 0, 0),
+        vinted_id="778899",
+        vinted_url="https://www.vinted.com/items/778899",
+        item_title="Stussy Big Ol Jeans",
+        sold_price=60.00,
+        order_id="ord-stussy-001",
+        brand="Stussy",
+        category="Jeans",
+        source="Email",
+    )
+    res = engine.process_email_batch([email_event])
+    assert res[0]["status"] == "appended_to_sold"
+
+    s_headers = ws_sold.rows[0]
+    s_src_idx = s_headers.index("Source")
+    appended_row = ws_sold.rows[-1]
+    assert appended_row[s_src_idx] == "Email"
+
+    # 2. HTML sync comes in with full order details for the same item -> should enrich and upgrade to 'Email + HTML'
+    html_order = SalesOrder(
+        order_id="ord-stussy-001",
+        item_title="Stussy Big Ol Jeans 32x30",
+        brand="Stussy",
+        category="Jeans",
+        sold_price=60.00,
+        sale_date=date(2026, 10, 25),
+        source="HTML",
+    )
+    sync_res = engine.sync_orders([html_order])
+    assert sync_res["synced_orders"] == 1
+    # Check that source is now 'Email + HTML'
+    assert ws_sold.rows[-1][s_src_idx] == "Email + HTML"
+
+
+def test_reconcile_missing_source_backfill(mock_sheets_env):
+    """Verifies that reconcile_missing_sold_metadata automatically backfills blank Source cells."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Row 1: email order with 'ord-' prefix and blank source
+    r1 = [""] * len(SOLD_ITEMS_HEADERS)
+    r1[0] = "SKU-2001"
+    r1[2] = "Nike Fleece Pullover"
+    r1[3] = "Nike"
+    r1[4] = "Sweaters & Hoodies"
+    r1[11] = 35.00
+    r1[14] = "2026-10-21"
+    r1[21] = "ord-12345"
+    r1[25] = ""  # blank source
+    ws_sold.append_row(r1)
+
+    # Row 2: html order with uuid and blank source
+    r2 = [""] * len(SOLD_ITEMS_HEADERS)
+    r2[0] = "SKU-2002"
+    r2[2] = "Carhartt Detroit Jacket"
+    r2[3] = "Carhartt"
+    r2[4] = "Outerwear"
+    r2[11] = 85.00
+    r2[14] = "2026-10-22"
+    r2[21] = "89abcdef-0123-4567-89ab-cdef01234567"
+    r2[25] = ""  # blank source
+    ws_sold.append_row(r2)
+
+    res = engine.reconcile_missing_sold_metadata()
+    assert res["fixed_rows"] >= 2
+
+    # Check backfilled sources
+    s_idx = SOLD_ITEMS_HEADERS.index("Source")
+    assert ws_sold.rows[-2][s_idx] == "Email"
+    assert ws_sold.rows[-1][s_idx] == "HTML"
+
+
+def test_find_duplicate_groups_includes_source(mock_sheets_env):
+    """Verifies that find_duplicate_groups exposes source for each duplicate candidate."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Two rows with matching Order_ID: one from Email, one from HTML
+    r1 = [""] * len(SOLD_ITEMS_HEADERS)
+    r1[0] = "SKU-3001"
+    r1[2] = "Order 445566"
+    r1[11] = 40.00
+    r1[21] = "ord-dup-1"
+    r1[25] = "Email"
+    ws_sold.append_row(r1)
+
+    r2 = [""] * len(SOLD_ITEMS_HEADERS)
+    r2[0] = "SKU-3002"
+    r2[2] = "Vintage Polo Ralph Lauren Sweater"
+    r2[3] = "Polo Ralph Lauren"
+    r2[4] = "Sweaters & Hoodies"
+    r2[11] = 40.00
+    r2[21] = "ord-dup-1"
+    r2[25] = "HTML"
+    ws_sold.append_row(r2)
+
+    groups = engine.find_duplicate_groups(TAB_SOLD_ITEMS)
+    assert len(groups) == 1
+    rows = groups[0]["rows"]
+    assert len(rows) == 2
+    sources = {r["source"] for r in rows}
+    assert sources == {"Email", "HTML"}
+
 
 
 

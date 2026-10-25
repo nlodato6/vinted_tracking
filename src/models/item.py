@@ -22,3 +22,4 @@ class ItemListing(BaseModel):
     status: str = Field("Draft", description="Draft, Listed, Reserved, Sold, or Archived")
     date_listed: Optional[date] = Field(None, description="Date posted to Vinted")
     last_synced: Optional[datetime] = Field(None, description="Last scraped timestamp")
+    source: str = Field("HTML", description="Originating source: HTML, Email, etc.")

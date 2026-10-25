@@ -18,6 +18,7 @@ class SalesOrder(BaseModel):
     item_cost: float = Field(0.0, ge=0, description="Unit cost of garment from InventoryLot")
     packaging_cost: float = Field(0.0, ge=0, description="Allocated packaging & shipping supply cost")
     vinted_status: str = Field("Completed", description="In Transit, Delivered, Completed, Cancelled")
+    source: str = Field("HTML", description="Originating source: HTML, Email, etc.")
 
     @computed_field
     def net_profit(self) -> float:
