@@ -142,5 +142,30 @@ def test_sync_metrics_styling_and_config():
     assert "color_picker" in sync_code
 
 
+def test_cancellation_ui_and_bookmarklet_integration():
+    from pathlib import Path
+
+    # Verify metrics.py has cancellation metrics and charts
+    metrics_code = Path("app_pages/metrics.py").read_text()
+    assert "parse_cancelled_dataframe" in metrics_code
+    assert "Cancellation Rate" in metrics_code
+    assert "Lost Gross Revenue" in metrics_code
+    assert "Cancelled Units" in metrics_code
+    assert "Hidden Vault Items" in metrics_code
+    assert "Cancellation Intelligence & Lost Revenue" in metrics_code
+    assert "build_cancellation_reasons_chart" in metrics_code
+    assert "build_cancellation_timeline_chart" in metrics_code
+
+    # Verify sync.py has bookmarklet, date range filter, and reconcile_active_closet_snapshot
+    sync_code = Path("app_pages/sync.py").read_text()
+    assert "1-Click Auto-Scroll Bookmarklet" in sync_code
+    assert "reconcile_active_closet_snapshot" in sync_code
+    assert "parse_orders_and_cancellations" in sync_code
+    assert "get_last_scan_date" in sync_code
+    assert "Date Range to Scan" in sync_code
+    assert "Since Last Scan" in sync_code
+
+
+
 
 

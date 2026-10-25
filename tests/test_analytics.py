@@ -7,6 +7,7 @@ from src.analytics import (
     clean_percent,
     parse_sold_dataframe,
     parse_active_dataframe,
+    parse_cancelled_dataframe,
     build_sales_trend_chart,
     build_category_chart,
     build_top_brands_chart,
@@ -15,6 +16,8 @@ from src.analytics import (
     build_sale_types_chart,
     compute_net_cash_profit,
     build_cash_flow_waterfall,
+    build_cancellation_reasons_chart,
+    build_cancellation_timeline_chart,
 )
 
 
@@ -210,5 +213,31 @@ def test_charts_with_missing_columns_do_not_throw_keyerror():
     assert build_sale_types_chart(sparse_df) is not None
     d1, d2 = build_inventory_split_donuts(sparse_df, sparse_df)
     assert d1 is not None and d2 is not None
+
+
+def test_parse_cancelled_dataframe_and_charts():
+    raw_rows = [
+        ["Order_ID", "Item_SKU", "Title", "Brand", "Category", "Sold_Price", "Original_Gross", "Cancellation_Date", "Cancellation_Reason", "Buyer_Username", "Vinted_URL", "Source"],
+        ["ORD-C1", "SKU-101", "Jeans", "Levis", "Pants", "$30.00", "$30.00", "2026-10-10", "Buyer cancelled", "buyer1", "", "HTML"],
+        ["ORD-C2", "SKU-102", "Boots", "UGG", "Shoes", "$50.00", "$50.00", "2026-10-12", "Out of stock", "buyer2", "", "Email"],
+    ]
+
+    df_canc = parse_cancelled_dataframe(raw_rows)
+    assert len(df_canc) == 2
+    assert df_canc["sold_price_num"].sum() == 80.00
+    assert df_canc["original_gross_num"].sum() == 80.00
+    assert pd.api.types.is_datetime64_any_dtype(df_canc["cancel_date_dt"])
+
+    fig_reasons = build_cancellation_reasons_chart(df_canc)
+    assert fig_reasons is not None
+
+    fig_timeline = build_cancellation_timeline_chart(df_canc)
+    assert fig_timeline is not None
+
+    # Empty DataFrame tests
+    empty_df = pd.DataFrame()
+    assert build_cancellation_reasons_chart(empty_df) is not None
+    assert build_cancellation_timeline_chart(empty_df) is not None
+
 
 

@@ -10,6 +10,7 @@ from src.analytics import (
     clean_currency,
     parse_sold_dataframe,
     parse_active_dataframe,
+    parse_cancelled_dataframe,
     build_sales_trend_chart,
     build_category_chart,
     build_top_brands_chart,
@@ -18,6 +19,8 @@ from src.analytics import (
     build_sale_types_chart,
     compute_net_cash_profit,
     build_cash_flow_waterfall,
+    build_cancellation_reasons_chart,
+    build_cancellation_timeline_chart,
 )
 
 
@@ -32,13 +35,17 @@ def load_raw_sheet_data(sheet_id: str, _creds):
             "Item_Listings!A:R",
             "Inventory_Lots!A:I",
             "Shipping_Supplies!A:H",
+            "Cancelled_Orders!A:L",
+            "Hidden_Items!A:S",
         ])
         val_ranges = res.get("valueRanges", [])
         sold_rows = val_ranges[0].get("values", []) if len(val_ranges) > 0 else []
         active_rows = val_ranges[1].get("values", []) if len(val_ranges) > 1 else []
         lot_rows = val_ranges[2].get("values", []) if len(val_ranges) > 2 else []
         supply_rows = val_ranges[3].get("values", []) if len(val_ranges) > 3 else []
-        return sold_rows, active_rows, lot_rows, supply_rows
+        cancelled_rows = val_ranges[4].get("values", []) if len(val_ranges) > 4 else []
+        hidden_rows = val_ranges[5].get("values", []) if len(val_ranges) > 5 else []
+        return sold_rows, active_rows, lot_rows, supply_rows, cancelled_rows, hidden_rows
     except Exception:
         sold_rows = sh.worksheet("Sold_Items").get_all_values()
         active_rows = sh.worksheet("Item_Listings").get_all_values()
@@ -50,7 +57,15 @@ def load_raw_sheet_data(sheet_id: str, _creds):
             supply_rows = sh.worksheet("Shipping_Supplies").get_all_values()
         except Exception:
             supply_rows = []
-        return sold_rows, active_rows, lot_rows, supply_rows
+        try:
+            cancelled_rows = sh.worksheet("Cancelled_Orders").get_all_values()
+        except Exception:
+            cancelled_rows = []
+        try:
+            hidden_rows = sh.worksheet("Hidden_Items").get_all_values()
+        except Exception:
+            hidden_rows = []
+        return sold_rows, active_rows, lot_rows, supply_rows, cancelled_rows, hidden_rows
 
 
 def render_metrics_page():
@@ -68,7 +83,7 @@ def render_metrics_page():
     # Data fetch with spinner
     try:
         with st.spinner("Loading sales & inventory data from Google Sheets..."):
-            sold_rows, active_rows, lot_rows, supply_rows = load_raw_sheet_data(spreadsheet_id, user_creds)
+            sold_rows, active_rows, lot_rows, supply_rows, cancelled_rows, hidden_rows = load_raw_sheet_data(spreadsheet_id, user_creds)
         log_event(u_email, "view_metrics", f"Loaded data for sheet {spreadsheet_id}", spreadsheet_id=spreadsheet_id)
     except Exception as e:
         log_error(u_email, "metrics.py:fetch_data", e)
@@ -85,8 +100,10 @@ def render_metrics_page():
 
     df_sold = parse_sold_dataframe(sold_rows)
     df_active = parse_active_dataframe(active_rows)
+    df_cancelled = parse_cancelled_dataframe(cancelled_rows)
+    hidden_count = max(0, len(hidden_rows) - 1) if hidden_rows else 0
 
-    if df_sold.empty and df_active.empty:
+    if df_sold.empty and df_active.empty and df_cancelled.empty:
         st.info("No sales or inventory listings found in this spreadsheet yet.")
         return
 
@@ -241,6 +258,43 @@ def render_metrics_page():
     v3.metric("Active Catalog Value", f"${active_value:,.2f}", f"{active_items} listed", border=True)
     v4.metric("Sell-Through Rate", f"{sell_through:.1f}%", f"{items_sold} of {total_catalog} items", border=True)
 
+    # Row 3: Cancellations & Vault Inventory (Hidden Items)
+    cancelled_count = len(df_cancelled) if not df_cancelled.empty else 0
+    lost_revenue = df_cancelled["sold_price_num"].sum() if (not df_cancelled.empty and "sold_price_num" in df_cancelled.columns) else 0.0
+    cancellation_rate = (cancelled_count / (items_sold + cancelled_count) * 100) if (items_sold + cancelled_count) > 0 else 0.0
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(
+        "Cancellation Rate",
+        f"{cancellation_rate:.1f}%",
+        f"{cancelled_count} cancelled" if cancelled_count else "0 cancellations",
+        delta_color="inverse" if cancelled_count else "off",
+        help="Percentage of orders that were cancelled or refunded.",
+        border=True,
+    )
+    c2.metric(
+        "Lost Gross Revenue",
+        f"${lost_revenue:,.2f}",
+        "Refunded to buyers" if lost_revenue > 0 else "No lost revenue",
+        delta_color="inverse" if lost_revenue > 0 else "off",
+        help="Gross revenue lost to cancellations and buyer refunds.",
+        border=True,
+    )
+    c3.metric(
+        "Cancelled Units",
+        f"{cancelled_count:,} orders",
+        help="Total number of orders cancelled on Vinted.",
+        border=True,
+    )
+    c4.metric(
+        "Hidden Vault Items",
+        f"{hidden_count:,} items",
+        "Archived / drafts",
+        delta_color="off",
+        help="Listings currently hidden or saved in draft/vault status.",
+        border=True,
+    )
+
     # -------------------------------------------------------------------------
     # Cash Flow & Capital Recovery Section
     # -------------------------------------------------------------------------
@@ -333,7 +387,27 @@ def render_metrics_page():
             st.plotly_chart(fig_types, width="stretch", alt="Sales by negotiation type")
 
     # -------------------------------------------------------------------------
-    # Row 5: Detailed Transactions Drill-Down Table
+    # Row 5: Order Cancellation Intelligence & Lost Revenue
+    # -------------------------------------------------------------------------
+    if not df_cancelled.empty:
+        with st.container(border=True):
+            st.subheader("🚫 Cancellation Intelligence & Lost Revenue")
+            st.caption("Understand why sales fall through, identify repeat return patterns, and track refunded revenue.")
+
+            canc_col1, canc_col2 = st.columns(2)
+            with canc_col1:
+                fig_reasons = build_cancellation_reasons_chart(df_cancelled)
+                st.plotly_chart(fig_reasons, width="stretch", alt="Cancelled orders by reason")
+            with canc_col2:
+                fig_time = build_cancellation_timeline_chart(df_cancelled)
+                st.plotly_chart(fig_time, width="stretch", alt="Monthly cancellation trend")
+
+            with st.expander(f"View Cancelled Orders Log ({cancelled_count} orders)", expanded=False):
+                disp_canc_cols = [c for c in ["Order_ID", "Item_SKU", "Title", "Brand", "Category", "Sold_Price", "Cancellation_Reason", "Buyer_Username", "Source"] if c in df_cancelled.columns]
+                st.dataframe(df_cancelled[disp_canc_cols], hide_index=True, width="stretch")
+
+    # -------------------------------------------------------------------------
+    # Row 6: Detailed Transactions Drill-Down Table
     # -------------------------------------------------------------------------
     with st.container(border=True):
         st.subheader("Recent Sales Drill-Down")

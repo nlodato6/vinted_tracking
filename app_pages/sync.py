@@ -11,8 +11,8 @@ import pandas as pd
 from src.config import settings
 from src.sheets import GoogleSheetsClient, SheetsSyncEngine
 from src.sheets.sync import parse_price
-from src.html_parser import parse_closet_html, parse_orders_html, detect_html_type, infer_brand, infer_clothing_category
-from src.email_parser import fetch_vinted_emails_via_imap
+from src.html_parser import parse_closet_html, parse_orders_html, parse_orders_and_cancellations, detect_html_type, infer_brand, infer_clothing_category
+from src.email_parser import fetch_vinted_emails_via_imap, get_last_scan_date
 from src.notifications import record_html_parse_event, record_email_parse_event, get_sync_status
 from src.telemetry import (
     log_event,
@@ -642,8 +642,12 @@ def render_sync_page():
                 3. Press **Cmd + S** (Mac) or **Ctrl + S** (Windows) $\\rightarrow$ select **"Webpage, Complete"** or **"Webpage, HTML Only"**.
                 4. Upload the newly saved `.html` file here.
                 
-                *⚡ Pro Tip: 5-Second Auto-Scroll Console Snippet:*
-                If you have a large closet and don't want to scroll manually, open Developer Tools Console (`Cmd+Option+J` on Mac or `Ctrl+Shift+J` on Windows / Chrome), paste this snippet, and hit Enter:
+                *⚡ Pro Tip: 1-Click Auto-Scroll Bookmarklet:*
+                Create a bookmark in your browser with this URL to auto-scroll any Vinted page with 1 click:
+                ```javascript
+                javascript:(function(){let lastHeight=0,repeats=0;let t=setInterval(()=>{window.scrollBy(0,1500);let h=document.body.offsetHeight;if(h===lastHeight){repeats++;if(repeats>=4){clearInterval(t);alert('All Vinted items loaded! Press Cmd+S (Ctrl+S) and select "Webpage, Complete" or "HTML Only" to save.');}}else{lastHeight=h;repeats=0;}},300);})();
+                ```
+                *Or paste this snippet directly into Developer Tools Console (`Cmd+Option+J` on Mac or `Ctrl+Shift+J` on Windows):*
                 ```javascript
                 let t = setInterval(() => { window.scrollBy(0, 1500); if (window.innerHeight + window.scrollY >= document.body.offsetHeight) { clearInterval(t); alert("All items loaded! Press Cmd+S to save."); } }, 250);
                 ```
@@ -668,9 +672,10 @@ def render_sync_page():
                 detected = detect_html_type(file_bytes)
                 
                 if detected == "orders":
-                    orders = parse_orders_html(file_bytes)
-                    parsed_orders.extend(orders)
-                    files_info.append({"Filename": f.name, "Detected Type": "💰 My Orders", "Items Found": len(orders)})
+                    completed_orders, cancelled_orders = parse_orders_and_cancellations(file_bytes)
+                    parsed_orders.extend(completed_orders + cancelled_orders)
+                    type_label = f"💰 My Orders ({len(completed_orders)} sales, {len(cancelled_orders)} cancelled)"
+                    files_info.append({"Filename": f.name, "Detected Type": type_label, "Items Found": len(completed_orders) + len(cancelled_orders)})
                 elif detected in ("active_closet", "sold_closet"):
                     items = parse_closet_html(file_bytes, default_lot=target_lot_id)
                     parsed_closet.extend(items)
@@ -692,19 +697,33 @@ def render_sync_page():
                 try:
                     curr_active_titles, curr_sold_titles = get_cached_titles(sheet_id, user_creds)
 
+                    canc_orders = [o for o in parsed_orders if getattr(o, "vinted_status", "") == "Cancelled"]
+                    valid_orders = [o for o in parsed_orders if getattr(o, "vinted_status", "") != "Cancelled"]
+
                     new_listings = [it for it in parsed_closet if it.status != "Sold" and it.title.strip().lower() not in curr_active_titles and it.title.strip().lower() not in curr_sold_titles]
-                    sold_transitions = [it for it in parsed_orders if it.item_title.strip().lower() in curr_active_titles]
-                    already_sold = [it for it in parsed_orders if it.item_title.strip().lower() in curr_sold_titles]
+                    sold_transitions = [it for it in valid_orders if it.item_title.strip().lower() in curr_active_titles]
+                    already_sold = [it for it in valid_orders if it.item_title.strip().lower() in curr_sold_titles]
 
                     # Assign target lot ID to new items in preview if not already populated
                     for it in new_listings:
                         if not it.lot_id and target_lot_id:
                             it.lot_id = target_lot_id
 
-                    p1, p2, p3 = st.columns(3)
+                    p1, p2, p3, p4 = st.columns(4)
                     p1.metric("🟢 New Active to Add", len(new_listings), f"Default Lot: {target_lot_id or 'None'}", border=True)
                     p2.metric("🔵 Active Moving to Sold", len(sold_transitions), border=True)
-                    p3.metric("⚪ Duplicates Skipped", len(already_sold) + (len(parsed_closet) - len(new_listings)), border=True)
+                    p3.metric("🚫 Cancelled Orders", len(canc_orders), border=True)
+                    p4.metric("⚪ Duplicates Skipped", len(already_sold) + (len(parsed_closet) - len(new_listings)), border=True)
+
+                    if canc_orders:
+                        with st.expander(f"View Cancelled Orders Detected ({len(canc_orders)} orders)", expanded=False):
+                            st.dataframe(pd.DataFrame([{
+                                "Order ID": o.order_id,
+                                "Title": o.item_title,
+                                "Price": f"${o.sold_price:.2f}",
+                                "Reason": getattr(o, "cancellation_reason", ""),
+                                "Buyer": getattr(o, "buyer_username", ""),
+                            } for o in canc_orders]), width="stretch")
 
                     if sold_transitions:
                         with st.expander("View Items Moving to Sold", expanded=False):
@@ -820,8 +839,13 @@ def render_sync_page():
                                             it.lot_id = target_lot_id
 
                                 # 4. Synchronize listings and orders
-                                res_orders = engine.sync_orders(parsed_orders, default_lot=target_lot_id, auto_assign_lot=False) if parsed_orders else {"synced_orders": 0}
-                                res_closet = engine.sync_listings(parsed_closet, auto_assign_lot=False) if parsed_closet else {"updated": 0, "created": 0}
+                                res_orders = engine.sync_orders(parsed_orders, default_lot=target_lot_id, auto_assign_lot=False) if parsed_orders else {"synced_orders": 0, "cancelled_orders": 0}
+                                
+                                has_active_export = any("Active Listings" in f.get("Detected Type", "") for f in files_info)
+                                if has_active_export and parsed_closet:
+                                    res_closet = engine.reconcile_active_closet_snapshot(parsed_closet, default_lot=target_lot_id, auto_assign_lot=False)
+                                else:
+                                    res_closet = engine.sync_listings(parsed_closet, auto_assign_lot=False) if parsed_closet else {"updated": 0, "created": 0}
 
                                 # 5. Record event and clear cache
                                 record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_closet)} items, Lot: {target_lot_id or 'None'})", client=client)
@@ -829,7 +853,12 @@ def render_sync_page():
                                 st.cache_data.clear()
 
                             lot_msg = f" (New lot {target_lot_id} created in Inventory_Lots)" if is_new_lot else (f" (Assigned to {target_lot_id})" if target_lot_id else " (No lot assigned)")
-                            st.success(f"✔ Sync Complete! {res_orders.get('synced_orders', 0)} orders synced, {res_closet.get('created', 0)} listings added{lot_msg}, {res_closet.get('updated', 0)} listings refreshed.")
+                            if has_active_export:
+                                closet_summary_msg = f"{res_closet.get('final_active_count', 0)} active listings reconciled ({res_closet.get('new_active_added', 0)} added, {res_closet.get('moved_to_sold', 0)} moved to sold, {res_closet.get('moved_to_hidden', 0)} hidden)"
+                            else:
+                                closet_summary_msg = f"{res_closet.get('created', 0)} listings added{lot_msg}, {res_closet.get('updated', 0)} listings refreshed"
+                            
+                            st.success(f"✔ Sync Complete! {closet_summary_msg}. {res_orders.get('synced_orders', 0)} sales orders synced, {res_orders.get('cancelled_orders', 0)} cancellations recorded.")
                             st.balloons()
                             time.sleep(1.5)
                             st.rerun()
@@ -893,9 +922,45 @@ def render_sync_page():
                     help="All Mail scans both your active inbox and archived Vinted notifications."
                 )
             with col_m2:
-                max_emails = st.slider("Max emails to scan", min_value=10, max_value=150, value=50)
+                max_emails = st.slider("Max emails to scan", min_value=10, max_value=500, value=150, step=10)
 
             folder_param = "ALL" if scan_location.startswith("All Mail") else "INBOX"
+
+            # Date Range Filter Selector
+            last_scan_dt = get_last_scan_date()
+            default_scan_label = f"Since Last Scan ({last_scan_dt.strftime('%b %d, %Y')})" if last_scan_dt else "Since Last Scan (Default)"
+
+            date_filter_choices = [
+                default_scan_label,
+                "Past 7 Days",
+                "Past 30 Days",
+                "All Time",
+                "Custom Date Range"
+            ]
+
+            selected_date_filter = st.selectbox(
+                "Date Range to Scan",
+                options=date_filter_choices,
+                index=0,
+                help="Defaults to scanning emails received since your last sync, or choose a broader range."
+            )
+
+            since_date = None
+            until_date = None
+            if selected_date_filter == default_scan_label:
+                since_date = last_scan_dt or (date.today() - timedelta(days=30))
+            elif selected_date_filter == "Past 7 Days":
+                since_date = date.today() - timedelta(days=7)
+            elif selected_date_filter == "Past 30 Days":
+                since_date = date.today() - timedelta(days=30)
+            elif selected_date_filter == "All Time":
+                since_date = None
+            elif selected_date_filter == "Custom Date Range":
+                c_d1, c_d2 = st.columns(2)
+                with c_d1:
+                    since_date = st.date_input("From Date", value=date.today() - timedelta(days=14))
+                with c_d2:
+                    until_date = st.date_input("To Date", value=date.today())
 
             if st.button("🔍 Scan & Preview Vinted Emails", type="primary", width="stretch"):
                 if not gmail_user_input or not gmail_pass_input:
@@ -912,7 +977,8 @@ def render_sync_page():
                                 password=gmail_pass_input.strip(),
                                 folder=folder_param,
                                 max_emails=max_emails,
-                                search_query='(FROM "vinted")',
+                                since_date=since_date,
+                                until_date=until_date,
                             )
                             if not events:
                                 st.session_state.email_sync_preview = None
@@ -952,14 +1018,27 @@ def render_sync_page():
             st.markdown(f"#### ⚡ Email Sync Preview ({len(preview_events)} Transactions Detected)")
             st.caption("Review the transactions detected from your Vinted emails before committing them to your Google Sheet.")
 
-            sales_count = len([e for e in preview_events if e.event_type == "sale"])
+            sales_count = len([e for e in preview_events if e.event_type in ("sale", "bundle_sale")])
             offers_count = len([e for e in preview_events if e.event_type == "offer"])
             favs_count = len([e for e in preview_events if e.event_type == "favorite"])
+            canc_count = len([e for e in preview_events if e.event_type == "cancellation"])
 
-            prev_c1, prev_c2, prev_c3 = st.columns(3)
+            prev_c1, prev_c2, prev_c3, prev_c4 = st.columns(4)
             prev_c1.metric("💰 Sales to Record", sales_count, border=True)
-            prev_c2.metric("💬 Offers Received", offers_count, border=True)
-            prev_c3.metric("❤️ Favorites to Increment", favs_count, border=True)
+            prev_c2.metric("🚫 Cancellations", canc_count, border=True)
+            prev_c3.metric("💬 Offers Received", offers_count, border=True)
+            prev_c4.metric("❤️ Favorites to Increment", favs_count, border=True)
+
+            if canc_count > 0:
+                with st.expander(f"View Cancellations Detected ({canc_count} orders)", expanded=False):
+                    canc_evs = [e for e in preview_events if e.event_type == "cancellation"]
+                    st.dataframe(pd.DataFrame([{
+                        "Title": ev.item_title or f"Vinted Order {ev.order_id}",
+                        "Price": f"${ev.sold_price:.2f}",
+                        "Buyer": f"@{ev.buyer_username}" if ev.buyer_username else "-",
+                        "Order ID": ev.order_id or "-",
+                        "Date": ev.timestamp.strftime("%Y-%m-%d"),
+                    } for ev in canc_evs]), width="stretch")
 
             # Default Inventory Lot Selector for Email Sales
             NO_LOT_OPTION = "⚪ None / No Lot (Unassigned)"
@@ -989,7 +1068,7 @@ def render_sync_page():
 
                 sale_rows = []
                 for idx, ev in enumerate(preview_events):
-                    if ev.event_type == "sale":
+                    if ev.event_type in ("sale", "bundle_sale"):
                         sale_indices.append(idx)
                         cur_lot = getattr(ev, "lot_id", "") or target_email_lot
                         cur_brand = getattr(ev, "brand", "") or (infer_brand(ev.item_title) if ev.item_title else "")

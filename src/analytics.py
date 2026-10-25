@@ -604,3 +604,134 @@ def build_cash_flow_waterfall(cash_summary: Dict[str, Any]) -> go.Figure:
     )
     return fig
 
+
+def parse_cancelled_dataframe(rows: list) -> pd.DataFrame:
+    """Parses raw rows from Cancelled_Orders worksheet into a typed pandas DataFrame."""
+    if not rows or len(rows) < 2:
+        return pd.DataFrame()
+
+    headers = [str(h).strip() for h in rows[0]]
+    cleaned_headers = []
+    seen = {}
+    for i, h in enumerate(headers):
+        name = h if h else f"Col_{i}"
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}_{seen[name]}"
+        else:
+            seen[name] = 0
+        cleaned_headers.append(name)
+
+    data_rows = [r for r in rows[1:] if any(str(c).strip() for c in r)]
+    if not data_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(data_rows, columns=cleaned_headers)
+
+    # Clean numeric fields
+    if "Lost_Revenue" in df.columns:
+        df["sold_price_num"] = df["Lost_Revenue"].apply(clean_currency)
+    elif "Sold_Price" in df.columns:
+        df["sold_price_num"] = df["Sold_Price"].apply(clean_currency)
+    else:
+        df["sold_price_num"] = 0.0
+
+    if "Original_Gross" in df.columns:
+        df["original_gross_num"] = df["Original_Gross"].apply(clean_currency)
+    else:
+        df["original_gross_num"] = df["sold_price_num"]
+
+    # Parse dates
+    date_col = next((c for c in df.columns if c.lower() in ("cancellation_date", "sale_date", "date")), None)
+    if date_col:
+        df["cancel_date_dt"] = pd.to_datetime(df[date_col], errors="coerce")
+    else:
+        df["cancel_date_dt"] = pd.NaT
+
+    return df
+
+
+def build_cancellation_reasons_chart(df_cancelled: pd.DataFrame) -> go.Figure:
+    """Builds a Plotly horizontal bar chart showing distribution of cancellation reasons."""
+    if df_cancelled.empty:
+        fig = go.Figure()
+        fig.add_annotation(text="No cancellation data available", showarrow=False)
+        return fig
+
+    reason_col = next((c for c in df_cancelled.columns if "reason" in c.lower()), None)
+    if not reason_col:
+        fig = go.Figure()
+        fig.add_annotation(text="No cancellation reason recorded", showarrow=False)
+        return fig
+
+    reason_counts = df_cancelled[reason_col].fillna("Unspecified").replace("", "Unspecified").value_counts().reset_index()
+    reason_counts.columns = ["Reason", "Count"]
+
+    fig = px.bar(
+        reason_counts,
+        x="Count",
+        y="Reason",
+        orientation="h",
+        text="Count",
+        color="Count",
+        color_continuous_scale="Reds",
+        title="Cancelled Orders by Reason",
+    )
+    fig.update_layout(
+        height=280,
+        margin=dict(l=10, r=10, t=40, b=20),
+        xaxis=dict(title="Cancelled Orders"),
+        yaxis=dict(title=""),
+        coloraxis_showscale=False,
+    )
+    return fig
+
+
+def build_cancellation_timeline_chart(df_cancelled: pd.DataFrame) -> go.Figure:
+    """Builds a timeline of lost revenue and cancelled order count over time."""
+    if df_cancelled.empty or "cancel_date_dt" not in df_cancelled.columns or df_cancelled["cancel_date_dt"].dropna().empty:
+        fig = go.Figure()
+        fig.add_annotation(text="No dated cancellation data available", showarrow=False)
+        return fig
+
+    df_valid = df_cancelled.dropna(subset=["cancel_date_dt"]).copy()
+    df_valid["Month"] = df_valid["cancel_date_dt"].dt.to_period("M").dt.to_timestamp()
+
+    monthly = df_valid.groupby("Month").agg(
+        cancelled_count=("sold_price_num", "count"),
+        lost_revenue=("sold_price_num", "sum")
+    ).reset_index()
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(
+        go.Bar(
+            x=monthly["Month"],
+            y=monthly["lost_revenue"],
+            name="Lost Revenue ($)",
+            marker_color="#ef4444",
+            text=[f"${v:,.2f}" for v in monthly["lost_revenue"]],
+            textposition="auto",
+        ),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=monthly["Month"],
+            y=monthly["cancelled_count"],
+            name="Cancelled Units",
+            mode="lines+markers",
+            line=dict(color="#f59e0b", width=3),
+            marker=dict(size=8),
+        ),
+        secondary_y=True,
+    )
+    fig.update_layout(
+        title=dict(text="Monthly Cancellation Trend & Lost Revenue", x=0.01),
+        height=280,
+        margin=dict(l=10, r=10, t=40, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    fig.update_yaxes(title_text="Lost Revenue ($)", secondary_y=False, tickformat="$,.0f")
+    fig.update_yaxes(title_text="Cancelled Units", secondary_y=True)
+    return fig
+
