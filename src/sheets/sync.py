@@ -607,6 +607,69 @@ class SheetsSyncEngine:
                     logger.warning(f"Could not provision tab {tab_name}: {e}")
         return created
 
+    def wipe_and_reset_sheet(self) -> Dict[str, Any]:
+        """
+        Completely resets Item_Listings, Sold_Items, Hidden_Items, and Cancelled_Orders
+        to 0 data rows with clean schema headers and template formatting.
+        Resets Inventory_Lots to LOT-001 with 0 items processed.
+        Re-applies all schema formatting and dashboard formulas.
+        """
+        from src.sheets.templates import initialize_all_tabs, format_header_row
+
+        results = {}
+        tabs_to_reset = [
+            (TAB_ITEM_LISTINGS, LISTINGS_HEADERS),
+            (TAB_SOLD_ITEMS, SOLD_ITEMS_HEADERS),
+            (TAB_HIDDEN_ITEMS, HIDDEN_ITEMS_HEADERS),
+            (TAB_CANCELLED_ORDERS, CANCELLED_ORDERS_HEADERS),
+        ]
+
+        for tab_name, headers in tabs_to_reset:
+            try:
+                ws = self.get_worksheet(tab_name)
+                ws.clear()
+                ws.update(range_name="A1", values=[headers])
+                try:
+                    format_header_row(ws, len(headers))
+                except Exception:
+                    pass
+                results[tab_name] = "wiped"
+            except Exception as e:
+                results[tab_name] = f"error: {e}"
+
+        # Reset Inventory_Lots
+        try:
+            ws_lots = self.get_worksheet(TAB_INVENTORY_LOTS)
+            ws_lots.clear()
+            ws_lots.update(range_name="A1", values=[LOTS_HEADERS])
+            try:
+                format_header_row(ws_lots, len(LOTS_HEADERS))
+            except Exception:
+                pass
+            lot_001_row = [
+                "LOT-001",
+                "2026-10-01",
+                "Consolidated Hauls (Initial)",
+                199.00,
+                351,
+                '=IF(A2="", "", IF(AND(ISNUMBER(E2), E2>0), D2/E2, ""))',
+                '=IF(A2="", "", COUNTIF(Item_Listings!B:B, A2) + COUNTIF(Sold_Items!B:B, A2))',
+                '=IF(A2="", "", IF(AND(ISNUMBER(E2), E2>0, COUNTIF(Sold_Items!B:B, A2)>=E2), "Completed", IF(COUNTIF(Item_Listings!B:B, A2)+COUNTIF(Sold_Items!B:B, A2)>0, "Active", "Pending")))',
+                "Baseline lot covering all initial inventory",
+            ]
+            ws_lots.update(range_name="A2", values=[lot_001_row], value_input_option="USER_ENTERED")
+            results[TAB_INVENTORY_LOTS] = "reset"
+        except Exception as e:
+            results[TAB_INVENTORY_LOTS] = f"error: {e}"
+
+        try:
+            initialize_all_tabs(self.client)
+        except Exception as e:
+            logger.warning(f"Error re-initializing all tabs: {e}")
+
+        self.clear_worksheet_cache()
+        return results
+
     def clear_worksheet_cache(self):
         self._ws_cache.clear()
 
@@ -1650,50 +1713,79 @@ class SheetsSyncEngine:
         self,
         sold_items: List[ItemListing],
         default_lot: str = "",
+        auto_assign_lot: bool = True,
     ) -> Dict[str, int]:
         """
         Reconciles items extracted from a Sold Closet HTML export:
         1. If an item in sold_items matches an active listing in Item_Listings (by Vinted ID or Title),
            moves it from Item_Listings to Sold_Items.
-        2. Never appends sold items to Item_Listings.
+        2. If an item in sold_items matches an existing row in Sold_Items, enriches it with missing
+           metadata (Vinted URL, favorites, views, brand, category, posted price).
+        3. If an item in sold_items is neither in active listings nor in Sold_Items, appends it
+           directly to Sold_Items as a new sold record with formulas and assigned lot.
+        4. Never appends sold items to Item_Listings.
         """
         if not sold_items:
-            return {"moved_to_sold": 0, "enriched": 0}
+            return {"moved_to_sold": 0, "new_sold_added": 0, "enriched": 0}
 
         ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
         ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
         self._ensure_headers(ws_listings, LISTINGS_HEADERS)
         self._ensure_headers(ws_sold, SOLD_ITEMS_HEADERS)
+        date_to_lot_id = self.get_date_to_lot_map()
 
         listings_rows = ws_listings.get_all_values()
-        if len(listings_rows) <= 1:
-            return {"moved_to_sold": 0, "enriched": 0}
-
-        l_headers = listings_rows[0]
-        l_sku_idx = l_headers.index("Item_SKU") if "Item_SKU" in l_headers else 0
-        l_title_idx = l_headers.index("Title") if "Title" in l_headers else 2
-        l_id_idx = l_headers.index("Vinted_ID") if "Vinted_ID" in l_headers else 13
+        sold_rows = ws_sold.get_all_values()
 
         active_by_vid: Dict[str, str] = {}
         active_by_title: Dict[str, str] = {}
-        for r in listings_rows[1:]:
-            sku = r[l_sku_idx].strip() if len(r) > l_sku_idx else ""
-            vid = r[l_id_idx].strip().replace(",", "") if len(r) > l_id_idx else ""
-            title = r[l_title_idx].strip().lower() if len(r) > l_title_idx else ""
-            if vid:
-                active_by_vid[vid] = sku
-            if title:
-                active_by_title[title] = sku
+        if len(listings_rows) > 1:
+            l_headers = listings_rows[0]
+            l_sku_idx = l_headers.index("Item_SKU") if "Item_SKU" in l_headers else 0
+            l_title_idx = l_headers.index("Title") if "Title" in l_headers else 2
+            l_id_idx = l_headers.index("Vinted_ID") if "Vinted_ID" in l_headers else 13
+
+            for r in listings_rows[1:]:
+                sku = r[l_sku_idx].strip() if len(r) > l_sku_idx else ""
+                vid = r[l_id_idx].strip().replace(",", "") if len(r) > l_id_idx else ""
+                title = r[l_title_idx].strip().lower() if len(r) > l_title_idx else ""
+                if vid and sku:
+                    active_by_vid[vid] = sku
+                if title and sku:
+                    active_by_title[title] = sku
+
+        s_headers = sold_rows[0] if sold_rows else SOLD_ITEMS_HEADERS
+        cur_sold_total = len(sold_rows)
+        max_sku_num = self.get_max_sku_num(cached_rows=listings_rows + sold_rows)
 
         moved_count = 0
+        enriched_count = 0
+        batch_new_sold_rows: List[List[Any]] = []
+        batch_cell_updates: List[Dict[str, Any]] = []
+
+        seen_new_vids: set = set()
+        seen_new_titles: set = set()
+        matched_sold_rows: set = set()
+
         for item in sold_items:
             vid = item.vinted_id.strip().replace(",", "") if item.vinted_id else ""
-            title = item.title.strip().lower() if item.title else ""
+            title = item.title.strip() if item.title else ""
+            clean_low = title.lower()
+            if not title:
+                continue
+
+            # Deduplicate against items already queued in this exact batch
+            if vid and vid in seen_new_vids:
+                continue
+            if not vid and clean_low in seen_new_titles:
+                continue
+
+            # 1. Check if present in active listings FIRST and move it to Sold_Items
             match_sku = None
             if vid and vid in active_by_vid:
                 match_sku = active_by_vid[vid]
-            elif title and title in active_by_title:
-                match_sku = active_by_title[title]
+            elif clean_low and clean_low in active_by_title:
+                match_sku = active_by_title[clean_low]
 
             if match_sku:
                 res = self.move_listing_to_sold(
@@ -1707,16 +1799,120 @@ class SheetsSyncEngine:
                     moved_count += 1
                     if vid:
                         active_by_vid.pop(vid, None)
-                    if title:
-                        active_by_title.pop(title, None)
+                        seen_new_vids.add(vid)
+                    if clean_low:
+                        active_by_title.pop(clean_low, None)
+                        seen_new_titles.add(clean_low)
+                    continue
 
-        if moved_count > 0:
+            # 2. Check for duplicate in Sold_Items before appending (enrich existing row if found)
+            item_date_str = item.date_listed.strftime("%Y-%m-%d") if item.date_listed else datetime.now().strftime("%Y-%m-%d")
+            matched_r_i = self.find_matching_sold_row(
+                sold_rows=sold_rows,
+                headers=s_headers,
+                vinted_id=vid,
+                vinted_url=item.vinted_url or "",
+                title=title,
+                sold_price=item.current_price,
+                sale_date=item_date_str,
+                already_matched_indices=matched_sold_rows,
+                brand=item.brand or "",
+            )
+
+            if matched_r_i:
+                assigned_lot = item.lot_id or default_lot or (date_to_lot_id.get(item_date_str, "") if auto_assign_lot else "")
+                enrich_updates = self.enrich_sold_row(
+                    existing_row=sold_rows[matched_r_i - 1],
+                    headers=s_headers,
+                    row_idx=matched_r_i,
+                    incoming={
+                        "item_title": title,
+                        "brand": item.brand,
+                        "category": item.category,
+                        "lot_id": assigned_lot,
+                        "vinted_url": item.vinted_url,
+                        "sold_price": item.current_price,
+                        "favorites": item.favorites,
+                        "views": item.views,
+                        "date_listed": item_date_str,
+                        "source": getattr(item, "source", "HTML") or "HTML",
+                    },
+                )
+                if enrich_updates:
+                    batch_cell_updates.extend(enrich_updates)
+                    enriched_count += 1
+                matched_sold_rows.add(matched_r_i)
+                if vid:
+                    seen_new_vids.add(vid)
+                if clean_low:
+                    seen_new_titles.add(clean_low)
+                continue
+
+            # 3. If neither active listing nor existing sold item found, queue for batch append to Sold_Items
+            max_sku_num += 1
+            new_sku = item.item_sku or f"SKU-{max_sku_num}"
+            next_sold_row = cur_sold_total + len(batch_new_sold_rows) + 1
+            assigned_lot = item.lot_id or default_lot or (date_to_lot_id.get(item_date_str, "") if auto_assign_lot else "") or "LOT-001"
+
+            posted_val = item.posted_price if (item.posted_price and item.posted_price > 0) else item.current_price
+            curr_val = item.current_price
+            sp_val = item.current_price
+            item_brand = item.brand or infer_brand(title, "")
+            item_cat = item.category or infer_clothing_category(title)
+            final_url = item.vinted_url or (f"https://www.vinted.com/items/{vid}" if vid else "")
+
+            sold_row_data = [
+                new_sku,                                                                     # A: Item_SKU
+                assigned_lot,                                                                # B: Lot_ID
+                title,                                                                       # C: Title
+                item_brand,                                                                  # D: Brand
+                item_cat,                                                                    # E: Category
+                f"=IFERROR(VLOOKUP(B{next_sold_row}, Inventory_Lots!A:F, 6, FALSE), 0)",      # F: Unit_Cost
+                posted_val,                                                                  # G: Posted_Price
+                curr_val,                                                                    # H: Current_Price
+                f'=IF(OR(G{next_sold_row}="", H{next_sold_row}=""), "", IF(AND(ISNUMBER(G{next_sold_row}), ISNUMBER(H{next_sold_row}), H{next_sold_row}<G{next_sold_row}), "YES", "NO"))', # I: Price_Lowered
+                f'=IF(OR(G{next_sold_row}="", H{next_sold_row}=""), "", IF(AND(ISNUMBER(G{next_sold_row}), ISNUMBER(H{next_sold_row}), H{next_sold_row}<G{next_sold_row}), G{next_sold_row}-H{next_sold_row}, 0))', # J: Price_Drop
+                "",                                                                          # K: Price_History
+                sp_val,                                                                      # L: Sold_Price
+                f'=IF(OR(G{next_sold_row}="", L{next_sold_row}=""), "", IF(AND(ISNUMBER(G{next_sold_row}), ISNUMBER(L{next_sold_row}), G{next_sold_row}>L{next_sold_row}), G{next_sold_row}-L{next_sold_row}, 0))', # M: Price_Discount
+                f'=IF(OR(G{next_sold_row}="", L{next_sold_row}=""), "", IF(L{next_sold_row}>=G{next_sold_row}, "Original Price", IF(L{next_sold_row}=H{next_sold_row}, "Lowered Price", "Accepted Offer")))', # N: Sale_Type
+                item_date_str,                                                               # O: Sale_Date
+                "Vinted",                                                                    # P: Platform
+                f'=IF(P{next_sold_row}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)', # Q: Packaging_Cost
+                f'=IF(AND(ISNUMBER(L{next_sold_row}), ISNUMBER(F{next_sold_row}), ISNUMBER(Q{next_sold_row})), L{next_sold_row}-F{next_sold_row}-Q{next_sold_row}, IF(ISNUMBER(L{next_sold_row}), L{next_sold_row}, 0))', # R: Net_Profit
+                f'=IF(AND(ISNUMBER(L{next_sold_row}), L{next_sold_row}>0), R{next_sold_row}/L{next_sold_row}, 0)', # S: Margin_%
+                item.favorites or 0,                                                         # T: Favorites
+                item.views or 0,                                                             # U: Views
+                "",                                                                          # V: Order_ID
+                final_url,                                                                   # W: Vinted_URL
+                "Sold",                                                                      # X: Status
+                item_date_str,                                                               # Y: Date_Listed
+                getattr(item, "source", "HTML") or "HTML",                                   # Z: Source
+            ]
+            batch_new_sold_rows.append(sold_row_data)
+            if vid:
+                seen_new_vids.add(vid)
+            if clean_low:
+                seen_new_titles.add(clean_low)
+
+        if batch_cell_updates:
+            try:
+                ws_sold.batch_update(batch_cell_updates, value_input_option="USER_ENTERED")
+            except Exception as e:
+                logger.warning(f"Error executing batch_update for sold closet enrichments: {e}")
+
+        new_sold_added = 0
+        if batch_new_sold_rows:
+            ws_sold.append_rows(batch_new_sold_rows, value_input_option="USER_ENTERED")
+            new_sold_added = len(batch_new_sold_rows)
+
+        if moved_count > 0 or new_sold_added > 0:
             try:
                 self.sync_lots()
             except Exception:
                 pass
 
-        return {"moved_to_sold": moved_count, "enriched": 0}
+        return {"moved_to_sold": moved_count, "new_sold_added": new_sold_added, "enriched": enriched_count}
 
     def reconcile_sold_listings(self) -> int:
         """

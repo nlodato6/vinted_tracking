@@ -417,7 +417,7 @@ def render_sync_page():
 
     # Quick Maintenance Tools
     with st.expander("Spreadsheet Tools", icon=":material/build:", expanded=False):
-        c_tool1, c_tool2, c_tool3, c_tool4, c_tool5 = st.columns(5)
+        c_tool1, c_tool2, c_tool3, c_tool4, c_tool5, c_tool6 = st.columns(6)
         with c_tool1:
             if st.button("Clean Blank Rows", type="secondary", width="stretch", icon=":material/cleaning_services:", key="clean_blank_rows_btn"):
                 with st.spinner("Scanning and purging blank rows from Google Sheets..."):
@@ -506,6 +506,20 @@ def render_sync_page():
                 st.success("Cache cleared! Reloading fresh data...", icon=":material/check_circle:")
                 time.sleep(0.5)
                 st.rerun()
+        with c_tool6:
+            with st.popover("Wipe Sheet", icon=":material/delete_forever:", help="Wipe all inventory and sales data to start completely fresh"):
+                st.markdown("**Danger Zone: Wipe Entire Sheet**")
+                st.caption("Resets `Item_Listings`, `Sold_Items`, `Hidden_Items`, and `Cancelled_Orders` to 0 rows. Resets `Inventory_Lots` to `LOT-001`.")
+                confirm_wipe = st.checkbox("Confirm sheet reset", key="confirm_wipe_sheet_chk")
+                if st.button("Wipe & Reset", type="primary", disabled=not confirm_wipe, key="exec_wipe_sheet_btn"):
+                    with st.spinner("Wiping spreadsheet and re-initializing pristine templates..."):
+                        engine = get_sheets_sync_engine(client)
+                        engine.wipe_and_reset_sheet()
+                        st.cache_data.clear()
+                        st.success("Spreadsheet completely wiped and reset to a fresh template!", icon=":material/check_circle:")
+                        time.sleep(1.2)
+                        st.rerun()
+            st.caption("Start fresh with empty catalog.")
 
     # -------------------------------------------------------------------------
     # Main Tabs: HTML Import, Email Sync, Duplicate Checker, Supplies
@@ -737,18 +751,53 @@ def render_sync_page():
                     sold_order_transitions = [it for it in valid_orders if it.item_title.strip().lower() in curr_active_titles]
                     sold_closet_transitions = [it for it in parsed_sold_closet if it.title.strip().lower() in curr_active_titles]
                     total_sold_transitions = len(sold_order_transitions) + len(sold_closet_transitions)
-                    already_sold = [it for it in valid_orders if it.item_title.strip().lower() in curr_sold_titles]
+
+                    # Deduplicated new sold items to append directly to Sold_Items
+                    seen_sold_titles_in_preview = set()
+                    new_sold_to_add = []
+                    already_sold_items = []
+
+                    for o in valid_orders:
+                        t = o.item_title.strip().lower()
+                        if t not in curr_active_titles:
+                            if t not in curr_sold_titles and t not in seen_sold_titles_in_preview:
+                                new_sold_to_add.append({
+                                    "Title": o.item_title,
+                                    "Price": f"${o.sold_price:.2f}",
+                                    "Brand": o.brand or "",
+                                    "Category": o.category or "",
+                                    "Source": "Orders HTML",
+                                })
+                                seen_sold_titles_in_preview.add(t)
+                            else:
+                                already_sold_items.append(o)
+
+                    for it in parsed_sold_closet:
+                        t = it.title.strip().lower()
+                        if t not in curr_active_titles:
+                            if t not in curr_sold_titles and t not in seen_sold_titles_in_preview:
+                                new_sold_to_add.append({
+                                    "Title": it.title,
+                                    "Price": f"${it.current_price:.2f}" if it.current_price else "$0.00",
+                                    "Brand": it.brand or "",
+                                    "Category": it.category or "",
+                                    "Source": "Sold Closet",
+                                })
+                                seen_sold_titles_in_preview.add(t)
+                            else:
+                                already_sold_items.append(it)
 
                     # Assign target lot ID to new items in preview if not already populated
                     for it in new_listings:
                         if not it.lot_id and target_lot_id:
                             it.lot_id = target_lot_id
 
-                    p1, p2, p3, p4 = st.columns(4)
-                    p1.metric("New Active to Add", len(new_listings), f"Default Lot: {target_lot_id or 'None'}", border=True)
-                    p2.metric("Active Moving to Sold", total_sold_transitions, border=True)
-                    p3.metric("Cancelled Orders", len(canc_orders), border=True)
-                    p4.metric("Duplicates Skipped", len(already_sold) + (len(parsed_active_closet) - len(new_listings)), border=True)
+                    p1, p2, p3, p4, p5 = st.columns(5)
+                    p1.metric("New Active to Add", len(new_listings), f"Lot: {target_lot_id or 'None'}", border=True)
+                    p2.metric("New Sold to Add", len(new_sold_to_add), f"Lot: {target_lot_id or 'None'}", border=True)
+                    p3.metric("Active Moving to Sold", total_sold_transitions, border=True)
+                    p4.metric("Cancelled Orders", len(canc_orders), border=True)
+                    p5.metric("Already Sold / Enriched", len(already_sold_items), border=True)
 
                     if canc_orders:
                         with st.expander(f"View Cancelled Orders Detected ({len(canc_orders)} orders)", expanded=False):
@@ -766,8 +815,13 @@ def render_sync_page():
                             trans_rows.extend([{"Title": it.title, "Price": f"${it.current_price:.2f}", "Order ID": "-", "Source": "Sold Closet"} for it in sold_closet_transitions])
                             st.dataframe(pd.DataFrame(trans_rows), width="stretch")
 
+                    if new_sold_to_add:
+                        with st.expander(f"View New Sold Items to Add ({len(new_sold_to_add)} items)", expanded=(len(new_listings) == 0)):
+                            st.caption("These items were detected as sold from your Sold Closet or Orders export and will be added directly into **Sold_Items**.")
+                            st.dataframe(pd.DataFrame(new_sold_to_add), width="stretch")
+
                     if parsed_sold_closet:
-                        with st.expander(f"View Sold Closet Items Detected ({len(parsed_sold_closet)} items)", expanded=False):
+                        with st.expander(f"View All Sold Closet Items Detected ({len(parsed_sold_closet)} items)", expanded=False):
                             st.caption("These items were detected from your Vinted Sold Closet export. They will be reconciled into Sold_Items and will never be added to active listings.")
                             st.dataframe(pd.DataFrame([{
                                 "Title": it.title,
@@ -896,7 +950,7 @@ def render_sync_page():
                                 if parsed_active_closet:
                                     res_closet = engine.reconcile_active_closet_snapshot(parsed_active_closet, default_lot=target_lot_id, auto_assign_lot=False)
 
-                                res_sold_closet = {"moved_to_sold": 0, "enriched": 0}
+                                res_sold_closet = {"moved_to_sold": 0, "new_sold_added": 0, "enriched": 0}
                                 if parsed_sold_closet:
                                     res_sold_closet = engine.reconcile_sold_closet(parsed_sold_closet, default_lot=target_lot_id)
 
@@ -910,8 +964,19 @@ def render_sync_page():
                                 summary_parts.append(f"{res_closet.get('final_active_count', 0)} active listings in closet ({res_closet.get('new_active_added', 0)} added, {res_closet.get('moved_to_sold', 0)} moved to sold, {res_closet.get('moved_to_hidden', 0)} hidden)")
                             if parsed_orders:
                                 summary_parts.append(f"{res_orders.get('synced_orders', 0)} sales orders synced, {res_orders.get('cancelled_orders', 0)} cancellations recorded")
-                            if parsed_sold_closet and res_sold_closet.get("moved_to_sold", 0) > 0:
-                                summary_parts.append(f"{res_sold_closet.get('moved_to_sold', 0)} sold closet items moved from active to sold")
+                            if parsed_sold_closet:
+                                sc_added = res_sold_closet.get("new_sold_added", 0)
+                                sc_moved = res_sold_closet.get("moved_to_sold", 0)
+                                sc_enr = res_sold_closet.get("enriched", 0)
+                                sc_parts = []
+                                if sc_added > 0:
+                                    sc_parts.append(f"{sc_added} new sold added")
+                                if sc_moved > 0:
+                                    sc_parts.append(f"{sc_moved} moved from active")
+                                if sc_enr > 0:
+                                    sc_parts.append(f"{sc_enr} enriched")
+                                if sc_parts:
+                                    summary_parts.append(f"Sold Closet: {', '.join(sc_parts)}")
                             
                             sync_summary_msg = " • ".join(summary_parts) if summary_parts else "Sync completed successfully."
                             st.success(f"Sync Complete! {sync_summary_msg}", icon=":material/check_circle:")

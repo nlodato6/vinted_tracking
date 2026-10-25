@@ -1976,6 +1976,108 @@ def test_reconcile_sold_closet_moves_item_from_listings(mock_sheets_env):
     assert not any(r[0] == "SKU-1001" for r in ws_listings.rows[1:])
     # ws_listings should not have grown
     assert len(ws_listings.rows) == 2
+    # Unrelated Sold Item should now be in ws_sold as a new sold item
+    assert res["new_sold_added"] == 1
+    assert any("Unrelated Sold Item" in r[2] for r in ws_sold.rows[1:])
+
+
+def test_reconcile_sold_closet_appends_when_listings_empty(mock_sheets_env):
+    """Verifies that reconcile_sold_closet cleanly appends all sold items when Item_Listings is empty."""
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Wipe listings to 0 rows (headers only)
+    ws_listings.rows = [LISTINGS_HEADERS]
+    ws_sold.rows = [SOLD_ITEMS_HEADERS]
+
+    sold_closet_items = [
+        ItemListing(
+            item_sku="",
+            title=f"Vintage Shirt {i}",
+            brand="Nike",
+            category="Tops",
+            current_price=20.0 + i,
+            vinted_id=f"vid_{100 + i}",
+            vinted_url=f"https://www.vinted.com/items/{100 + i}",
+            status="Sold",
+        )
+        for i in range(5)
+    ]
+
+    res = engine.reconcile_sold_closet(sold_closet_items, default_lot="LOT-001")
+    assert res["moved_to_sold"] == 0
+    assert res["new_sold_added"] == 5
+
+    # ws_sold should have 5 items + header
+    assert len(ws_sold.rows) == 6
+    # Item_Listings should remain at 0 items
+    assert len(ws_listings.rows) == 1
+    # Check lot assignment and formulas
+    for idx, r in enumerate(ws_sold.rows[1:], start=2):
+        assert r[1] == "LOT-001"  # Lot_ID
+        assert r[5] == f"=IFERROR(VLOOKUP(B{idx}, Inventory_Lots!A:F, 6, FALSE), 0)"  # Unit_Cost formula
+
+
+def test_reconcile_sold_closet_enriches_existing(mock_sheets_env):
+    """Verifies that reconcile_sold_closet enriches existing Sold_Items without duplicating."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Pre-populate one sold item with minimal data (no URL, 0 favorites)
+    ws_sold.rows = [
+        SOLD_ITEMS_HEADERS,
+        [
+            "SKU-1001", "LOT-001", "Vintage Tommy Hilfiger Fleece", "Tommy Hilfiger", "Outerwear",
+            "=IFERROR(VLOOKUP(B2, Inventory_Lots!A:F, 6, FALSE), 0)",
+            "40.00", "40.00", "NO", "0.0", "", "35.00", "5.00", "Accepted Offer",
+            "2026-10-15", "Vinted", "=IF(P2=\"FB Marketplace (Local)\", 0, Shipping_Supplies!$H$2)",
+            "30.00", "0.85", "0", "0", "01a-test-order", "", "Sold", "2026-10-10", "HTML"
+        ]
+    ]
+
+    sold_closet_items = [
+        ItemListing(
+            item_sku="",
+            title="Vintage Tommy Hilfiger Fleece",
+            brand="Tommy Hilfiger",
+            category="Outerwear",
+            current_price=35.0,
+            favorites=12,
+            views=45,
+            vinted_id="55443322",
+            vinted_url="https://www.vinted.com/items/55443322-vintage-fleece",
+            status="Sold",
+        )
+    ]
+
+    res = engine.reconcile_sold_closet(sold_closet_items)
+    assert res["moved_to_sold"] == 0
+    assert res["new_sold_added"] == 0
+    assert res["enriched"] == 1
+    # Ensure no duplicates were added
+    assert len(ws_sold.rows) == 2
+
+
+def test_wipe_and_reset_sheet(mock_sheets_env):
+    """Verifies that wipe_and_reset_sheet completely clears data rows and resets LOT-001."""
+    engine, sh = mock_sheets_env
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_lots = sh.worksheet(TAB_INVENTORY_LOTS)
+
+    assert len(ws_listings.rows) > 1
+    res = engine.wipe_and_reset_sheet()
+    assert res[TAB_ITEM_LISTINGS] == "wiped"
+    assert res[TAB_SOLD_ITEMS] == "wiped"
+
+    # Data rows should be 0 (only headers)
+    assert len(ws_listings.rows) == 1
+    assert len(ws_sold.rows) == 1
+    # LOT-001 preserved
+    assert len(ws_lots.rows) == 2
+    assert ws_lots.rows[1][0] == "LOT-001"
+
 
 
 
