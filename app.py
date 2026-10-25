@@ -37,7 +37,7 @@ LOGO_PATH = "assets/invintory.png"
 
 st.set_page_config(
     page_title="Threadcount",
-    page_icon=LOGO_PATH if os.path.exists(LOGO_PATH) else "👕",
+    page_icon=LOGO_PATH if os.path.exists(LOGO_PATH) else ":material/checkroom:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -70,7 +70,7 @@ if "email_sync_user" not in st.session_state:
 # -----------------------------------------------------------------------------
 # Legal & Compliance Dialogs
 # -----------------------------------------------------------------------------
-@st.dialog("🛡️ Threadcount Privacy Policy", width="large")
+@st.dialog("Threadcount Privacy Policy", width="large")
 def show_privacy_dialog():
     privacy_file = settings.base_dir / "PRIVACY_POLICY.md"
     if privacy_file.exists():
@@ -79,7 +79,7 @@ def show_privacy_dialog():
         st.info("Privacy Policy document is available at PRIVACY_POLICY.md")
 
 
-@st.dialog("📜 Threadcount Terms of Service", width="large")
+@st.dialog("Threadcount Terms of Service", width="large")
 def show_terms_dialog():
     terms_file = settings.base_dir / "TERMS_OF_SERVICE.md"
     if terms_file.exists():
@@ -88,7 +88,7 @@ def show_terms_dialog():
         st.info("Terms of Service document is available at TERMS_OF_SERVICE.md")
 
 
-@st.dialog("📖 Threadcount User & Feature Guide", width="large")
+@st.dialog("Threadcount User & Feature Guide", width="large")
 def show_user_guide_dialog():
     guide_file = settings.base_dir / "USER_GUIDE.md"
     if guide_file.exists():
@@ -161,20 +161,20 @@ if not st.session_state.authenticated:
                 from src.auth import get_redirect_uri
                 active_redirect = get_redirect_uri()
                 auth_url, _ = get_authorization_url(active_redirect)
-                st.link_button("🔑 Sign in with Google", auth_url, type="primary", width="stretch")
+                st.link_button("Sign in with Google", auth_url, icon=":material/key:", type="primary", width="stretch")
                 st.caption("Sign in with your Google account to connect directly to your personal Google Sheets.")
-                with st.expander("ℹ️ Google OAuth Redirect URI details", expanded=False):
+                with st.expander("Google OAuth Redirect URI details", icon=":material/info:", expanded=False):
                     st.markdown(f"**App Redirect URI:** `{active_redirect}`")
                     st.caption("Ensure this exact URL is added under **Authorized redirect URIs** in your Google Cloud Console Credentials.")
             except Exception as e:
-                st.warning(f"OAuth configuration notice: {e}")
+                st.warning(f"OAuth configuration notice: {e}", icon=":material/warning:")
         else:
-            st.info("ℹ️ Google OAuth can be enabled by setting `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` or Streamlit Secrets.")
+            st.info("Google OAuth can be enabled by setting `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` or Streamlit Secrets.", icon=":material/info:")
 
         st.divider()
 
         # 2. Manual Login (Fallback for Streamlit Cloud & Testing)
-        with st.expander("🔐 Manual Login (Fallback)", expanded=False):
+        with st.expander("Manual Login (Fallback)", icon=":material/lock:", expanded=False):
             st.caption("Sign in with email and password for manual access, testing, or if Google OAuth is unconfigured.")
             manual_email = st.text_input("Email", placeholder="user@threadcount.com", key="manual_login_email")
             manual_pass = st.text_input("Password", type="password", placeholder="Enter your password", key="manual_login_pass")
@@ -207,19 +207,19 @@ if not st.session_state.authenticated:
                         saved_sheet = get_user_spreadsheet(clean_email)
                         st.session_state.spreadsheet_id = saved_sheet or settings.google_sheet_id or "1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg"
                     log_session(clean_email, user_display, auth_provider="manual_password")
-                    st.success("✔ Signed in successfully!")
+                    st.success("Signed in successfully!", icon=":material/check_circle:")
                     st.rerun()
                 else:
-                    st.error("Invalid email or password.")
+                    st.error("Invalid email or password.", icon=":material/error:")
 
     with col2:
         st.markdown("""
         ### What This App Does
-        * **📈 Interactive Plotly Metrics**: Track gross revenue, net profit, margin trends, brand rankings, and price-to-profit distributions.
-        * **📦 1-Click HTML Import**: Upload your saved Vinted profile or orders HTML to update active items and sales.
-        * **⚡ Zero Duplicate Guarantee**: Intelligent set-based reconciliation avoids duplicating previously imported items.
-        * **📬 Real-Time Email Sync**: Pull sales and offers directly from your Gmail inbox via IMAP.
-        * **🔒 100% Private**: Your data connects straight to your personal Google Drive with zero middleman database.
+        * **:material/analytics: Interactive Plotly Metrics**: Track gross revenue, net profit, margin trends, brand rankings, and price-to-profit distributions.
+        * **:material/upload_file: 1-Click HTML Import**: Upload your saved Vinted profile or orders HTML to update active items and sales.
+        * **:material/verified: Zero Duplicate Guarantee**: Intelligent set-based reconciliation avoids duplicating previously imported items.
+        * **:material/mail: Real-Time Email Sync**: Pull sales and offers directly from your Gmail inbox via IMAP.
+        * **:material/lock: 100% Private**: Your data connects straight to your personal Google Drive with zero middleman database.
         """)
 
     st.divider()
@@ -230,13 +230,13 @@ if not st.session_state.authenticated:
             "Vinted, Google LLC, or Meta Platforms, Inc. All trademarks belong to their respective owners."
         )
     with leg_col2:
-        if st.button("📖 User Guide", width="stretch", key="login_guide_btn", icon=":material/menu_book:"):
+        if st.button("User Guide", icon=":material/menu_book:", width="stretch", key="login_guide_btn"):
             show_user_guide_dialog()
     with leg_col3:
-        if st.button("🛡️ Privacy Policy", width="stretch", key="login_privacy_btn"):
+        if st.button("Privacy Policy", icon=":material/shield:", width="stretch", key="login_privacy_btn"):
             show_privacy_dialog()
     with leg_col4:
-        if st.button("📜 Terms of Service", width="stretch", key="login_terms_btn"):
+        if st.button("Terms of Service", icon=":material/description:", width="stretch", key="login_terms_btn"):
             show_terms_dialog()
 
     st.stop()
@@ -267,12 +267,13 @@ with st.sidebar:
 
     if st.session_state.get("missing_sheets_scope", False):
         st.warning(
-            "⚠️ **Google Sheets Permission Needed**: When you signed in with Google, the permission to view and edit Google Sheets was not selected.\n\n"
-            "To allow Thread Count to read and update your spreadsheets, please click **Sign Out** above and when the Google prompt appears, **check the checkbox for Google Sheets**."
+            "**Google Sheets Permission Needed**: When you signed in with Google, the permission to view and edit Google Sheets was not selected.\n\n"
+            "To allow Thread Count to read and update your spreadsheets, please click **Sign Out** above and when the Google prompt appears, **check the checkbox for Google Sheets**.",
+            icon=":material/warning:",
         )
 
     st.sidebar.divider()
-    st.sidebar.markdown("### 📊 Google Sheet")
+    st.sidebar.markdown("### Google Sheet")
 
     # If sheet is not in session state, check user preferences in database
     if not st.session_state.spreadsheet_id and u_email:
@@ -281,11 +282,11 @@ with st.sidebar:
             st.session_state.spreadsheet_id = saved_sheet
 
     if st.session_state.spreadsheet_id:
-        st.sidebar.success("Sheet Connected", icon="✅")
+        st.sidebar.success("Sheet Connected", icon=":material/check_circle:")
         sheet_url = f"https://docs.google.com/spreadsheets/d/{st.session_state.spreadsheet_id}/edit"
-        st.sidebar.link_button("🔗 Open Live Sheet", sheet_url, type="primary", width="stretch")
+        st.sidebar.link_button("Open Live Sheet", sheet_url, icon=":material/open_in_new:", type="primary", width="stretch")
 
-        with st.sidebar.expander("⚙️ Manage or Switch Sheet", expanded=False):
+        with st.sidebar.expander("Manage or Switch Sheet", icon=":material/settings:", expanded=False):
             sheet_id_input = st.text_input(
                 "Change Sheet ID / URL",
                 value=st.session_state.spreadsheet_id,
@@ -302,7 +303,7 @@ with st.sidebar:
                     st.cache_data.clear()
                     st.rerun()
 
-            if st.session_state.user_credentials and st.button("✨ Auto-Recreate Fresh Sheet", width="stretch", key="sb_recreate_sheet_btn"):
+            if st.session_state.user_credentials and st.button("Auto-Recreate Fresh Sheet", icon=":material/auto_fix_high:", width="stretch", key="sb_recreate_sheet_btn"):
                 with st.spinner("Provisioning new sheet in your Drive..."):
                     try:
                         s_id, s_title, _ = auto_provision_user_sheet(
@@ -315,11 +316,11 @@ with st.sidebar:
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Failed to create: {e}")
+                        st.error(f"Failed to create: {e}", icon=":material/error:")
     else:
-        st.sidebar.warning("No Sheet Connected", icon="⚠️")
+        st.sidebar.warning("No Sheet Connected", icon=":material/warning:")
         if st.session_state.user_credentials:
-            if st.sidebar.button("✨ Auto-Create & Connect Sheet", type="primary", width="stretch", icon=":material/magic_button:", key="sb_auto_create_btn"):
+            if st.sidebar.button("Auto-Create & Connect Sheet", type="primary", width="stretch", icon=":material/magic_button:", key="sb_auto_create_btn"):
                 with st.spinner("Setting up your tracker in Google Drive..."):
                     try:
                         s_id, s_title, _ = auto_provision_user_sheet(
@@ -332,9 +333,9 @@ with st.sidebar:
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
-                        st.sidebar.error(f"Setup error: {e}")
+                        st.sidebar.error(f"Setup error: {e}", icon=":material/error:")
 
-        with st.sidebar.expander("Or Connect Existing Sheet", expanded=not bool(st.session_state.user_credentials)):
+        with st.sidebar.expander("Or Connect Existing Sheet", icon=":material/link:", expanded=not bool(st.session_state.user_credentials)):
             sheet_id_input = st.text_input(
                 "Spreadsheet ID or URL",
                 value="",
@@ -354,15 +355,15 @@ with st.sidebar:
 
             master_template_id = "1osw6Osf37GMeCEf3dXA6_TqaUPCCfsUg4VS5HIKLGWg"
             template_copy_url = f"https://docs.google.com/spreadsheets/d/{master_template_id}/copy"
-            st.link_button("📋 Copy Template Manually", template_copy_url, width="stretch")
+            st.link_button("Copy Template Manually", template_copy_url, icon=":material/content_copy:", width="stretch")
 
     st.sidebar.divider()
     # Documentation & User Guide
-    if st.sidebar.button("📖 User Guide & Manual", icon=":material/menu_book:", width="stretch", key="sb_user_guide_btn"):
+    if st.sidebar.button("User Guide & Manual", icon=":material/menu_book:", width="stretch", key="sb_user_guide_btn"):
         show_user_guide_dialog()
 
     # Feedback & User Voice Module
-    with st.sidebar.popover("💬 Feedback & Requests", icon=":material/rate_review:", width="stretch"):
+    with st.sidebar.popover("Feedback & Requests", icon=":material/rate_review:", width="stretch"):
         st.markdown("#### Share Your Feedback")
         st.caption("Suggest features, report bugs, or share thoughts directly with the Threadcount team.")
 
@@ -387,7 +388,7 @@ with st.sidebar:
 
         if st.button("Send Feedback", icon=":material/send:", type="primary", width="stretch", key="sb_fb_submit_btn"):
             if not fb_message.strip():
-                st.warning("Please type a short message before sending.")
+                st.warning("Please type a short message before sending.", icon=":material/warning:")
             else:
                 try:
                     log_feedback(
@@ -398,23 +399,23 @@ with st.sidebar:
                         spreadsheet_id=st.session_state.spreadsheet_id,
                         sync_to_sheets=True,
                     )
-                    st.toast("🎉 Thank you! Your feedback has been received.", icon=":material/favorite:")
-                    st.success("✔ Feedback submitted! Recorded in Admin Hub & Google Sheets.")
+                    st.toast("Thank you! Your feedback has been received.", icon=":material/thumb_up:")
+                    st.success("Feedback submitted! Recorded in Admin Hub & Google Sheets.", icon=":material/check_circle:")
                 except Exception as e:
-                    st.error(f"Could not submit feedback: {e}")
+                    st.error(f"Could not submit feedback: {e}", icon=":material/error:")
 
     st.sidebar.divider()
-    with st.sidebar.expander("⚖️ Legal & Compliance"):
+    with st.sidebar.expander("Legal & Compliance", icon=":material/gavel:"):
         st.caption(
             "**Threadcount** is an independent third-party tool and is not affiliated with, authorized, or endorsed by "
             "Vinted, Google LLC, or Meta Platforms, Inc. All trademarks belong to their respective owners."
         )
         col_sp, col_st = st.columns(2)
         with col_sp:
-            if st.button("Privacy Policy", width="stretch", key="sb_privacy_btn"):
+            if st.button("Privacy Policy", icon=":material/shield:", width="stretch", key="sb_privacy_btn"):
                 show_privacy_dialog()
         with col_st:
-            if st.button("Terms of Service", width="stretch", key="sb_terms_btn"):
+            if st.button("Terms of Service", icon=":material/description:", width="stretch", key="sb_terms_btn"):
                 show_terms_dialog()
 
 # -----------------------------------------------------------------------------

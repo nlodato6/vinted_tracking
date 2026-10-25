@@ -69,7 +69,7 @@ def load_raw_sheet_data(sheet_id: str, _creds):
 
 
 def render_metrics_page():
-    st.header("📈 Thread Count Analytics & Performance")
+    st.header("Thread Count Analytics & Performance", icon=":material/analytics:")
     st.caption("From inbox alerts to bottom-line gains. Interactive metrics, profit trends, and inventory intelligence.")
 
     spreadsheet_id = st.session_state.get("spreadsheet_id")
@@ -77,7 +77,7 @@ def render_metrics_page():
     u_email = (st.session_state.get("user_info", {}).get("email") or "anonymous").lower()
 
     if not spreadsheet_id:
-        st.warning("No Google Spreadsheet ID configured. Please specify one in the sidebar.")
+        st.warning("No Google Spreadsheet ID configured. Please specify one in the sidebar.", icon=":material/warning:")
         return
 
     # Data fetch with spinner
@@ -87,15 +87,16 @@ def render_metrics_page():
         log_event(u_email, "view_metrics", f"Loaded data for sheet {spreadsheet_id}", spreadsheet_id=spreadsheet_id)
     except Exception as e:
         log_error(u_email, "metrics.py:fetch_data", e)
-        st.error(f"Failed to fetch data from spreadsheet: {e}")
+        st.error(f"Failed to fetch data from spreadsheet: {e}", icon=":material/error:")
         if not user_creds:
             st.info(
-                "💡 **Why did this happen?** You signed in using the Manual Password fallback instead of Google OAuth.\n\n"
+                "**Why did this happen?** You signed in using the Manual Password fallback instead of Google OAuth.\n\n"
                 "To access Google Sheets, you can either:\n"
-                "1. **Sign out and click '🔑 Sign in with Google'** (easiest, no service account needed).\n"
-                "2. **Add `GOOGLE_SERVICE_ACCOUNT_JSON` to Streamlit Cloud Secrets** with your `credentials.json` contents so manual logins can query Google Sheets."
+                "1. **Sign out and click ':material/key: Sign in with Google'** (easiest, no service account needed).\n"
+                "2. **Add `GOOGLE_SERVICE_ACCOUNT_JSON` to Streamlit Cloud Secrets** with your `credentials.json` contents so manual logins can query Google Sheets.",
+                icon=":material/lightbulb:",
             )
-        st.button("🔄 Retry Connection", on_click=lambda: st.cache_data.clear())
+        st.button("Retry Connection", icon=":material/refresh:", on_click=lambda: st.cache_data.clear())
         return
 
     df_sold = parse_sold_dataframe(sold_rows)
@@ -149,7 +150,7 @@ def render_metrics_page():
 
     with f3:
         st.write("") # vertical spacing
-        if st.button("🔄 Refresh Data", width="stretch", help="Clear cache and fetch latest Google Sheets records"):
+        if st.button("Refresh Data", icon=":material/refresh:", width="stretch", help="Clear cache and fetch latest Google Sheets records"):
             st.cache_data.clear()
             st.rerun()
 
@@ -217,9 +218,9 @@ def render_metrics_page():
     k1, k2, k3, k4 = st.columns(4)
 
     if is_positive:
-        cash_delta = f"✅ Cash Flow Positive (+{cash_summary['cash_roi_pct']:.1f}% ROI)"
+        cash_delta = f":material/check_circle: Cash Flow Positive (+{cash_summary['cash_roi_pct']:.1f}% ROI)"
     else:
-        cash_delta = f"⚠️ ${abs(net_cash):,.2f} to breakeven ({cash_summary['recovery_pct']:.1f}% recovered)"
+        cash_delta = f":material/warning: ${abs(net_cash):,.2f} to breakeven ({cash_summary['recovery_pct']:.1f}% recovered)"
 
     k1.metric(
         "Actual Net Cash Profit",
@@ -299,7 +300,7 @@ def render_metrics_page():
     # Cash Flow & Capital Recovery Section
     # -------------------------------------------------------------------------
     with st.container(border=True):
-        st.subheader("💵 Cash Flow & Capital Recovery")
+        st.subheader("Cash Flow & Capital Recovery", icon=":material/payments:")
         st.caption("Track when your upfront haul and packaging investments are fully recouped into pure take-home profit.")
 
         cf_col1, cf_col2 = st.columns([1.2, 1.8], vertical_alignment="center")
@@ -310,9 +311,15 @@ def render_metrics_page():
             st.progress(rec_pct / 100.0)
 
             if is_positive:
-                st.success(f"🎉 **Hauls & Supplies 100% Paid Off!** You are in pure cash profit territory with **+${net_cash:,.2f}** in pocket.", icon="✅")
+                st.success(
+                    f"**Hauls & Supplies 100% Paid Off!** You are in pure cash profit territory with **+${net_cash:,.2f}** in pocket.",
+                    icon=":material/check_circle:",
+                )
             else:
-                st.info(f"⏳ **Breakeven Target**: You need **${abs(net_cash):,.2f}** more in sales revenue to fully recoup all inventory and packaging expenses.", icon="🎯")
+                st.info(
+                    f"**Breakeven Target**: You need **${abs(net_cash):,.2f}** more in sales revenue to fully recoup all inventory and packaging expenses.",
+                    icon=":material/target:",
+                )
 
             st.markdown(f"""
             - **Gross Cash Inflow**: `${total_rev:,.2f}`
@@ -391,7 +398,7 @@ def render_metrics_page():
     # -------------------------------------------------------------------------
     if not df_cancelled.empty:
         with st.container(border=True):
-            st.subheader("🚫 Cancellation Intelligence & Lost Revenue")
+            st.subheader("Cancellation Intelligence & Lost Revenue", icon=":material/cancel:")
             st.caption("Understand why sales fall through, identify repeat return patterns, and track refunded revenue.")
 
             canc_col1, canc_col2 = st.columns(2)
@@ -410,7 +417,7 @@ def render_metrics_page():
     # Row 6: Detailed Transactions Drill-Down Table
     # -------------------------------------------------------------------------
     with st.container(border=True):
-        st.subheader("Recent Sales Drill-Down")
+        st.subheader("Recent Sales Drill-Down", icon=":material/table_chart:")
         
         if not filtered_sold.empty:
             display_cols = [
@@ -430,14 +437,15 @@ def render_metrics_page():
             # Export CSV
             csv_data = filtered_sold[valid_cols].to_csv(index=False).encode("utf-8")
             st.download_button(
-                label="📥 Export Filtered Sales to CSV",
+                label="Export Filtered Sales to CSV",
+                icon=":material/download:",
                 data=csv_data,
                 file_name=f"vinted_sales_export_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv",
                 width="content",
             )
         else:
-            st.info("No sold items matching current filters.")
+            st.info("No sold items matching current filters.", icon=":material/info:")
 
 
 if __name__ == "__main__":

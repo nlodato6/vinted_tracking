@@ -596,7 +596,7 @@ def build_cash_flow_waterfall(cash_summary: Dict[str, Any]) -> go.Figure:
     )
 
     fig.update_layout(
-        title=dict(text="💵 Cash Flow & Capital Recovery Breakdown", x=0.01),
+        title=dict(text="Cash Flow & Capital Recovery Breakdown", x=0.01),
         showlegend=False,
         height=320,
         margin=dict(l=10, r=10, t=45, b=20),
