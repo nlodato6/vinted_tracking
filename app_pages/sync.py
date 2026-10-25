@@ -1129,7 +1129,7 @@ def render_sync_page():
                 default="Sold Items (Sold_Items)",
                 key="dup_target_sheet_choice",
             ) or "Sold Items (Sold_Items)"
-            target_tab_name = sheet_options[selected_sheet_label]
+            target_tab_name = sheet_options.get(selected_sheet_label, "Sold_Items")
 
         with col_cfg2:
             auto_scan = st.session_state.pop("duplicate_scan_trigger", False)
@@ -1155,7 +1155,7 @@ def render_sync_page():
                     for g in dup_groups:
                         rec_idx = g.get("recommended_keep_row_idx")
                         g_id = g["group_id"]
-                        st.session_state[f"dup_decision_{g_id}"] = f"merge_into:{rec_idx}"
+                        st.session_state[f"dup_decision_{target_tab_name}_{g_id}"] = f"merge_into:{rec_idx}"
                 except Exception as e:
                     log_error(u_email, "sync.py:find_duplicate_groups", e)
                     st.error(f"Error scanning for duplicates: {e}")
@@ -1184,103 +1184,107 @@ def render_sync_page():
                     if st.button("⭐ Merge into Best for All", width="stretch", icon=":material/auto_fix_high:", key="btn_bulk_merge"):
                         for g in groups:
                             rec_idx = g.get("recommended_keep_row_idx")
-                            st.session_state[f"dup_decision_{g['group_id']}"] = f"merge_into:{rec_idx}"
+                            st.session_state[f"dup_decision_{target_tab_name}_{g['group_id']}"] = f"merge_into:{rec_idx}"
                         st.rerun()
                 with b_c2:
                     if st.button("🗑️ Keep Best Row Only for All", width="stretch", icon=":material/delete_forever:", key="btn_bulk_keep_best"):
                         for g in groups:
                             rec_idx = g.get("recommended_keep_row_idx")
-                            st.session_state[f"dup_decision_{g['group_id']}"] = f"keep_row:{rec_idx}"
+                            st.session_state[f"dup_decision_{target_tab_name}_{g['group_id']}"] = f"keep_row:{rec_idx}"
                         st.rerun()
                 with b_c3:
                     if st.button("👥 Keep Both for All", width="stretch", icon=":material/people:", key="btn_bulk_keep_both"):
                         for g in groups:
-                            st.session_state[f"dup_decision_{g['group_id']}"] = "keep_both"
+                            st.session_state[f"dup_decision_{target_tab_name}_{g['group_id']}"] = "keep_both"
                         st.rerun()
 
                 st.divider()
 
                 # Render each duplicate group
-                for g_idx, g in enumerate(groups):
-                    g_id = g["group_id"]
-                    rec_idx = g.get("recommended_keep_row_idx")
-                    rows = g.get("rows", [])
+                try:
+                    for g_idx, g in enumerate(groups):
+                        g_id = g["group_id"]
+                        rec_idx = g.get("recommended_keep_row_idx")
+                        rows = g.get("rows", [])
 
-                    with st.container(border=True):
-                        # Group Header
-                        g_h1, g_h2 = st.columns([3, 1])
-                        with g_h1:
-                            st.markdown(f"#### 🔍 Group #{g_idx + 1}")
-                            st.caption(f"**Detection Reason:** {g.get('reason', 'Duplicate item match')}")
-                        with g_h2:
-                            st.metric("Duplicate Rows", len(rows), border=False)
+                        with st.container(border=True):
+                            # Group Header
+                            g_h1, g_h2 = st.columns([3, 1])
+                            with g_h1:
+                                st.markdown(f"#### 🔍 Group #{g_idx + 1}")
+                                st.caption(f"**Detection Reason:** {g.get('reason', 'Duplicate item match')}")
+                            with g_h2:
+                                st.metric("Duplicate Rows", len(rows), border=False)
 
-                        # Side-by-side comparison of items
-                        row_cols = st.columns(len(rows))
-                        for r_col_idx, (r_col, row_info) in enumerate(zip(row_cols, rows)):
-                            is_rec = (row_info["row_idx"] == rec_idx)
-                            with r_col:
-                                card_border = "2px solid #22c55e" if is_rec else "1px solid #334155"
-                                bg_color = "rgba(34, 197, 94, 0.08)" if is_rec else "rgba(30, 41, 59, 0.5)"
-                                badge_html = (
-                                    '<span style="background-color:#166534;color:#bbf7d0;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;">⭐ RECOMMENDED (MOST COMPLETE)</span>'
-                                    if is_rec else
-                                    '<span style="background-color:#334155;color:#94a3b8;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">DUPLICATE CANDIDATE</span>'
-                                )
+                            # Side-by-side comparison of items
+                            row_cols = st.columns(len(rows))
+                            for r_col_idx, (r_col, row_info) in enumerate(zip(row_cols, rows)):
+                                r_idx = row_info.get("row_idx")
+                                is_rec = (r_idx == rec_idx)
+                                with r_col:
+                                    card_border = "2px solid #22c55e" if is_rec else "1px solid #334155"
+                                    bg_color = "rgba(34, 197, 94, 0.08)" if is_rec else "rgba(30, 41, 59, 0.5)"
+                                    badge_html = (
+                                        '<span style="background-color:#166534;color:#bbf7d0;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;">⭐ RECOMMENDED (MOST COMPLETE)</span>'
+                                        if is_rec else
+                                        '<span style="background-color:#334155;color:#94a3b8;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">DUPLICATE CANDIDATE</span>'
+                                    )
 
-                                price_display = f"${row_info['price']:.2f}" if row_info['price'] > 0 else "—"
-                                order_display = row_info['order_id'] or "—"
-                                sku_display = row_info['sku'] or "—"
-                                lot_display = row_info['lot_id'] or "—"
-                                brand_display = row_info['brand'] or "—"
-                                cat_display = row_info['category'] or "—"
-                                date_display = row_info['date'] or "—"
-                                title_display = row_info['title'] or "*(No Title)*"
+                                    price_val = row_info.get("price", 0.0)
+                                    price_display = f"${price_val:.2f}" if price_val > 0 else "—"
+                                    order_display = row_info.get("order_id") or "—"
+                                    sku_display = row_info.get("sku") or "—"
+                                    lot_display = row_info.get("lot_id") or row_info.get("lot") or "—"
+                                    brand_display = row_info.get("brand") or "—"
+                                    cat_display = row_info.get("category") or "—"
+                                    date_display = row_info.get("date") or "—"
+                                    title_display = row_info.get("title") or "*(No Title)*"
+                                    comp_score = row_info.get("completeness_score", 0)
 
-                                st.markdown(
-                                    f"""
-                                    <div style="border:{card_border};background:{bg_color};border-radius:8px;padding:12px;margin-bottom:8px;">
-                                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                                            <span style="font-weight:700;font-size:14px;color:#f8fafc;">Row #{row_info['row_idx']}</span>
-                                            {badge_html}
+                                    st.markdown(
+                                        f"""
+                                        <div style="border:{card_border};background:{bg_color};border-radius:8px;padding:12px;margin-bottom:8px;">
+                                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                                                <span style="font-weight:700;font-size:14px;color:#f8fafc;">Row #{r_idx}</span>
+                                                {badge_html}
+                                            </div>
+                                            <div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;">{html.escape(title_display)}</div>
+                                            <div style="font-size:12px;color:#94a3b8;line-height:1.5;">
+                                                <div><strong>Price:</strong> <span style="color:#38bdf8;">{price_display}</span> &nbsp;|&nbsp; <strong>Date:</strong> {date_display}</div>
+                                                <div><strong>Brand:</strong> {html.escape(brand_display)} &nbsp;|&nbsp; <strong>Cat:</strong> {html.escape(cat_display)}</div>
+                                                <div><strong>Lot:</strong> {html.escape(lot_display)} &nbsp;|&nbsp; <strong>SKU:</strong> {html.escape(sku_display)}</div>
+                                                <div><strong>Order ID:</strong> <code>{html.escape(order_display)}</code></div>
+                                                <div><strong>Completeness Score:</strong> {comp_score}/8</div>
+                                            </div>
                                         </div>
-                                        <div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:6px;">{html.escape(title_display)}</div>
-                                        <div style="font-size:12px;color:#94a3b8;line-height:1.5;">
-                                            <div><strong>Price:</strong> <span style="color:#38bdf8;">{price_display}</span> &nbsp;|&nbsp; <strong>Date:</strong> {date_display}</div>
-                                            <div><strong>Brand:</strong> {html.escape(brand_display)} &nbsp;|&nbsp; <strong>Cat:</strong> {html.escape(cat_display)}</div>
-                                            <div><strong>Lot:</strong> {html.escape(lot_display)} &nbsp;|&nbsp; <strong>SKU:</strong> {html.escape(sku_display)}</div>
-                                            <div><strong>Order ID:</strong> <code>{html.escape(order_display)}</code></div>
-                                            <div><strong>Completeness Score:</strong> {row_info['completeness_score']}/8</div>
-                                        </div>
-                                    </div>
-                                    """,
-                                    unsafe_allow_html=True,
-                                )
+                                        """,
+                                        unsafe_allow_html=True,
+                                    )
 
-                        # Decision Radio / Options for this group
-                        choice_options = {}
-                        # Merge option
-                        choice_options[f"merge_into:{rec_idx}"] = f"🔄 Merge missing fields into Row #{rec_idx} & delete other row(s) (Recommended)"
-                        # Keep Row X options
-                        for row_info in rows:
-                            r_i = row_info["row_idx"]
-                            other_indices = [r["row_idx"] for r in rows if r["row_idx"] != r_i]
-                            others_str = ", ".join(f"#{x}" for x in other_indices)
-                            choice_options[f"keep_row:{r_i}"] = f"🗑️ Keep Row #{r_i} only (delete {others_str})"
-                        # Keep Both option
-                        choice_options["keep_both"] = "👥 Keep Both rows (do not delete or change anything)"
+                            # Decision Radio / Options for this group
+                            choice_options = {}
+                            choice_options[f"merge_into:{rec_idx}"] = f"🔄 Merge missing fields into Row #{rec_idx} & delete other row(s) (Recommended)"
+                            for row_info in rows:
+                                r_i = row_info.get("row_idx")
+                                other_indices = [r.get("row_idx") for r in rows if r.get("row_idx") != r_i]
+                                others_str = ", ".join(f"#{x}" for x in other_indices)
+                                choice_options[f"keep_row:{r_i}"] = f"🗑️ Keep Row #{r_i} only (delete {others_str})"
+                            choice_options["keep_both"] = "👥 Keep Both rows (do not delete or change anything)"
 
-                        current_val = st.session_state.get(f"dup_decision_{g_id}", f"merge_into:{rec_idx}")
-                        if current_val not in choice_options:
-                            current_val = f"merge_into:{rec_idx}"
+                            group_key = f"dup_decision_{target_tab_name}_{g_id}"
+                            if group_key not in st.session_state or st.session_state[group_key] not in choice_options:
+                                st.session_state[group_key] = f"merge_into:{rec_idx}"
 
-                        chosen_key = st.radio(
-                            f"Decision for Group #{g_idx + 1}:",
-                            options=list(choice_options.keys()),
-                            format_func=lambda k: choice_options[k],
-                            index=list(choice_options.keys()).index(current_val),
-                            key=f"dup_decision_{g_id}",
-                        )
+                            chosen_key = st.radio(
+                                f"Decision for Group #{g_idx + 1}:",
+                                options=list(choice_options.keys()),
+                                format_func=lambda k: choice_options[k],
+                                index=list(choice_options.keys()).index(st.session_state[group_key]),
+                                key=group_key,
+                            )
+                except Exception as e:
+                    log_error(u_email, "sync.py:render_duplicate_groups", e)
+                    st.error(f"Error displaying duplicate groups: {e}")
 
                 st.divider()
 
@@ -1298,17 +1302,18 @@ def render_sync_page():
                             decisions_payload = []
                             for g in groups:
                                 g_id = g["group_id"]
-                                dec_val = st.session_state.get(f"dup_decision_{g_id}", f"merge_into:{g.get('recommended_keep_row_idx')}")
-                                all_indices = [r["row_idx"] for r in g.get("rows", [])]
+                                group_key = f"dup_decision_{target_tab_name}_{g_id}"
+                                dec_val = st.session_state.get(group_key, f"merge_into:{g.get('recommended_keep_row_idx')}")
+                                all_indices = [r.get("row_idx") for r in g.get("rows", [])]
 
-                                if dec_val == "keep_both":
+                                if not dec_val or dec_val == "keep_both":
                                     decisions_payload.append({
                                         "group_id": g_id,
                                         "action": "keep_both",
                                         "keep_row_idx": None,
                                         "discard_row_indices": [],
                                     })
-                                elif dec_val.startswith("merge_into:"):
+                                elif str(dec_val).startswith("merge_into:"):
                                     k_idx = int(dec_val.split(":")[1])
                                     d_indices = [idx for idx in all_indices if idx != k_idx]
                                     decisions_payload.append({
@@ -1317,7 +1322,7 @@ def render_sync_page():
                                         "keep_row_idx": k_idx,
                                         "discard_row_indices": d_indices,
                                     })
-                                elif dec_val.startswith("keep_row:"):
+                                elif str(dec_val).startswith("keep_row:"):
                                     k_idx = int(dec_val.split(":")[1])
                                     d_indices = [idx for idx in all_indices if idx != k_idx]
                                     decisions_payload.append({

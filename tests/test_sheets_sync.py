@@ -1309,6 +1309,99 @@ def test_process_email_batch_with_none_fields_and_assigned_lot(mock_sheets_env):
     assert added_row[2] == "Vintage Leather Bomber Jacket"
 
 
+def test_find_duplicate_groups_has_lot_and_lot_id(mock_sheets_env):
+    """Ensure find_duplicate_groups returns both 'lot' and 'lot_id' so UI cards don't raise KeyError."""
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_sold.rows = [list(SOLD_ITEMS_HEADERS)]
+
+    row1 = [""] * len(SOLD_ITEMS_HEADERS)
+    row1[0] = "SKU-001"
+    row1[1] = "LOT-100"
+    row1[2] = "Nike Hoodie"
+    row1[11] = 45.00
+    row1[21] = "ORD-UUID-MATCH-99"
+    ws_sold.append_row(row1)
+
+    row2 = [""] * len(SOLD_ITEMS_HEADERS)
+    row2[0] = "SKU-002"
+    row2[1] = "LOT-100"
+    row2[2] = "Nike Hoodie Grey"
+    row2[11] = 45.00
+    row2[21] = "ORD-UUID-MATCH-99"
+    ws_sold.append_row(row2)
+
+    groups = engine.find_duplicate_groups(tab_name=TAB_SOLD_ITEMS)
+    assert len(groups) == 1
+    rows = groups[0]["rows"]
+    assert len(rows) == 2
+    for r in rows:
+        assert "lot" in r
+        assert "lot_id" in r
+        assert r["lot"] == "LOT-100"
+        assert r["lot_id"] == "LOT-100"
+
+
+def test_resolve_duplicates_item_listings_preserves_active_status(mock_sheets_env):
+    """Ensure resolve_duplicates on Item_Listings merges fields without setting status to Sold or adding Sold_Items formulas."""
+    engine, sh = mock_sheets_env
+    ws_list = sh.worksheet(TAB_ITEM_LISTINGS)
+    ws_list.rows = [list(LISTINGS_HEADERS)]
+
+    # Row 2: Incomplete active listing
+    row1 = [""] * len(LISTINGS_HEADERS)
+    row1[0] = "SKU-LIST-1"
+    row1[1] = ""  # Lot_ID empty
+    row1[2] = "Vinted Item"  # Placeholder
+    row1[3] = ""  # Brand
+    row1[4] = ""  # Category
+    row1[6] = 50.00
+    row1[7] = 50.00
+    row1[13] = "123456789"  # Vinted_ID
+    row1[14] = "https://www.vinted.com/items/123456789"
+    row1[15] = "Active"
+    ws_list.append_row(row1)
+
+    # Row 3: Duplicate with full title, brand, category, and lot
+    row2 = [""] * len(LISTINGS_HEADERS)
+    row2[0] = "SKU-LIST-2"
+    row2[1] = "LOT-888"
+    row2[2] = "Levi's 501 Straight Leg Jeans"
+    row2[3] = "Levi's"
+    row2[4] = "Jeans"
+    row2[6] = 50.00
+    row2[7] = 50.00
+    row2[13] = "123456789"  # Vinted_ID
+    row2[14] = "https://www.vinted.com/items/123456789"
+    row2[15] = "Active"
+    ws_list.append_row(row2)
+
+    assert len(ws_list.rows) == 3
+
+    res = engine.resolve_duplicates(
+        tab_name=TAB_ITEM_LISTINGS,
+        decisions=[{
+            "group_id": "group_1",
+            "action": "merge_into",
+            "keep_row_idx": 2,
+            "discard_row_indices": [3],
+        }],
+    )
+
+    assert res["deleted_count"] == 1
+    assert res["merged_count"] >= 1
+    assert len(ws_list.rows) == 2
+
+    kept = ws_list.rows[1]
+    assert kept[1] == "LOT-888"
+    assert kept[2] == "Levi's 501 Straight Leg Jeans"
+    assert kept[3] == "Levi's"
+    assert kept[4] == "Jeans"
+    # Status MUST remain Active, NOT overwritten with Sold
+    assert kept[15] == "Active"
+
+
+
 
 
 

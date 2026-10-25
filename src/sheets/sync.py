@@ -2312,6 +2312,7 @@ class SheetsSyncEngine:
                 "row_idx": r_i,
                 "sku": sku_val,
                 "lot": lot_val,
+                "lot_id": lot_val,
                 "title": title_val,
                 "brand": brand_val,
                 "category": cat_val,
@@ -2514,10 +2515,72 @@ class SheetsSyncEngine:
                         if date_i != -1 and len(d_row_data) > date_i and d_row_data[date_i] is not None and str(d_row_data[date_i]).strip():
                             inc["sale_date"] = str(d_row_data[date_i]).strip()
 
-                        enrich_u = self.enrich_sold_row(keep_row_data, headers, keep_idx, inc)
-                        if enrich_u:
-                            cell_updates.extend(enrich_u)
-                            merged_count += 1
+                        if tab_name == TAB_SOLD_ITEMS:
+                            enrich_u = self.enrich_sold_row(keep_row_data, headers, keep_idx, inc)
+                            if enrich_u:
+                                cell_updates.extend(enrich_u)
+                                merged_count += 1
+                        else:
+                            # Dedicated Item_Listings / non-Sold merging logic
+                            list_u = []
+                            cur_t = str(keep_row_data[title_i] if len(keep_row_data) > title_i else "").strip()
+                            new_t = inc.get("item_title", "")
+                            if new_t and not is_placeholder_title(new_t) and (not cur_t or is_placeholder_title(cur_t)):
+                                list_u.append({"range": f"{col_letter(title_i)}{keep_idx}", "values": [[new_t]]})
+                                while len(keep_row_data) <= title_i:
+                                    keep_row_data.append("")
+                                keep_row_data[title_i] = new_t
+
+                            cur_b = str(keep_row_data[brand_i] if len(keep_row_data) > brand_i else "").strip()
+                            new_b = inc.get("brand", "")
+                            if new_b and not is_placeholder_brand(new_b) and (not cur_b or is_placeholder_brand(cur_b)):
+                                list_u.append({"range": f"{col_letter(brand_i)}{keep_idx}", "values": [[new_b]]})
+                                while len(keep_row_data) <= brand_i:
+                                    keep_row_data.append("")
+                                keep_row_data[brand_i] = new_b
+
+                            cur_c = str(keep_row_data[cat_i] if len(keep_row_data) > cat_i else "").strip()
+                            new_c = inc.get("category", "")
+                            if new_c and not is_placeholder_category(new_c) and (not cur_c or is_placeholder_category(cur_c)):
+                                list_u.append({"range": f"{col_letter(cat_i)}{keep_idx}", "values": [[new_c]]})
+                                while len(keep_row_data) <= cat_i:
+                                    keep_row_data.append("")
+                                keep_row_data[cat_i] = new_c
+
+                            cur_l = str(keep_row_data[lot_i] if len(keep_row_data) > lot_i else "").strip()
+                            new_l = inc.get("lot_id", "")
+                            if new_l and not is_placeholder_lot(new_l) and (not cur_l or is_placeholder_lot(cur_l)):
+                                list_u.append({"range": f"{col_letter(lot_i)}{keep_idx}", "values": [[new_l]]})
+                                while len(keep_row_data) <= lot_i:
+                                    keep_row_data.append("")
+                                keep_row_data[lot_i] = new_l
+                                cost_i = headers.index("Unit_Cost") if "Unit_Cost" in headers else 5
+                                col_b_let = col_letter(lot_i)
+                                cost_formula = f'=IFERROR(VLOOKUP({col_b_let}{keep_idx}, Inventory_Lots!A:F, 6, FALSE), 0)'
+                                list_u.append({"range": f"{col_letter(cost_i)}{keep_idx}", "values": [[cost_formula]]})
+
+                            if url_i != -1:
+                                cur_u = str(keep_row_data[url_i] if len(keep_row_data) > url_i else "").strip()
+                                new_u = inc.get("vinted_url", "")
+                                if new_u and (not cur_u or not cur_u.startswith("http")):
+                                    list_u.append({"range": f"{col_letter(url_i)}{keep_idx}", "values": [[new_u]]})
+                                    while len(keep_row_data) <= url_i:
+                                        keep_row_data.append("")
+                                    keep_row_data[url_i] = new_u
+
+                            vid_i = headers.index("Vinted_ID") if "Vinted_ID" in headers else -1
+                            if vid_i != -1 and len(d_row_data) > vid_i:
+                                d_vid = str(d_row_data[vid_i] or "").strip()
+                                cur_vid = str(keep_row_data[vid_i] if len(keep_row_data) > vid_i else "").strip()
+                                if d_vid and not cur_vid:
+                                    list_u.append({"range": f"{col_letter(vid_i)}{keep_idx}", "values": [[d_vid]]})
+                                    while len(keep_row_data) <= vid_i:
+                                        keep_row_data.append("")
+                                    keep_row_data[vid_i] = d_vid
+
+                            if list_u:
+                                cell_updates.extend(list_u)
+                                merged_count += 1
 
             for d_idx in discard_indices:
                 deleted_rows.add(d_idx)
