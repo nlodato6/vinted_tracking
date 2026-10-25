@@ -6,8 +6,8 @@ from email.header import decode_header
 import email.utils
 import imaplib
 import html
-from datetime import datetime, date
-from typing import Optional, Dict, Any, List
+from datetime import datetime, date, timedelta
+from typing import Optional, Dict, Any, List, Union, Tuple
 from pydantic import BaseModel
 from bs4 import BeautifulSoup
 
@@ -15,7 +15,7 @@ from src.html_parser import infer_brand, infer_clothing_category
 
 
 class ParsedEmailEvent(BaseModel):
-    event_type: str = "unknown"  # "sale", "favorite", "offer", or "unknown"
+    event_type: str = "unknown"  # "sale", "bundle_sale", "cancellation", "favorite", "offer", or "unknown"
     item_title: Optional[str] = ""
     vinted_id: Optional[str] = ""
     order_id: Optional[str] = ""
@@ -30,6 +30,8 @@ class ParsedEmailEvent(BaseModel):
     category: Optional[str] = ""
     lot_id: Optional[str] = ""
     source: Optional[str] = "Email"
+    quantity: int = 1
+    cancellation_reason: Optional[str] = ""
 
 
 
@@ -94,7 +96,155 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
             category=category,
         )
 
-    # 2. Check for Sale Notification
+    # 2. Check for Cancellation / Refund Notification
+    is_cancellation = bool(
+        re.search(r"(?:order|transaction)\s+(?:was\s+)?(?:cancell?ed|failed|refunded)", sub_clean, re.IGNORECASE)
+        or "order cancelled" in sub_clean.lower()
+        or "order canceled" in sub_clean.lower()
+        or "cancellation confirmation" in sub_clean.lower()
+        or "transaction status: failed" in content.lower()
+        or "canceled. refund processed" in content.lower()
+        or "cancelled. refund processed" in content.lower()
+        or re.search(r"(?:order|transaction)\s+(?:has been|was)?\s*(?:cancell?ed|failed|refunded)", content, re.IGNORECASE)
+    )
+
+    if is_cancellation:
+        # Extract Sold / Refund Price ($X.XX)
+        sold_price = 0.0
+        price_matches = re.findall(r"\$\s*(\d+(?:\.\d{2})?)", content)
+        if price_matches:
+            try:
+                sold_price = float(price_matches[0])
+            except ValueError:
+                sold_price = 0.0
+
+        # Extract Item ID, Item URL, and slug title
+        v_id = ""
+        v_url = ""
+        slug_title = ""
+        item_link_match = re.search(r"https?://(?:www\.)?vinted\.[a-z.]+/items/(\d+)(?:-([\w-]+))?", content)
+        if item_link_match:
+            v_id = item_link_match.group(1)
+            v_url = item_link_match.group(0)
+            if item_link_match.group(2):
+                slug_title = item_link_match.group(2).replace("-", " ").replace("_", " ").title().strip()
+
+        # Extract Order ID
+        order_id = ""
+        trans_match = re.search(r"https?://(?:www\.)?vinted\.[a-z.]+/(?:transaction|inbox)/([a-zA-Z0-9-]+)", content)
+        if trans_match:
+            order_id = trans_match.group(1)
+        else:
+            order_num_match = re.search(r"order\s*#?\s*:?\s*([a-zA-Z0-9-]{8,})", content, re.IGNORECASE)
+            if order_num_match:
+                order_id = order_num_match.group(1)
+            else:
+                order_id = f"ORD-{int(dt.timestamp())}"
+
+        # Extract Buyer (@username)
+        buyer = ""
+        buyer_match = re.search(r"@([\w.-]+)", content)
+        if buyer_match:
+            cand_b = buyer_match.group(1).strip()
+            if cand_b.lower() not in ("vinted", "support", "admin", "cancellation", "order"):
+                buyer = cand_b
+
+        # Cancellation Reason
+        cancellation_reason = "Order cancelled. Refund processed."
+        m_reason = re.search(r"(?:reason|status):\s*([^\n\r<]+)", content, re.IGNORECASE)
+        if m_reason:
+            cand_r = m_reason.group(1).strip()
+            if len(cand_r) > 3 and not cand_r.lower().startswith("http"):
+                cancellation_reason = cand_r
+        elif "buyer cancelled" in content.lower() or "buyer canceled" in content.lower():
+            cancellation_reason = "Buyer cancelled the order."
+        elif "refund processed" in content.lower():
+            cancellation_reason = "Canceled. Refund processed."
+
+        # Extract Title
+        title = ""
+        if soup:
+            for img in soup.find_all("img"):
+                alt = (img.get("alt") or "").strip()
+                if alt:
+                    alt_clean = html.unescape(alt).strip().strip('"').strip("'")
+                    if (
+                        alt_clean.lower() not in (
+                            "vinted", "logo", "star", "stars", "avatar", "profile", "badge",
+                            "icon", "arrow", "image", "photo", "divider", "spacer", "unnamed", "rating"
+                        )
+                        and not alt_clean.lower().startswith("http")
+                        and len(alt_clean) >= 3
+                    ):
+                        title = alt_clean
+                        break
+
+        # Check explicit "order for <Title> has been/was cancelled"
+        if not title:
+            m_title_for = re.search(r"order\s+for\s+[\"']?([^\n\r<]+?)[\"']?\s+(?:has been|was)\s+cancell?ed", content, re.IGNORECASE)
+            if m_title_for:
+                cand = m_title_for.group(1).strip().strip('"').strip("'")
+                if cand.lower() not in ("an item", "your item"):
+                    title = cand
+
+        # Check item links
+        if not title and soup:
+            for a in soup.find_all("a", href=True):
+                if "/items/" in a["href"]:
+                    a_txt = a.get_text(separator=" ", strip=True)
+                    if a_txt and len(a_txt) >= 3 and not a_txt.lower().startswith("http") and "view" not in a_txt.lower():
+                        title = a_txt
+                        break
+
+        if not title:
+            title_match = re.search(r"(?:item|article|listing):\s*([^\n\r<]+)", content, re.IGNORECASE)
+            if title_match:
+                cand = title_match.group(1).strip()
+                if cand.lower().startswith("http") or "/items/" in cand:
+                    m_slug = re.search(r"/items/\d+-([a-zA-Z0-9_-]+)", cand)
+                    cand = m_slug.group(1).replace("-", " ").replace("_", " ").title().strip() if m_slug else ""
+                if cand:
+                    title = cand
+
+        if not title and slug_title:
+            title = slug_title
+
+        if not title:
+            m_sub_title = re.search(r"^(.*?)\s+order\s+(?:has been|was)?\s*cancell?ed", sub_clean, re.IGNORECASE)
+            if m_sub_title and m_sub_title.group(1).strip():
+                cand = m_sub_title.group(1).strip()
+                if cand.lower() not in ("your", "the", "an", "an item", "order", "my"):
+                    title = cand
+
+        if title:
+            title = html.unescape(re.sub(r"<[^>]+>", "", title)).strip().strip('"').strip("'")
+
+        # Bundle quantity
+        quantity = 1
+        m_bundle = re.search(r"bundle\s+(\d+)\s+items", (title or "") + " " + content, re.IGNORECASE)
+        if m_bundle:
+            quantity = int(m_bundle.group(1))
+
+        brand = infer_brand(title, content)
+        category = infer_clothing_category(title) if title else "Other Apparel"
+
+        return ParsedEmailEvent(
+            event_type="cancellation",
+            item_title=title or f"Cancelled Order {order_id}",
+            vinted_id=v_id,
+            order_id=order_id,
+            sold_price=sold_price,
+            buyer_username=buyer,
+            vinted_url=v_url,
+            timestamp=dt,
+            raw_subject=sub_clean,
+            brand=brand,
+            category=category,
+            quantity=quantity,
+            cancellation_reason=cancellation_reason,
+        )
+
+    # 3. Check for Sale Notification
     is_sale = bool(
         re.search(r"(you sold|you've made a sale|you made a sale|item sold|sale confirmation|congratulations on your sale)", sub_clean, re.IGNORECASE)
         or re.search(r"(congratulations on your sale|sold to|buyer bought|you just made a sale|your item has sold|order details)", content, re.IGNORECASE)
@@ -240,8 +390,19 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
         if not category:
             category = infer_clothing_category(title) if title else "Other Apparel"
 
+        # Bundle quantity
+        quantity = 1
+        m_bundle = re.search(r"bundle\s+(\d+)\s+items", (title or "") + " " + content, re.IGNORECASE)
+        if m_bundle:
+            quantity = int(m_bundle.group(1))
+        elif "bundle" in (title or "").lower() or "bundle" in sub_clean.lower():
+            m_qty = re.search(r"bundle\s+(?:of\s+)?(\d+)", (title or "") + " " + sub_clean, re.IGNORECASE)
+            quantity = int(m_qty.group(1)) if m_qty else 2
+
+        event_type = "bundle_sale" if (quantity > 1 or "bundle" in (title or "").lower() or "bundle" in sub_clean.lower()) else "sale"
+
         return ParsedEmailEvent(
-            event_type="sale",
+            event_type=event_type,
             item_title=title,
             vinted_id=v_id,
             order_id=order_id,
@@ -252,9 +413,10 @@ def parse_vinted_email(subject: str, body_text_or_html: str, email_date: Optiona
             raw_subject=sub_clean,
             brand=brand,
             category=category,
+            quantity=quantity,
         )
 
-    # 3. Check for Offer Received Notification
+    # 4. Check for Offer Received Notification
     is_offer = bool(
         "new offer for" in sub_clean.lower()
         or ("instead of" in content.lower() and re.search(r"\$\s*\d+.*instead of.*\$\s*\d+", content, re.IGNORECASE))
@@ -365,35 +527,58 @@ def _resolve_imap_folder(mail: imaplib.IMAP4_SSL, folder: str = "ALL") -> str:
     Selects the requested IMAP mailbox.
     If 'ALL' is specified, discovers Gmail's 'All Mail' mailbox (which includes archived emails)
     or falls back gracefully to 'INBOX'.
+    Strips surrounding quotes to prevent double-quoting errors in imaplib.
     """
     if folder.upper() == "INBOX":
         mail.select("INBOX")
         return "INBOX"
 
-    candidates = ['"[Gmail]/All Mail"', '"[Google Mail]/All Mail"', 'INBOX']
+    candidates = ["[Gmail]/All Mail", "[Google Mail]/All Mail", "INBOX"]
     try:
         status, folder_list = mail.list()
         if status == "OK" and folder_list:
             for item in folder_list:
-                if isinstance(item, bytes):
-                    item_str = item.decode("utf-8", errors="ignore")
-                    if r"\All" in item_str:
-                        parts = item_str.split(' "/" ')
-                        if len(parts) == 2:
-                            candidates.insert(0, parts[1].strip())
+                item_str = item.decode("utf-8", errors="ignore") if isinstance(item, bytes) else str(item)
+                if r"\All" in item_str:
+                    parts = item_str.split(' "/" ')
+                    if len(parts) == 2:
+                        raw_name = parts[1].strip().strip('"').strip("'")
+                        if raw_name and raw_name not in candidates:
+                            candidates.insert(0, raw_name)
     except Exception:
         pass
 
     for candidate in candidates:
+        clean_candidate = candidate.strip().strip('"').strip("'")
         try:
-            status, _ = mail.select(candidate)
+            status, _ = mail.select(clean_candidate)
             if status == "OK":
-                return candidate
+                return clean_candidate
         except Exception:
             continue
 
     mail.select("INBOX")
     return "INBOX"
+
+
+def get_last_scan_date() -> Optional[date]:
+    """
+    Retrieves the date of the last successful email sync from .sync_status.json.
+    Returns None if sync has not been run yet.
+    """
+    try:
+        from src.notifications import get_sync_status
+        status = get_sync_status()
+        raw = status.get("last_email_parsed_at", "")
+        if raw and str(raw).strip().lower() not in ("not yet run", "none", ""):
+            for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(str(raw).strip()[:19], fmt).date()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return None
 
 
 def fetch_vinted_emails_via_imap(
@@ -403,15 +588,23 @@ def fetch_vinted_emails_via_imap(
     max_emails: int = 250,
     search_query: Optional[str] = None,
     scan_processed_label: bool = True,
+    since_date: Optional[Union[date, datetime]] = None,
+    until_date: Optional[Union[date, datetime]] = None,
 ) -> List[ParsedEmailEvent]:
     """
     Connects to Gmail via IMAP and parses transactional emails from Vinted.
     By default, scans 'ALL' mail (including archived, inbox, and labeled messages).
-    Specifically searches for messages tagged with 'Vinted-Processed' and messages from Vinted.
+    Supports date range filtering with since_date and until_date.
+    Uses Gmail native X-GM-RAW search criteria when available with standard IMAP fallback.
     Returns list of ParsedEmailEvent objects.
     """
     if not username or not password:
         return []
+
+    if isinstance(since_date, datetime):
+        since_date = since_date.date()
+    if isinstance(until_date, datetime):
+        until_date = until_date.date()
 
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -432,17 +625,25 @@ def fetch_vinted_emails_via_imap(
                     seen_ids.add(mid)
                     collected_msg_ids.append(mid)
 
+    # Date filter strings
+    gm_date_clause = ""
+    if since_date:
+        gm_date_clause += f" after:{since_date.strftime('%Y/%m/%d')}"
+    if until_date:
+        gm_date_clause += f" before:{(until_date + timedelta(days=1)).strftime('%Y/%m/%d')}"
+
     # 1. If scan_processed_label is True, search for label:Vinted-Processed using Gmail X-GM-RAW
     if scan_processed_label:
         for lbl_q in ('label:Vinted-Processed', 'label:"Vinted Processed"'):
             try:
-                status, search_data = mail.search(None, 'X-GM-RAW', lbl_q)
+                full_lbl = f"{lbl_q}{gm_date_clause}"
+                status, search_data = mail.search(None, 'X-GM-RAW', full_lbl)
                 if status == "OK":
                     _add_ids(search_data)
             except Exception:
                 pass
 
-    # 2. Search for all Vinted emails
+    # 2. Search for Vinted emails
     if search_query:
         try:
             status, search_data = mail.search(None, search_query)
@@ -451,23 +652,34 @@ def fetch_vinted_emails_via_imap(
         except Exception:
             pass
     else:
-        # Try X-GM-RAW from:vinted
-        try:
-            status, search_data = mail.search(None, 'X-GM-RAW', 'from:vinted')
-            if status == "OK":
-                _add_ids(search_data)
-        except Exception:
-            pass
+        # Strategy A: Gmail native full-text search (matches inbox, archived, labels)
+        raw_gmail_queries = [
+            f"vinted{gm_date_clause}",
+            f"from:vinted{gm_date_clause}",
+        ]
+        for q in raw_gmail_queries:
+            try:
+                status, search_data = mail.search(None, 'X-GM-RAW', q)
+                if status == "OK":
+                    _add_ids(search_data)
+            except Exception:
+                pass
 
-        # Fallback standard IMAP search (FROM "vinted")
-        try:
-            status, search_data = mail.search(None, '(FROM "vinted")')
-            if status == "OK":
-                _add_ids(search_data)
-        except Exception:
-            pass
+        # Strategy B: Fallback standard IMAP search if X-GM-RAW yielded no results
+        if not collected_msg_ids:
+            try:
+                since_clause = f'SINCE "{since_date.strftime("%d-%b-%Y")}" ' if since_date else ""
+                for fallback_crit in (f'({since_clause}FROM "vinted")', f'({since_clause}SUBJECT "vinted")'):
+                    try:
+                        status, search_data = mail.search(None, fallback_crit)
+                        if status == "OK":
+                            _add_ids(search_data)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
-    # 3. If no emails found yet and scan_processed_label is True, check if a dedicated IMAP folder "Vinted-Processed" exists
+    # 3. Check dedicated IMAP folder "Vinted-Processed" if empty
     if not collected_msg_ids and scan_processed_label:
         try:
             status, folder_list = mail.list()
@@ -477,7 +689,7 @@ def fetch_vinted_emails_via_imap(
                     if "Vinted-Processed" in item_str or "vinted-processed" in item_str.lower():
                         parts = item_str.split(' "/" ')
                         if len(parts) == 2:
-                            custom_box = parts[1].strip()
+                            custom_box = parts[1].strip().strip('"').strip("'")
                             s_status, _ = mail.select(custom_box)
                             if s_status == "OK":
                                 st_all, d_all = mail.search(None, "ALL")

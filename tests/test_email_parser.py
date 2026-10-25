@@ -191,4 +191,99 @@ def test_fetch_vinted_emails_scans_processed_label(monkeypatch):
     assert events[0].order_id == "test-uuid-1234"
 
 
+def test_parse_cancellation_email():
+    subject = "Your order was cancelled"
+    body = """
+    <div>
+        <h1>Order Cancelled</h1>
+        <p>Your order for Joe's Jeans has been cancelled.</p>
+        <p>Reason: Buyer cancelled the order.</p>
+        <div>Refund of $3.40 processed.</div>
+        <a href="https://www.vinted.com/transaction/01a156e8-test-cancel">View transaction</a>
+        <p>Buyer: @denimfan</p>
+    </div>
+    """
+    event = parse_vinted_email(subject, body)
+    assert event.event_type == "cancellation"
+    assert "Joe's Jeans" in event.item_title
+    assert event.sold_price == 3.40
+    assert event.order_id == "01a156e8-test-cancel"
+    assert "Buyer cancelled" in event.cancellation_reason
+    assert event.buyer_username == "denimfan"
+
+
+def test_parse_bundle_sale_email():
+    subject = "You sold a bundle on Vinted!"
+    body = """
+    <div>
+        <p>Congratulations! You sold a Bundle 5 items to @buyer99.</p>
+        <span>Earnings: $15.00</span>
+        <a href="https://www.vinted.com/transaction/01a156e8-bundle-5">Order details</a>
+    </div>
+    """
+    event = parse_vinted_email(subject, body)
+    assert event.event_type == "bundle_sale"
+    assert event.quantity == 5
+    assert event.sold_price == 15.00
+    assert event.order_id == "01a156e8-bundle-5"
+
+
+def test_resolve_imap_folder_strips_quotes():
+    from unittest.mock import MagicMock
+    from src.email_parser import _resolve_imap_folder
+
+    mock_mail = MagicMock()
+    mock_mail.list.return_value = ("OK", [b'(\\HasNoChildren \\All) "/" "[Gmail]/All Mail"'])
+    mock_mail.select.return_value = ("OK", [b"100"])
+
+    resolved = _resolve_imap_folder(mock_mail, "ALL")
+    assert resolved == "[Gmail]/All Mail"
+    # Ensure quotes were stripped before calling mail.select
+    mock_mail.select.assert_called_with("[Gmail]/All Mail")
+
+
+def test_get_last_scan_date(monkeypatch):
+    from datetime import date
+    from src.email_parser import get_last_scan_date
+
+    monkeypatch.setattr("src.notifications.get_sync_status", lambda: {"last_email_parsed_at": "2026-10-21 14:30"})
+    d = get_last_scan_date()
+    assert d == date(2026, 10, 21)
+
+    monkeypatch.setattr("src.notifications.get_sync_status", lambda: {"last_email_parsed_at": "Not yet run"})
+    assert get_last_scan_date() is None
+
+
+def test_fetch_vinted_emails_date_range_query(monkeypatch):
+    import imaplib
+    from datetime import date
+    from unittest.mock import MagicMock
+    from src.email_parser import fetch_vinted_emails_via_imap
+
+    mock_mail = MagicMock()
+    mock_mail.select.return_value = ("OK", [b"1"])
+    mock_mail.list.return_value = ("OK", [b'(\\HasNoChildren) "/" "[Gmail]/All Mail"'])
+
+    searched_queries = []
+
+    def mock_search(charset, *criteria):
+        searched_queries.append(" ".join(str(c) for c in criteria))
+        return ("OK", [b""])
+
+    mock_mail.search.side_effect = mock_search
+    monkeypatch.setattr(imaplib, "IMAP4_SSL", lambda host: mock_mail)
+
+    fetch_vinted_emails_via_imap(
+        username="user@gmail.com",
+        password="app_password",
+        since_date=date(2026, 10, 1),
+        until_date=date(2026, 10, 15),
+    )
+
+    # Check that after: and before: were passed to X-GM-RAW
+    any_date_search = any("after:2026/10/01" in q and "before:2026/10/16" in q for q in searched_queries)
+    assert any_date_search, f"Searched queries did not include expected date filter: {searched_queries}"
+
+
+
 
