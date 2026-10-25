@@ -184,9 +184,9 @@ def render_sync_kpi_cards(
     # Style control bar
     c_head, c_btn = st.columns([5, 1], vertical_alignment="center")
     with c_head:
-        st.markdown("##### 📊 Sync Status & Metrics")
+        st.markdown("##### Sync Status & Metrics")
     with c_btn:
-        with st.popover("🎨 Card Style", help="Customize card background, text color, and themes"):
+        with st.popover("Card Style", icon=":material/palette:", help="Customize card background, text color, and themes"):
             st.markdown("**Metric Card Styling**")
             theme_choice = st.radio(
                 "Theme Preset",
@@ -241,34 +241,34 @@ def render_sync_kpi_cards(
     # Palette configurations (Defaulting to Dark backgrounds)
     if style_mode == "Minimalist Dark":
         cards = [
-            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#161b22", "border": "#30363d", "accent": "#58a6ff", "text": "#f0f6fc"},
-            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#161b22", "border": "#30363d", "accent": "#3fb950", "text": "#f0f6fc"},
-            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#161b22", "border": "#30363d", "accent": "#d29922", "text": "#f0f6fc"},
-            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#161b22", "border": "#30363d", "accent": "#bc8cff", "text": "#f0f6fc"},
+            {"label": "Active Listings", "icon": "sell", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#161b22", "border": "#30363d", "accent": "#58a6ff", "text": "#f0f6fc"},
+            {"label": "Sold Items", "icon": "payments", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#161b22", "border": "#30363d", "accent": "#3fb950", "text": "#f0f6fc"},
+            {"label": "Last HTML Import", "icon": "language", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#161b22", "border": "#30363d", "accent": "#d29922", "text": "#f0f6fc"},
+            {"label": "Last Email Parsed", "icon": "mail", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#161b22", "border": "#30363d", "accent": "#bc8cff", "text": "#f0f6fc"},
         ]
     elif style_mode == "Vibrant Dark":
         cards = [
-            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#0c1e3d", "border": "#2563eb", "accent": "#60a5fa", "text": "#f8fafc"},
-            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#062e24", "border": "#059669", "accent": "#34d399", "text": "#f8fafc"},
-            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#361e05", "border": "#d97706", "accent": "#fbbf24", "text": "#f8fafc"},
-            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#260e42", "border": "#7c3aed", "accent": "#c084fc", "text": "#f8fafc"},
+            {"label": "Active Listings", "icon": "sell", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#0c1e3d", "border": "#2563eb", "accent": "#60a5fa", "text": "#f8fafc"},
+            {"label": "Sold Items", "icon": "payments", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#062e24", "border": "#059669", "accent": "#34d399", "text": "#f8fafc"},
+            {"label": "Last HTML Import", "icon": "language", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#361e05", "border": "#d97706", "accent": "#fbbf24", "text": "#f8fafc"},
+            {"label": "Last Email Parsed", "icon": "mail", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#260e42", "border": "#7c3aed", "accent": "#c084fc", "text": "#f8fafc"},
         ]
     elif style_mode == "Custom Colors":
         c_bg = st.session_state.get("sync_card_custom_bg", "#0f172a")
         c_text = st.session_state.get("sync_card_custom_text", "#f8fafc")
         c_border = st.session_state.get("sync_card_custom_border", "#3b82f6")
         cards = [
-            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
-            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
-            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
-            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
+            {"label": "Active Listings", "icon": "sell", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
+            {"label": "Sold Items", "icon": "payments", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
+            {"label": "Last HTML Import", "icon": "language", "value": h_display, "sub": h_sub, "is_date": True, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
+            {"label": "Last Email Parsed", "icon": "mail", "value": e_display, "sub": e_sub, "is_date": True, "bg": c_bg, "border": c_border, "accent": c_border, "text": c_text},
         ]
     else:  # "Deep Slate (Dark)" (Default)
         cards = [
-            {"label": "Active Listings", "icon": "🏷️", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#0f172a", "border": "#1e3a8a", "accent": "#60a5fa", "text": "#f8fafc"},
-            {"label": "Sold Items", "icon": "💰", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#0f172a", "border": "#065f46", "accent": "#34d399", "text": "#f8fafc"},
-            {"label": "Last HTML Import", "icon": "🌐", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#0f172a", "border": "#854d0e", "accent": "#fbbf24", "text": "#f8fafc"},
-            {"label": "Last Email Parsed", "icon": "✉️", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#0f172a", "border": "#581c87", "accent": "#c084fc", "text": "#f8fafc"},
+            {"label": "Active Listings", "icon": "sell", "value": f"{active_cnt:,}", "sub": "In Google Sheets", "is_date": False, "bg": "#0f172a", "border": "#1e3a8a", "accent": "#60a5fa", "text": "#f8fafc"},
+            {"label": "Sold Items", "icon": "payments", "value": f"{sold_cnt:,}", "sub": "Completed sales", "is_date": False, "bg": "#0f172a", "border": "#065f46", "accent": "#34d399", "text": "#f8fafc"},
+            {"label": "Last HTML Import", "icon": "language", "value": h_display, "sub": h_sub, "is_date": True, "bg": "#0f172a", "border": "#854d0e", "accent": "#fbbf24", "text": "#f8fafc"},
+            {"label": "Last Email Parsed", "icon": "mail", "value": e_display, "sub": e_sub, "is_date": True, "bg": "#0f172a", "border": "#581c87", "accent": "#c084fc", "text": "#f8fafc"},
         ]
 
     # Generate CSS & Grid HTML
@@ -290,6 +290,7 @@ def render_sync_kpi_cards(
 
     html_content = f'''
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
     .sync-metrics-grid {{
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -325,8 +326,11 @@ def render_sync_kpi_cards(
         letter-spacing: 0.05em;
     }}
     .sync-metric-icon {{
-        font-size: 1.05rem;
+        font-family: 'Material Symbols Rounded', sans-serif;
+        font-size: 1.25rem;
         line-height: 1;
+        display: inline-block;
+        vertical-align: middle;
     }}
     .sync-metric-val-num {{
         font-size: 1.85rem;
@@ -371,7 +375,7 @@ def render_sync_kpi_cards(
 
 
 def render_sync_page():
-    st.header("⚡ Thread Count Operations & Sync Hub")
+    st.header("Thread Count Operations & Sync Hub")
     st.caption("From inbox alerts to bottom-line gains. Reconcile inventory via HTML uploads, live Gmail sync, or supply tracking.")
 
     client = get_sheets_client()
@@ -385,8 +389,8 @@ def render_sync_page():
         connected = True
     except Exception as e:
         if "429" in str(e):
-            st.warning("⏳ Google Sheets rate limit reached (60 read requests/min). Please wait 30 seconds for Google's quota to reset.")
-            st.button("🔄 Retry Connection", on_click=lambda: st.cache_data.clear(), key="retry_rate_limit_btn")
+            st.warning("Google Sheets rate limit reached (60 read requests/min). Please wait 30 seconds for Google's quota to reset.", icon=":material/hourglass_top:")
+            st.button("Retry Connection", icon=":material/refresh:", on_click=lambda: st.cache_data.clear(), key="retry_rate_limit_btn")
             return
         active_cnt = 0
         sold_cnt = 0
@@ -404,14 +408,14 @@ def render_sync_page():
     )
 
     if not connected:
-        st.warning("⚠️ Could not connect to Google Spreadsheet. Check permissions or ensure your spreadsheet is shared with your account.")
+        st.warning("Could not connect to Google Spreadsheet. Check permissions or ensure your spreadsheet is shared with your account.", icon=":material/warning:")
         return
 
     # Quick Maintenance Tools
-    with st.expander("🛠️ Spreadsheet Tools", expanded=False):
+    with st.expander("Spreadsheet Tools", icon=":material/build:", expanded=False):
         c_tool1, c_tool2, c_tool3, c_tool4 = st.columns(4)
         with c_tool1:
-            if st.button("🧹 Clean Blank Rows", type="secondary", width="stretch", icon=":material/cleaning_services:", key="clean_blank_rows_btn"):
+            if st.button("Clean Blank Rows", type="secondary", width="stretch", icon=":material/cleaning_services:", key="clean_blank_rows_btn"):
                 with st.spinner("Scanning and purging blank rows from Google Sheets..."):
                     engine = get_sheets_sync_engine(client)
                     if not hasattr(engine, "clean_blank_rows"):
@@ -425,9 +429,9 @@ def render_sync_page():
                     total_cleaned = sum(res.values())
                     if total_cleaned > 0:
                         details = ", ".join(f"{tab}: {cnt}" for tab, cnt in res.items() if cnt > 0)
-                        st.success(f"✔ Purged {total_cleaned} blank row(s) from spreadsheet ({details})!")
+                        st.success(f"Purged {total_cleaned} blank row(s) from spreadsheet ({details})!", icon=":material/check_circle:")
                     else:
-                        st.info("✔ No blank rows detected in your spreadsheet. All clean!")
+                        st.info("No blank rows detected in your spreadsheet. All clean!", icon=":material/check_circle:")
                     time.sleep(1.2)
                     st.rerun()
         with c_tool2:
@@ -435,7 +439,7 @@ def render_sync_page():
             active_email_user = saved_u or os.getenv("GMAIL_USER", "") or st.session_state.get("gmail_user_input", "") or st.session_state.get("email_sync_user", "")
             active_email_pass = saved_p or os.getenv("GMAIL_APP_PASSWORD", "") or st.session_state.get("gmail_pass_input", "")
 
-            if st.button("✨ Backfill Missing Metadata in Sold", type="secondary", width="stretch", icon=":material/auto_fix_high:", key="backfill_metadata_btn"):
+            if st.button("Backfill Missing Metadata in Sold", type="secondary", width="stretch", icon=":material/auto_fix_high:", key="backfill_metadata_btn"):
                 spinner_text = "Analyzing Sold_Items and restoring missing Titles, Lots, Brands, and Categories"
                 if active_email_user and active_email_pass:
                     spinner_text += f" (re-scanning Vinted-Processed emails from {active_email_user})..."
@@ -459,29 +463,30 @@ def render_sync_page():
                     if res["fixed_rows"] > 0:
                         email_info = f" from {res.get('emails_scanned', 0)} scanned emails" if res.get('emails_scanned', 0) > 0 else ""
                         st.success(
-                            f"✔ Enriched {res['fixed_rows']} sold items{email_info}! "
+                            f"Enriched {res['fixed_rows']} sold items{email_info}! "
                             f"({res['titles_fixed']} titles restored, {res['lots_assigned']} lots assigned, "
-                            f"{res['brands_fixed']} brands, {res['categories_fixed']} categories)"
+                            f"{res['brands_fixed']} brands, {res['categories_fixed']} categories)",
+                            icon=":material/check_circle:",
                         )
                     else:
                         email_scanned_msg = f" (Scanned {res.get('emails_scanned', 0)} emails)" if res.get('emails_scanned', 0) > 0 else ""
-                        st.info(f"✔ All items in Sold_Items already have full metadata!{email_scanned_msg}")
+                        st.info(f"All items in Sold_Items already have full metadata!{email_scanned_msg}", icon=":material/check_circle:")
                     time.sleep(1.5)
                     st.rerun()
 
             if active_email_user:
-                st.caption(f"📬 Gmail: `{active_email_user}` (re-scans `Vinted-Processed` emails)")
+                st.caption(f":material/mail: Gmail: `{active_email_user}` (re-scans `Vinted-Processed` emails)")
             else:
-                st.caption("💡 Enter Gmail in **Direct Email Sync** tab to re-scan `Vinted-Processed` emails.")
+                st.caption(":material/lightbulb: Enter Gmail in **Direct Email Sync** tab to re-scan `Vinted-Processed` emails.")
         with c_tool3:
-            if st.button("🔍 Check Duplicates", type="secondary", width="stretch", icon=":material/difference:", key="quick_check_dups_btn"):
+            if st.button("Check Duplicates", type="secondary", width="stretch", icon=":material/difference:", key="quick_check_dups_btn"):
                 st.session_state.duplicate_scan_trigger = True
                 st.rerun()
             st.caption("Scan sheets for duplicate items & placeholder rows.")
         with c_tool4:
-            if st.button("🔄 Force Refresh Data", type="secondary", width="stretch", icon=":material/refresh:", key="force_refresh_data_btn"):
+            if st.button("Force Refresh Data", type="secondary", width="stretch", icon=":material/refresh:", key="force_refresh_data_btn"):
                 st.cache_data.clear()
-                st.success("✔ Cache cleared! Reloading fresh data...")
+                st.success("Cache cleared! Reloading fresh data...", icon=":material/check_circle:")
                 time.sleep(0.5)
                 st.rerun()
 
@@ -489,10 +494,10 @@ def render_sync_page():
     # Main Tabs: HTML Import, Email Sync, Duplicate Checker, Supplies
     # -------------------------------------------------------------------------
     tab_html, tab_email, tab_dups, tab_supplies = st.tabs([
-        "📦 HTML Batch Import & Reconciliation",
-        "📬 Direct Email Sync",
-        "🔍 Duplicate Checker & Resolver",
-        "🏷️ Shipping Supplies",
+        ":material/upload_file: HTML Batch Import & Reconciliation",
+        ":material/mail: Direct Email Sync",
+        ":material/difference: Duplicate Checker & Resolver",
+        ":material/inventory_2: Shipping Supplies",
     ])
 
     # ---------------------------------------------------------
@@ -504,18 +509,18 @@ def render_sync_page():
             all_lots = get_cached_lots(sheet_id, user_creds)
         except Exception as e:
             if "429" in str(e):
-                st.warning("⏳ Google Sheets quota reached. Waiting for reset...")
-                st.button("🔄 Retry Lots", on_click=lambda: st.cache_data.clear(), key="retry_lots_btn")
+                st.warning("Google Sheets quota reached. Waiting for reset...", icon=":material/hourglass_empty:")
+                st.button("Retry Lots", icon=":material/refresh:", on_click=lambda: st.cache_data.clear(), key="retry_lots_btn")
             all_lots = []
 
         # -----------------------------------------------------------------
         # 1. Inventory Lot Assignment (Always Visible)
         # -----------------------------------------------------------------
         with st.container(border=True):
-            st.markdown("### 🏷️ Inventory Lot Assignment")
+            st.markdown("### Inventory Lot Assignment")
             st.caption("Choose which inventory lot new items should be assigned to, leave unassigned, or register a new lot.")
 
-            NO_LOT_OPTION = "⚪ None / No Lot (Unassigned)"
+            NO_LOT_OPTION = "None / No Lot (Unassigned)"
             lot_options = [NO_LOT_OPTION]
             lot_id_map = {NO_LOT_OPTION: ""}
 
@@ -529,7 +534,7 @@ def render_sync_page():
                 lot_options.append(label)
                 lot_id_map[label] = lid
 
-            lot_options.append("➕ Add New Lot...")
+            lot_options.append("Add New Lot...")
 
             # Determine default index based on current session lot
             default_idx = 0
@@ -546,16 +551,16 @@ def render_sync_page():
                 "Select Inventory Lot for New Listings:",
                 options=lot_options,
                 index=default_idx,
-                help="Select an existing lot from your sheet, choose '⚪ None / No Lot' to leave unassigned, or '➕ Add New Lot...' to register a new haul.",
+                help="Select an existing lot from your sheet, choose 'None / No Lot' to leave unassigned, or 'Add New Lot...' to register a new haul.",
                 key="sync_lot_selectbox",
             )
 
-            is_new_lot = (selected_option == "➕ Add New Lot...")
+            is_new_lot = (selected_option == "Add New Lot...")
             is_none_lot = (selected_option == NO_LOT_OPTION)
 
             if is_new_lot:
                 with st.container(border=True):
-                    st.markdown("#### ✨ Define New Inventory Lot")
+                    st.markdown("#### Define New Inventory Lot")
                     st.caption("Fill out the lot details below. You can save it immediately or have it automatically created when syncing HTML files.")
                     next_suggested_id = engine.get_next_lot_id(cached_lots=all_lots)
 
@@ -571,7 +576,7 @@ def render_sync_page():
                         new_total_articles = st.number_input("Total Articles in Lot", min_value=1, value=25, step=1, key="input_new_lot_articles")
 
                     calc_unit_cost = (new_total_cost / new_total_articles) if new_total_articles > 0 else 0.0
-                    st.info(f"💡 Calculated Unit Cost per item: **${calc_unit_cost:.2f}** (`${new_total_cost:.2f} ÷ {new_total_articles} articles`)")
+                    st.info(f"Calculated Unit Cost per item: **${calc_unit_cost:.2f}** (`${new_total_cost:.2f} ÷ {new_total_articles} articles`)", icon=":material/lightbulb:")
 
                     new_notes = st.text_input("Notes", placeholder="e.g. 50 assorted fall sweaters and flannels", key="input_new_lot_notes")
                     target_lot_id = new_lot_id.strip().upper() if new_lot_id else next_suggested_id
@@ -581,7 +586,7 @@ def render_sync_page():
 
                     btn_c1, btn_c2 = st.columns([2, 1], vertical_alignment="bottom")
                     with btn_c1:
-                        if st.button("💾 Save New Lot to Spreadsheet Now", type="secondary", width="stretch"):
+                        if st.button("Save New Lot to Spreadsheet Now", icon=":material/save:", type="secondary", width="stretch"):
                             with st.spinner(f"Saving {target_lot_id} to Google Sheets..."):
                                 res = engine.add_inventory_lot(
                                     lot_id=target_lot_id,
@@ -591,15 +596,15 @@ def render_sync_page():
                                     total_articles=int(new_total_articles),
                                     status=new_status,
                                     notes=new_notes,
-                                )
+                                    )
                                 engine.sync_lots()
                                 log_event(u_email, "lot_created", f"Created lot {target_lot_id} ({new_total_articles} articles)", spreadsheet_id=st.session_state.get("spreadsheet_id"))
                                 st.session_state.selected_lot = target_lot_id
                                 st.cache_data.clear()
                             if res.get("status") == "exists":
-                                st.warning(f"Lot {target_lot_id} already exists in your spreadsheet.")
+                                st.warning(f"Lot {target_lot_id} already exists in your spreadsheet.", icon=":material/warning:")
                             else:
-                                st.success(f"✔ Lot {target_lot_id} successfully saved to Inventory_Lots!")
+                                st.success(f"Lot {target_lot_id} successfully saved to Inventory_Lots!", icon=":material/check_circle:")
                             time.sleep(1.2)
                             st.rerun()
                     with btn_c2:
@@ -607,7 +612,7 @@ def render_sync_page():
             elif is_none_lot:
                 target_lot_id = ""
                 st.session_state.selected_lot = ""
-                st.info("ℹ️ **No Lot Selected**: New items will be imported without an assigned inventory lot (Unit Cost = $0.00). You can choose lots individually in the preview editor below or assign them later in Google Sheets.")
+                st.info("**No Lot Selected**: New items will be imported without an assigned inventory lot (Unit Cost = $0.00). You can choose lots individually in the preview editor below or assign them later in Google Sheets.", icon=":material/info:")
             else:
                 target_lot_id = lot_id_map.get(selected_option, "")
                 st.session_state.selected_lot = target_lot_id
@@ -628,7 +633,7 @@ def render_sync_page():
         st.markdown("### Upload Saved Vinted HTML Files")
         st.caption(f"Drag and drop your saved HTML files (`Active Listings`, `Sold Listings`, `My Orders`). Newly detected items will default to {lot_display_str}.")
 
-        with st.expander("ℹ️ How to export your FULL catalog (180+ items) from Vinted", expanded=False):
+        with st.expander("How to export your FULL catalog (180+ items) from Vinted", icon=":material/info:", expanded=False):
             st.markdown(
                 """
                 **Why does an uploaded file only show 20 items?**
@@ -642,7 +647,7 @@ def render_sync_page():
                 3. Press **Cmd + S** (Mac) or **Ctrl + S** (Windows) $\\rightarrow$ select **"Webpage, Complete"** or **"Webpage, HTML Only"**.
                 4. Upload the newly saved `.html` file here.
                 
-                *⚡ Pro Tip: 1-Click Auto-Scroll Bookmarklet:*
+                *Pro Tip: 1-Click Auto-Scroll Bookmarklet:*
                 Create a bookmark in your browser with this URL to auto-scroll any Vinted page with 1 click:
                 ```javascript
                 javascript:(function(){let lastHeight=0,repeats=0;let t=setInterval(()=>{window.scrollBy(0,1500);let h=document.body.offsetHeight;if(h===lastHeight){repeats++;if(repeats>=4){clearInterval(t);alert('All Vinted items loaded! Press Cmd+S (Ctrl+S) and select "Webpage, Complete" or "HTML Only" to save.');}}else{lastHeight=h;repeats=0;}},300);})();
@@ -662,7 +667,7 @@ def render_sync_page():
         )
 
         if uploaded_files:
-            st.markdown("#### 🔍 Detected Files & Content Analysis")
+            st.markdown("#### Detected Files & Content Analysis")
             files_info = []
             parsed_orders = []
             parsed_closet = []
@@ -674,15 +679,15 @@ def render_sync_page():
                 if detected == "orders":
                     completed_orders, cancelled_orders = parse_orders_and_cancellations(file_bytes)
                     parsed_orders.extend(completed_orders + cancelled_orders)
-                    type_label = f"💰 My Orders ({len(completed_orders)} sales, {len(cancelled_orders)} cancelled)"
+                    type_label = f"My Orders ({len(completed_orders)} sales, {len(cancelled_orders)} cancelled)"
                     files_info.append({"Filename": f.name, "Detected Type": type_label, "Items Found": len(completed_orders) + len(cancelled_orders)})
                 elif detected in ("active_closet", "sold_closet"):
                     items = parse_closet_html(file_bytes, default_lot=target_lot_id)
                     parsed_closet.extend(items)
-                    type_label = "📦 Active Listings" if detected == "active_closet" else "🏷️ Sold Closet"
+                    type_label = "Active Listings" if detected == "active_closet" else "Sold Closet"
                     files_info.append({"Filename": f.name, "Detected Type": type_label, "Items Found": len(items)})
                 else:
-                    files_info.append({"Filename": f.name, "Detected Type": "❓ Unknown", "Items Found": 0})
+                    files_info.append({"Filename": f.name, "Detected Type": "Unknown", "Items Found": 0})
 
             st.dataframe(pd.DataFrame(files_info), width="stretch")
 
@@ -692,7 +697,7 @@ def render_sync_page():
             if parsed_orders or parsed_closet:
                 st.divider()
                 lot_preview_header = f" (Default Lot: {target_lot_id})" if target_lot_id else " (Default Lot: None)"
-                st.markdown(f"#### ⚡ Reconciliation Preview{lot_preview_header}")
+                st.markdown(f"#### Reconciliation Preview{lot_preview_header}")
                 
                 try:
                     curr_active_titles, curr_sold_titles = get_cached_titles(sheet_id, user_creds)
@@ -710,10 +715,10 @@ def render_sync_page():
                             it.lot_id = target_lot_id
 
                     p1, p2, p3, p4 = st.columns(4)
-                    p1.metric("🟢 New Active to Add", len(new_listings), f"Default Lot: {target_lot_id or 'None'}", border=True)
-                    p2.metric("🔵 Active Moving to Sold", len(sold_transitions), border=True)
-                    p3.metric("🚫 Cancelled Orders", len(canc_orders), border=True)
-                    p4.metric("⚪ Duplicates Skipped", len(already_sold) + (len(parsed_closet) - len(new_listings)), border=True)
+                    p1.metric("New Active to Add", len(new_listings), f"Default Lot: {target_lot_id or 'None'}", border=True)
+                    p2.metric("Active Moving to Sold", len(sold_transitions), border=True)
+                    p3.metric("Cancelled Orders", len(canc_orders), border=True)
+                    p4.metric("Duplicates Skipped", len(already_sold) + (len(parsed_closet) - len(new_listings)), border=True)
 
                     if canc_orders:
                         with st.expander(f"View Cancelled Orders Detected ({len(canc_orders)} orders)", expanded=False):
@@ -732,7 +737,7 @@ def render_sync_page():
                     edited_listings_df = None
                     if new_listings:
                         with st.expander(f"View New Listings to Add ({len(new_listings)} items — Editable)", expanded=True):
-                            st.caption("✏️ You can edit any item's **Title** or **Assigned Lot** directly in the table below before committing to Google Sheets.")
+                            st.caption("You can edit any item's **Title** or **Assigned Lot** directly in the table below before committing to Google Sheets.")
                             
                             # Prepare lot options for the editor dropdown
                             available_lot_ids = [l.get("Lot_ID", "") for l in all_lots if l.get("Lot_ID")]
@@ -759,7 +764,7 @@ def render_sync_page():
                                     "Assigned Lot",
                                     help="Select an inventory lot or choose None to leave unassigned.",
                                     options=lot_editor_options,
-                                    format_func=lambda x: "⚪ None (Unassigned)" if not x else x,
+                                    format_func=lambda x: "None (Unassigned)" if not x else x,
                                     required=False,
                                     width="medium",
                                 )
@@ -804,7 +809,7 @@ def render_sync_page():
                                 key="html_new_listings_editor",
                             )
 
-                    if st.button("🚀 Commit & Synchronize to Google Sheets", type="primary", width="stretch"):
+                    if st.button("Commit & Synchronize to Google Sheets", icon=":material/cloud_upload:", type="primary", width="stretch"):
                         try:
                             with st.spinner("Synchronizing to Google Sheets..."):
                                 # 1. If new lot, create it in Inventory_Lots if not already created
@@ -827,7 +832,7 @@ def render_sync_page():
                                         if idx < len(new_listings):
                                             edited_title = str(row.get("Title", "")).strip()
                                             raw_lot = row.get("Assigned Lot")
-                                            edited_lot = "" if (pd.isna(raw_lot) or str(raw_lot).strip() in ("", "None", "⚪ None (Unassigned)", "nan")) else str(raw_lot).strip()
+                                            edited_lot = "" if (pd.isna(raw_lot) or str(raw_lot).strip() in ("", "None", "None (Unassigned)", "nan")) else str(raw_lot).strip()
                                             if edited_title:
                                                 new_listings[idx].title = edited_title
                                             new_listings[idx].lot_id = edited_lot
@@ -858,14 +863,14 @@ def render_sync_page():
                             else:
                                 closet_summary_msg = f"{res_closet.get('created', 0)} listings added{lot_msg}, {res_closet.get('updated', 0)} listings refreshed"
                             
-                            st.success(f"✔ Sync Complete! {closet_summary_msg}. {res_orders.get('synced_orders', 0)} sales orders synced, {res_orders.get('cancelled_orders', 0)} cancellations recorded.")
+                            st.success(f"Sync Complete! {closet_summary_msg}. {res_orders.get('synced_orders', 0)} sales orders synced, {res_orders.get('cancelled_orders', 0)} cancellations recorded.", icon=":material/check_circle:")
                             st.balloons()
                             time.sleep(1.5)
                             st.rerun()
                         except Exception as e:
                             log_error(u_email, "sync.py:commit", e)
                             if "429" in str(e):
-                                st.warning("⏳ Google Sheets rate limit reached (60 read requests/min). Please wait 30 seconds for Google's quota to reset, then click 'Commit & Synchronize' again.")
+                                st.warning("Google Sheets rate limit reached (60 read requests/min). Please wait 30 seconds for Google's quota to reset, then click 'Commit & Synchronize' again.", icon=":material/warning:")
                             else:
                                 st.error(f"Synchronization failed: {e}")
 
@@ -877,7 +882,7 @@ def render_sync_page():
     # TAB 2: EMAIL SYNC
     # ---------------------------------------------------------
     with tab_email:
-        st.markdown("### 📬 Direct Gmail Sync")
+        st.markdown("### Direct Gmail Sync")
         st.caption("Pull incoming sales, buyer offers, and favorites directly from your Gmail account via secure IMAP.")
 
         e1, e2 = st.columns([1, 1])
@@ -900,16 +905,16 @@ def render_sync_page():
             col_rem1, col_rem2 = st.columns([1.5, 1], vertical_alignment="center")
             with col_rem1:
                 remember_creds = st.checkbox(
-                    "💾 Remember password on this machine",
+                    "Remember password on this machine",
                     value=True,
                     help="Saves your password in local preferences so you don't have to enter it again."
                 )
             with col_rem2:
                 if saved_p or (os.getenv("GMAIL_APP_PASSWORD") and os.getenv("GMAIL_APP_PASSWORD") == default_pwd):
-                    if st.button("🗑️ Forget Password", help="Removes your saved password from local storage"):
+                    if st.button("Forget Password", icon=":material/delete:", help="Removes your saved password from local storage"):
                         clear_user_email_credentials(u_email)
                         save_email_credentials_to_env(gmail_user_input, "")
-                        st.success("Saved password removed!")
+                        st.success("Saved password removed!", icon=":material/check_circle:")
                         time.sleep(1)
                         st.rerun()
 
@@ -962,7 +967,7 @@ def render_sync_page():
                 with c_d2:
                     until_date = st.date_input("To Date", value=date.today())
 
-            if st.button("🔍 Scan & Preview Vinted Emails", type="primary", width="stretch"):
+            if st.button("Scan & Preview Vinted Emails", icon=":material/search:", type="primary", width="stretch"):
                 if not gmail_user_input or not gmail_pass_input:
                     st.error("Please provide your Gmail address and 16-character App Password.")
                 else:
@@ -982,7 +987,7 @@ def render_sync_page():
                             )
                             if not events:
                                 st.session_state.email_sync_preview = None
-                                st.info("ℹ️ No Vinted notification emails found. We scanned your entire mailbox (including archived emails) for messages from Vinted. Make sure Vinted notifications are sent to this address.")
+                                st.info("No Vinted notification emails found. We scanned your entire mailbox (including archived emails) for messages from Vinted. Make sure Vinted notifications are sent to this address.", icon=":material/info:")
                             else:
                                 st.session_state.email_sync_preview = events
                                 st.session_state.email_sync_user = gmail_user_input.strip()
@@ -993,7 +998,7 @@ def render_sync_page():
 
         with e2:
             with st.container(border=True):
-                st.markdown("#### 🔑 Need a Google App Password?")
+                st.markdown("#### Need a Google App Password?")
                 st.info(
                     "**Prerequisite:** You must have **2-Step Verification (Two-Factor Authentication / 2FA)** enabled on your Google account. If 2FA is turned off, Google disables App Passwords and displays an error saying the setting is not available.",
                     icon=":material/security:",
@@ -1006,7 +1011,7 @@ def render_sync_page():
                 3. **Create Key:** Type `Vinted Tracker` under **App name** $\\rightarrow$ click **Create**.
                 4. **Copy & Paste:** Copy the 16-character passcode (e.g. `abcd efgh ijkl mnop`) into the password box on the left.
                 
-                📘 *For full troubleshooting steps, see the [`GOOGLE_APP_PASSWORD_SETUP.md`](./GOOGLE_APP_PASSWORD_SETUP.md) guide.*
+                *For full troubleshooting steps, see the [`GOOGLE_APP_PASSWORD_SETUP.md`](./GOOGLE_APP_PASSWORD_SETUP.md) guide.*
                 """)
 
         # -------------------------------------------------------------
@@ -1015,7 +1020,7 @@ def render_sync_page():
         if st.session_state.get("email_sync_preview"):
             preview_events = st.session_state.email_sync_preview
             st.divider()
-            st.markdown(f"#### ⚡ Email Sync Preview ({len(preview_events)} Transactions Detected)")
+            st.markdown(f"#### Email Sync Preview ({len(preview_events)} Transactions Detected)")
             st.caption("Review the transactions detected from your Vinted emails before committing them to your Google Sheet.")
 
             sales_count = len([e for e in preview_events if e.event_type in ("sale", "bundle_sale")])
@@ -1024,13 +1029,13 @@ def render_sync_page():
             canc_count = len([e for e in preview_events if e.event_type == "cancellation"])
 
             prev_c1, prev_c2, prev_c3, prev_c4 = st.columns(4)
-            prev_c1.metric("💰 Sales to Record", sales_count, border=True)
-            prev_c2.metric("🚫 Cancellations", canc_count, border=True)
-            prev_c3.metric("💬 Offers Received", offers_count, border=True)
-            prev_c4.metric("❤️ Favorites to Increment", favs_count, border=True)
+            prev_c1.metric("Sales to Record", sales_count, border=True)
+            prev_c2.metric("Cancellations", canc_count, border=True)
+            prev_c3.metric("Offers Received", offers_count, border=True)
+            prev_c4.metric("Favorites to Increment", favs_count, border=True)
 
             if canc_count > 0:
-                with st.expander(f"View Cancellations Detected ({canc_count} orders)", expanded=False):
+                with st.expander(f"View Cancellations Detected ({canc_count} orders)", icon=":material/cancel:", expanded=False):
                     canc_evs = [e for e in preview_events if e.event_type == "cancellation"]
                     st.dataframe(pd.DataFrame([{
                         "Title": ev.item_title or f"Vinted Order {ev.order_id}",
@@ -1041,7 +1046,7 @@ def render_sync_page():
                     } for ev in canc_evs]), width="stretch")
 
             # Default Inventory Lot Selector for Email Sales
-            NO_LOT_OPTION = "⚪ None / No Lot (Unassigned)"
+            NO_LOT_OPTION = "None / No Lot (Unassigned)"
             email_lot_options = [NO_LOT_OPTION] + [
                 f"{l['Lot_ID']} — {l.get('Source_Vendor', 'Vendor')} ({l.get('Unit_Cost', '$0.00')}/ea)"
                 for l in all_lots if l.get("Lot_ID")
@@ -1059,8 +1064,8 @@ def render_sync_page():
             sale_indices = []
 
             if sales_count > 0:
-                st.markdown("##### 🛒 Detected Sales (Editable Preview)")
-                st.caption("✏️ You can edit the **Title**, choose an **Assigned Lot**, and verify **Brand** or **Category** before syncing to `Sold_Items`.")
+                st.markdown("##### Detected Sales (Editable Preview)")
+                st.caption("You can edit the **Title**, choose an **Assigned Lot**, and verify **Brand** or **Category** before syncing to `Sold_Items`.")
 
                 available_lot_ids = [l.get("Lot_ID", "") for l in all_lots if l.get("Lot_ID")]
                 if target_email_lot and target_email_lot not in available_lot_ids:
@@ -1106,7 +1111,7 @@ def render_sync_page():
                         "Assigned Lot": st.column_config.SelectboxColumn(
                             "Assigned Lot",
                             options=lot_col_options,
-                            format_func=lambda x: "⚪ None (Unassigned)" if not x else x,
+                            format_func=lambda x: "None (Unassigned)" if not x else x,
                             width="medium"
                         ) if available_lot_ids else st.column_config.TextColumn("Assigned Lot", width="medium"),
                         "Brand": st.column_config.TextColumn("Brand", width="medium"),
@@ -1124,7 +1129,7 @@ def render_sync_page():
 
             non_sales = [e for e in preview_events if e.event_type != "sale"]
             if non_sales:
-                with st.expander(f"View Other Detected Events ({len(non_sales)} offers & favorites)", expanded=False):
+                with st.expander(f"View Other Detected Events ({len(non_sales)} offers & favorites)", icon=":material/forum:", expanded=False):
                     st.dataframe(pd.DataFrame([{
                         "Type": ev.event_type.upper(),
                         "Item": ev.item_title or ev.vinted_id,
@@ -1135,7 +1140,7 @@ def render_sync_page():
 
             action_c1, action_c2 = st.columns([1.5, 1])
             with action_c1:
-                if st.button("🚀 Confirm & Sync to Google Sheets", type="primary", width="stretch", key="btn_confirm_email_sync"):
+                if st.button("Confirm & Sync to Google Sheets", icon=":material/cloud_upload:", type="primary", width="stretch", key="btn_confirm_email_sync"):
                     with st.spinner("Synchronizing email events to Google Sheets..."):
                         try:
                             # Apply any edits from st.data_editor to preview_events
@@ -1153,7 +1158,7 @@ def render_sync_page():
                                             ev.lot_id = ""
                                         else:
                                             s_lot = str(raw_lot).strip()
-                                            ev.lot_id = "" if s_lot in ("", "None", "⚪ None", "⚪ None (Unassigned)") else s_lot
+                                            ev.lot_id = "" if s_lot in ("", "None", "None (Unassigned)") else s_lot
                                         raw_brand = row.get("Brand")
                                         ev.brand = str(raw_brand).strip() if (raw_brand is not None and not pd.isna(raw_brand) and str(raw_brand).strip() != "None") else ""
                                         raw_cat = row.get("Category")
@@ -1170,7 +1175,7 @@ def render_sync_page():
                             )
                             st.cache_data.clear()
                             st.session_state.email_sync_preview = None
-                            st.success(f"✔ Successfully synced {processed} email transactions to your Google Sheet with full lot, brand, and category assignments!")
+                            st.success(f"Successfully synced {processed} email transactions to your Google Sheet with full lot, brand, and category assignments!", icon=":material/check_circle:")
                             st.balloons()
                             time.sleep(1.5)
                             st.rerun()
@@ -1179,7 +1184,7 @@ def render_sync_page():
                             st.error(f"Sync failed: {e}")
 
             with action_c2:
-                if st.button("❌ Cancel / Clear Preview", type="secondary", width="stretch", key="btn_cancel_email_sync"):
+                if st.button("Cancel / Clear Preview", icon=":material/close:", type="secondary", width="stretch", key="btn_cancel_email_sync"):
                     st.session_state.email_sync_preview = None
                     st.rerun()
 
@@ -1187,7 +1192,7 @@ def render_sync_page():
     # TAB 3: DUPLICATE CHECKER & RESOLVER
     # ---------------------------------------------------------
     with tab_dups:
-        st.markdown("### 🔍 Duplicate Checker & Resolver")
+        st.markdown("### Duplicate Checker & Resolver")
         st.caption(
             "Scan your Google Sheet (`Sold_Items` or `Item_Listings`) for duplicate records caused by multiple imports, "
             "email notifications, or placeholder rows. Compare matching items side-by-side and choose whether to keep one, "
@@ -1213,7 +1218,7 @@ def render_sync_page():
         with col_cfg2:
             auto_scan = st.session_state.pop("duplicate_scan_trigger", False)
             btn_scan = st.button(
-                "🔎 Scan for Duplicates",
+                "Scan for Duplicates",
                 type="primary",
                 width="stretch",
                 icon=":material/search:",
@@ -1245,13 +1250,13 @@ def render_sync_page():
             groups = scan_data.get("groups", [])
             if not groups:
                 st.success(
-                    f"🎉 **No duplicates found in `{target_tab_name}`!** Every row has a unique Order ID, URL, or item details.",
+                    f"**No duplicates found in `{target_tab_name}`!** Every row has a unique Order ID, URL, or item details.",
                     icon=":material/check_circle:",
                 )
             else:
                 total_dup_rows = sum(len(g.get("rows", [])) for g in groups)
                 st.warning(
-                    f"⚠️ Found **{len(groups)} duplicate group(s)** involving **{total_dup_rows} total rows** in `{target_tab_name}`. "
+                    f"Found **{len(groups)} duplicate group(s)** involving **{total_dup_rows} total rows** in `{target_tab_name}`. "
                     f"Review the side-by-side details below and select your decision for each group.",
                     icon=":material/warning:",
                 )
@@ -1260,19 +1265,19 @@ def render_sync_page():
                 st.markdown("##### Quick Actions for All Groups")
                 b_c1, b_c2, b_c3 = st.columns(3)
                 with b_c1:
-                    if st.button("⭐ Merge into Best for All", width="stretch", icon=":material/auto_fix_high:", key="btn_bulk_merge"):
+                    if st.button("Merge into Best for All", width="stretch", icon=":material/auto_fix_high:", key="btn_bulk_merge"):
                         for g in groups:
                             rec_idx = g.get("recommended_keep_row_idx")
                             st.session_state[f"dup_decision_{target_tab_name}_{g['group_id']}"] = f"merge_into:{rec_idx}"
                         st.rerun()
                 with b_c2:
-                    if st.button("🗑️ Keep Best Row Only for All", width="stretch", icon=":material/delete_forever:", key="btn_bulk_keep_best"):
+                    if st.button("Keep Best Row Only for All", width="stretch", icon=":material/delete_forever:", key="btn_bulk_keep_best"):
                         for g in groups:
                             rec_idx = g.get("recommended_keep_row_idx")
                             st.session_state[f"dup_decision_{target_tab_name}_{g['group_id']}"] = f"keep_row:{rec_idx}"
                         st.rerun()
                 with b_c3:
-                    if st.button("👥 Keep Both for All", width="stretch", icon=":material/people:", key="btn_bulk_keep_both"):
+                    if st.button("Keep Both for All", width="stretch", icon=":material/people:", key="btn_bulk_keep_both"):
                         for g in groups:
                             st.session_state[f"dup_decision_{target_tab_name}_{g['group_id']}"] = "keep_both"
                         st.rerun()
@@ -1290,7 +1295,7 @@ def render_sync_page():
                             # Group Header
                             g_h1, g_h2 = st.columns([3, 1])
                             with g_h1:
-                                st.markdown(f"#### 🔍 Group #{g_idx + 1}")
+                                st.markdown(f"#### Group #{g_idx + 1}")
                                 st.caption(f"**Detection Reason:** {g.get('reason', 'Duplicate item match')}")
                             with g_h2:
                                 st.metric("Duplicate Rows", len(rows), border=False)
@@ -1304,7 +1309,7 @@ def render_sync_page():
                                     card_border = "2px solid #22c55e" if is_rec else "1px solid #334155"
                                     bg_color = "rgba(34, 197, 94, 0.08)" if is_rec else "rgba(30, 41, 59, 0.5)"
                                     badge_html = (
-                                        '<span style="background-color:#166534;color:#bbf7d0;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;">⭐ RECOMMENDED (MOST COMPLETE)</span>'
+                                        '<span style="background-color:#166534;color:#bbf7d0;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px;"><span class="material-symbols-rounded" style="font-size:13px;line-height:1;">verified</span> RECOMMENDED (MOST COMPLETE)</span>'
                                         if is_rec else
                                         '<span style="background-color:#334155;color:#94a3b8;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;">DUPLICATE CANDIDATE</span>'
                                     )
@@ -1322,11 +1327,11 @@ def render_sync_page():
 
                                     source_val = row_info.get("source") or "—"
                                     if "Email" in source_val and "HTML" in source_val:
-                                        source_badge = '<span style="background-color:#4338ca;color:#c7d2fe;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">📧 Email + 🌐 HTML</span>'
+                                        source_badge = '<span style="background-color:#4338ca;color:#c7d2fe;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">Email + HTML</span>'
                                     elif "Email" in source_val:
-                                        source_badge = '<span style="background-color:#0369a1;color:#bae6fd;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">📧 Email</span>'
+                                        source_badge = '<span style="background-color:#0369a1;color:#bae6fd;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">Email</span>'
                                     elif "HTML" in source_val:
-                                        source_badge = '<span style="background-color:#0f766e;color:#99f6e4;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">🌐 HTML</span>'
+                                        source_badge = '<span style="background-color:#0f766e;color:#99f6e4;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">HTML</span>'
                                     else:
                                         source_badge = f'<span style="background-color:#334155;color:#94a3b8;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600;">{html.escape(source_val)}</span>'
 
@@ -1352,13 +1357,13 @@ def render_sync_page():
 
                             # Decision Radio / Options for this group
                             choice_options = {}
-                            choice_options[f"merge_into:{rec_idx}"] = f"🔄 Merge missing fields into Row #{rec_idx} & delete other row(s) (Recommended)"
+                            choice_options[f"merge_into:{rec_idx}"] = f"Merge missing fields into Row #{rec_idx} & delete other row(s) (Recommended)"
                             for row_info in rows:
                                 r_i = row_info.get("row_idx")
                                 other_indices = [r.get("row_idx") for r in rows if r.get("row_idx") != r_i]
                                 others_str = ", ".join(f"#{x}" for x in other_indices)
-                                choice_options[f"keep_row:{r_i}"] = f"🗑️ Keep Row #{r_i} only (delete {others_str})"
-                            choice_options["keep_both"] = "👥 Keep Both rows (do not delete or change anything)"
+                                choice_options[f"keep_row:{r_i}"] = f"Keep Row #{r_i} only (delete {others_str})"
+                            choice_options["keep_both"] = "Keep Both rows (do not delete or change anything)"
 
                             group_key = f"dup_decision_{target_tab_name}_{g_id}"
                             if group_key not in st.session_state or st.session_state[group_key] not in choice_options:
@@ -1381,7 +1386,7 @@ def render_sync_page():
                 act_c1, act_c2 = st.columns([2, 1])
                 with act_c1:
                     if st.button(
-                        f"🚀 Apply Decisions & Resolve Duplicates in {target_tab_name}",
+                        f"Apply Decisions & Resolve Duplicates in {target_tab_name}",
                         type="primary",
                         width="stretch",
                         icon=":material/check:",
@@ -1435,7 +1440,7 @@ def render_sync_page():
                                 st.cache_data.clear()
                                 st.session_state.duplicate_scan_results = None
                                 st.success(
-                                    f"✔ Successfully resolved duplicates! Deleted {res['deleted_count']} redundant row(s), "
+                                    f"Successfully resolved duplicates! Deleted {res['deleted_count']} redundant row(s), "
                                     f"merged missing details for {res['merged_count']} item(s), and preserved {res['kept_both_count']} group(s) intact.",
                                     icon=":material/task_alt:",
                                 )
@@ -1447,7 +1452,7 @@ def render_sync_page():
                                 st.error(f"Error applying duplicate resolutions: {e}")
 
                 with act_c2:
-                    if st.button("❌ Clear Results / Cancel", type="secondary", width="stretch", key="btn_cancel_dup_scan"):
+                    if st.button("Clear Results / Cancel", icon=":material/close:", type="secondary", width="stretch", key="btn_cancel_dup_scan"):
                         st.session_state.duplicate_scan_results = None
                         st.rerun()
 
@@ -1455,7 +1460,7 @@ def render_sync_page():
     # TAB 4: SHIPPING SUPPLIES
     # ---------------------------------------------------------
     with tab_supplies:
-        st.markdown("### 🏷️ Shipping Supplies & Packaging Costs")
+        st.markdown("### Shipping Supplies & Packaging Costs")
         st.caption("Manage boxes, poly mailers, labels, and tape. The global weighted average packaging cost is automatically deducted from every sale in `Sold_Items` to compute true net profits.")
 
         sup_engine = get_sheets_sync_engine(client)
@@ -1463,8 +1468,8 @@ def render_sync_page():
             sup_data = get_cached_supplies(sheet_id, user_creds)
         except Exception as e:
             if "429" in str(e):
-                st.warning("⏳ Google Sheets rate limit reached. Waiting for quota reset...")
-                st.button("🔄 Retry Supplies", on_click=lambda: st.cache_data.clear(), key="retry_sup_btn")
+                st.warning("Google Sheets rate limit reached. Waiting for quota reset...", icon=":material/hourglass_top:")
+                st.button("Retry Supplies", icon=":material/refresh:", on_click=lambda: st.cache_data.clear(), key="retry_sup_btn")
             sup_data = {"supplies": [], "avg_cost_per_shipment": 0.24}
         active_supplies = sup_data.get("supplies", [])
         avg_cost_val = sup_data.get("avg_cost_per_shipment", 0.24)
@@ -1487,10 +1492,10 @@ def render_sync_page():
 
         # Section 1: Form to Add or Update Supply
         with st.container(border=True):
-            st.markdown("#### ➕ Add or Update Shipping Supply")
+            st.markdown("#### Add or Update Shipping Supply")
 
             next_sup_id = sup_engine.get_next_supply_id(cached_supplies=active_supplies)
-            sup_mode_options = [f"➕ New Supply ({next_sup_id})"] + [
+            sup_mode_options = [f"New Supply ({next_sup_id})"] + [
                 f"{s['Supply_ID']} — {s.get('Item_Description') or 'Supply'} ({s.get('Vendor') or 'Vendor'})"
                 for s in active_supplies
             ]
@@ -1501,7 +1506,7 @@ def render_sync_page():
                 key="select_supply_mode",
             )
 
-            is_editing_existing = not selected_sup_mode.startswith("➕ New Supply")
+            is_editing_existing = not selected_sup_mode.startswith("New Supply")
             if is_editing_existing:
                 selected_sup_id = selected_sup_mode.split(" — ")[0].strip()
                 existing_item = next((s for s in active_supplies if s["Supply_ID"] == selected_sup_id), {})
@@ -1534,9 +1539,9 @@ def render_sync_page():
                 input_sup_cost = st.number_input("Total Cost Paid ($)", min_value=0.0, value=float(default_cost), step=1.0, key="sup_cost_input")
 
             calc_sup_unit = (input_sup_cost / input_sup_qty) if input_sup_qty > 0 else 0.0
-            st.info(f"💡 Calculated Unit Packaging Cost: **${calc_sup_unit:.3f} per unit** (`${input_sup_cost:.2f} ÷ {input_sup_qty} units`)")
+            st.info(f"Calculated Unit Packaging Cost: **${calc_sup_unit:.3f} per unit** (`${input_sup_cost:.2f} ÷ {input_sup_qty} units`)", icon=":material/lightbulb:")
 
-            if st.button("💾 Save Supply to Spreadsheet", type="primary", width="stretch", key="btn_save_supply"):
+            if st.button("Save Supply to Spreadsheet", icon=":material/save:", type="primary", width="stretch", key="btn_save_supply"):
                 with st.spinner(f"Saving supply {form_sup_id} to Google Sheets..."):
                     res = sup_engine.save_shipping_supply(
                         supply_id=form_sup_id,
@@ -1549,13 +1554,13 @@ def render_sync_page():
                     log_event(u_email, "supply_saved", f"Supply {form_sup_id}: {input_sup_desc} ({input_sup_qty} @ ${input_sup_cost})", spreadsheet_id=st.session_state.get("spreadsheet_id"))
                     st.cache_data.clear()
 
-                st.success(f"✔ Supply {form_sup_id} saved successfully! Global packaging deduction updated in Google Sheets.")
+                st.success(f"Supply {form_sup_id} saved successfully! Global packaging deduction updated in Google Sheets.", icon=":material/check_circle:")
                 st.balloons()
                 time.sleep(1.2)
                 st.rerun()
 
         # Section 2: Current Inventory Table
-        st.markdown("#### 📋 Current Shipping Supplies in Sheet")
+        st.markdown("#### Current Shipping Supplies in Sheet")
         if active_supplies:
             display_supplies = []
             for s in active_supplies:
@@ -1573,7 +1578,7 @@ def render_sync_page():
                 })
             st.dataframe(pd.DataFrame(display_supplies), width="stretch")
         else:
-            st.info("No shipping supplies recorded yet.")
+            st.info("No shipping supplies recorded yet.", icon=":material/info:")
 
 
 if __name__ == "__main__":
