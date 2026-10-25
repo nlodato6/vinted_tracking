@@ -1065,13 +1065,20 @@ def render_sync_page():
                                     if s_idx < len(edited_sale_df):
                                         row = edited_sale_df.iloc[s_idx]
                                         ev = preview_events[df_idx]
-                                        ed_title = str(row.get("Title", "")).strip()
-                                        if ed_title:
+                                        val_title = row.get("Title")
+                                        ed_title = str(val_title).strip() if (val_title is not None and not pd.isna(val_title)) else ""
+                                        if ed_title and ed_title != "None":
                                             ev.item_title = ed_title
                                         raw_lot = row.get("Assigned Lot")
-                                        ev.lot_id = "" if (pd.isna(raw_lot) or str(raw_lot).strip() in ("", "None", "⚪ None", "⚪ None (Unassigned)")) else str(raw_lot).strip()
-                                        ev.brand = str(row.get("Brand", "")).strip()
-                                        ev.category = str(row.get("Category", "")).strip()
+                                        if pd.isna(raw_lot) or raw_lot is None:
+                                            ev.lot_id = ""
+                                        else:
+                                            s_lot = str(raw_lot).strip()
+                                            ev.lot_id = "" if s_lot in ("", "None", "⚪ None", "⚪ None (Unassigned)") else s_lot
+                                        raw_brand = row.get("Brand")
+                                        ev.brand = str(raw_brand).strip() if (raw_brand is not None and not pd.isna(raw_brand) and str(raw_brand).strip() != "None") else ""
+                                        raw_cat = row.get("Category")
+                                        ev.category = str(raw_cat).strip() if (raw_cat is not None and not pd.isna(raw_cat) and str(raw_cat).strip() != "None") else ""
 
                             engine = get_sheets_sync_engine(client)
                             results = engine.process_email_batch(preview_events, default_lot=target_email_lot)

@@ -30,11 +30,11 @@ def parse_price(price_val: Any) -> float:
         return 0.0
 
 
-def normalize_date_str(s: str) -> str:
+def normalize_date_str(s: Any) -> str:
     """Normalizes various date formats (e.g. 10/19/2026, 2026-10-19) to YYYY-MM-DD."""
     if not s:
         return ""
-    cleaned = s.strip()
+    cleaned = str(s).strip()
     for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y/%m/%d", "%m-%d-%Y", "%d/%m/%Y"):
         try:
             return datetime.strptime(cleaned, fmt).strftime("%Y-%m-%d")
@@ -177,12 +177,12 @@ class SheetsSyncEngine:
 
         already_matched = already_matched_indices or set()
 
-        clean_order_id = order_id.strip() if order_id else ""
+        clean_order_id = str(order_id).strip() if (order_id is not None and str(order_id).strip()) else ""
         clean_incoming_uuid = extract_uuid(order_id) or extract_uuid(vinted_url) or extract_uuid(title)
-        clean_incoming_vid = vinted_id.strip() or extract_vinted_id_from_text(vinted_url) or extract_vinted_id_from_text(title)
-        clean_incoming_url = vinted_url.strip().lower() if vinted_url else ""
-        clean_sku = item_sku.strip().upper() if item_sku else ""
-        clean_title = title.strip() if title else ""
+        clean_incoming_vid = (str(vinted_id).strip() if (vinted_id is not None and str(vinted_id).strip()) else "") or extract_vinted_id_from_text(vinted_url) or extract_vinted_id_from_text(title) or ""
+        clean_incoming_url = str(vinted_url).strip().lower() if (vinted_url is not None and str(vinted_url).strip()) else ""
+        clean_sku = str(item_sku).strip().upper() if (item_sku is not None and str(item_sku).strip()) else ""
+        clean_title = str(title).strip() if (title is not None and str(title).strip()) else ""
         clean_price = round(float(sold_price), 2) if (sold_price is not None and float(sold_price) > 0) else None
         clean_date = normalize_date_str(sale_date) if sale_date else ""
 
@@ -191,10 +191,10 @@ class SheetsSyncEngine:
             if r_idx in already_matched:
                 continue
 
-            row_ord = row[order_id_idx].strip() if len(row) > order_id_idx else ""
-            row_url = row[url_idx].strip() if len(row) > url_idx else ""
-            row_t = row[title_idx].strip() if len(row) > title_idx else ""
-            row_sku = row[sku_idx].strip() if len(row) > sku_idx else ""
+            row_ord = str(row[order_id_idx]).strip() if (len(row) > order_id_idx and row[order_id_idx] is not None) else ""
+            row_url = str(row[url_idx]).strip() if (len(row) > url_idx and row[url_idx] is not None) else ""
+            row_t = str(row[title_idx]).strip() if (len(row) > title_idx and row[title_idx] is not None) else ""
+            row_sku = str(row[sku_idx]).strip() if (len(row) > sku_idx and row[sku_idx] is not None) else ""
 
             # 1. Exact Order ID
             if clean_order_id and not is_placeholder_order_id(clean_order_id):
@@ -229,7 +229,7 @@ class SheetsSyncEngine:
             for r_idx, row in enumerate(sold_rows[1:], start=2):
                 if r_idx in already_matched:
                     continue
-                row_t = row[title_idx].strip() if len(row) > title_idx else ""
+                row_t = str(row[title_idx]).strip() if (len(row) > title_idx and row[title_idx] is not None) else ""
                 if not is_placeholder_title(row_t):
                     r_low = row_t.lower()
                     if c_low == r_low:
@@ -242,7 +242,7 @@ class SheetsSyncEngine:
             for r_idx, row in enumerate(sold_rows[1:], start=2):
                 if r_idx in already_matched:
                     continue
-                row_t = row[title_idx].strip() if len(row) > title_idx else ""
+                row_t = str(row[title_idx]).strip() if (len(row) > title_idx and row[title_idx] is not None) else ""
                 if is_placeholder_title(row_t) or is_placeholder_title(clean_title):
                     row_p = parse_price(row[price_idx]) if len(row) > price_idx else 0.0
                     if abs(clean_price - row_p) < 0.01:
@@ -299,10 +299,15 @@ class SheetsSyncEngine:
 
         while len(existing_row) <= 24:
             existing_row.append("")
+        for idx in range(len(existing_row)):
+            if existing_row[idx] is None:
+                existing_row[idx] = ""
+            elif not isinstance(existing_row[idx], str):
+                existing_row[idx] = str(existing_row[idx])
 
         # 1. Title
-        existing_title = existing_row[title_idx].strip()
-        new_title = (incoming.get("item_title") or "").strip()
+        existing_title = (existing_row[title_idx] or "").strip()
+        new_title = str(incoming.get("item_title") or "").strip()
         if new_title and not is_placeholder_title(new_title):
             if is_placeholder_title(existing_title) or not existing_title:
                 updates.append({"range": f"{col_letter(title_idx)}{row_idx}", "values": [[new_title]]})
@@ -311,8 +316,8 @@ class SheetsSyncEngine:
         effective_title = existing_row[title_idx] if not is_placeholder_title(existing_row[title_idx]) else new_title
 
         # 2. Brand
-        existing_brand = existing_row[brand_idx].strip()
-        new_brand = (incoming.get("brand") or "").strip()
+        existing_brand = (existing_row[brand_idx] or "").strip()
+        new_brand = str(incoming.get("brand") or "").strip()
         if is_placeholder_brand(new_brand):
             new_brand = infer_brand(effective_title)
         if not is_placeholder_brand(new_brand) and is_placeholder_brand(existing_brand):
@@ -320,8 +325,8 @@ class SheetsSyncEngine:
             existing_row[brand_idx] = new_brand
 
         # 3. Category
-        existing_cat = existing_row[cat_idx].strip()
-        new_cat = (incoming.get("category") or "").strip()
+        existing_cat = (existing_row[cat_idx] or "").strip()
+        new_cat = str(incoming.get("category") or "").strip()
         if is_placeholder_category(new_cat):
             new_cat = infer_clothing_category(effective_title)
         if not is_placeholder_category(new_cat) and is_placeholder_category(existing_cat):
@@ -329,8 +334,8 @@ class SheetsSyncEngine:
             existing_row[cat_idx] = new_cat
 
         # 4. Lot_ID
-        existing_lot = existing_row[lot_idx].strip()
-        new_lot = (incoming.get("lot_id") or "").strip()
+        existing_lot = (existing_row[lot_idx] or "").strip()
+        new_lot = str(incoming.get("lot_id") or "").strip()
         if not is_placeholder_lot(new_lot) and is_placeholder_lot(existing_lot):
             updates.append({"range": f"{col_letter(lot_idx)}{row_idx}", "values": [[new_lot]]})
             existing_row[lot_idx] = new_lot
@@ -340,15 +345,15 @@ class SheetsSyncEngine:
             existing_row[cost_idx] = cost_formula
 
         # 5. Order_ID
-        existing_ord = existing_row[ord_idx].strip()
-        new_ord = (incoming.get("order_id") or "").strip()
+        existing_ord = (existing_row[ord_idx] or "").strip() if ord_idx != -1 else ""
+        new_ord = str(incoming.get("order_id") or "").strip()
         if new_ord and (not existing_ord or (is_placeholder_order_id(existing_ord) and not is_placeholder_order_id(new_ord))):
             updates.append({"range": f"{col_letter(ord_idx)}{row_idx}", "values": [[new_ord]]})
             existing_row[ord_idx] = new_ord
 
         # 6. Vinted_URL
-        existing_url = existing_row[url_idx].strip()
-        new_url = (incoming.get("vinted_url") or "").strip()
+        existing_url = (existing_row[url_idx] or "").strip() if url_idx != -1 else ""
+        new_url = str(incoming.get("vinted_url") or "").strip()
         if new_url and (not existing_url or (len(new_url) > len(existing_url) and not existing_url.startswith("http"))):
             updates.append({"range": f"{col_letter(url_idx)}{row_idx}", "values": [[new_url]]})
             existing_row[url_idx] = new_url
@@ -382,19 +387,19 @@ class SheetsSyncEngine:
 
         # 9. Date_Listed & Sale_Date
         new_dl = normalize_date_str(incoming.get("date_listed") or "")
-        existing_dl = existing_row[dl_idx].strip()
+        existing_dl = (existing_row[dl_idx] or "").strip() if dl_idx != -1 else ""
         if new_dl and not existing_dl:
             updates.append({"range": f"{col_letter(dl_idx)}{row_idx}", "values": [[new_dl]]})
             existing_row[dl_idx] = new_dl
 
         new_sd = normalize_date_str(incoming.get("sale_date") or "")
-        existing_sd = existing_row[date_idx].strip()
+        existing_sd = (existing_row[date_idx] or "").strip() if date_idx != -1 else ""
         if new_sd and not existing_sd:
             updates.append({"range": f"{col_letter(date_idx)}{row_idx}", "values": [[new_sd]]})
             existing_row[date_idx] = new_sd
 
         # 10. Status
-        existing_st = existing_row[status_idx].strip()
+        existing_st = (existing_row[status_idx] or "").strip() if status_idx != -1 else ""
         if existing_st.lower() != "sold":
             updates.append({"range": f"{col_letter(status_idx)}{row_idx}", "values": [["Sold"]]})
             existing_row[status_idx] = "Sold"
@@ -760,16 +765,16 @@ class SheetsSyncEngine:
         if len(listings_rows) > 1:
             l_lot_idx = listings_rows[0].index("Lot_ID") if "Lot_ID" in listings_rows[0] else 1
             for lr in listings_rows[1:]:
-                if len(lr) > l_lot_idx and lr[l_lot_idx].strip():
-                    l_id = lr[l_lot_idx].strip()
+                if len(lr) > l_lot_idx and lr[l_lot_idx] is not None and str(lr[l_lot_idx]).strip():
+                    l_id = str(lr[l_lot_idx]).strip()
                     active_counts[l_id] = active_counts.get(l_id, 0) + 1
 
         sold_counts: Dict[str, int] = {}
         if len(sold_rows) > 1:
             s_lot_idx = sold_rows[0].index("Lot_ID") if "Lot_ID" in sold_rows[0] else 1
             for sr in sold_rows[1:]:
-                if len(sr) > s_lot_idx and sr[s_lot_idx].strip():
-                    s_id = sr[s_lot_idx].strip()
+                if len(sr) > s_lot_idx and sr[s_lot_idx] is not None and str(sr[s_lot_idx]).strip():
+                    s_id = str(sr[s_lot_idx]).strip()
                     sold_counts[s_id] = sold_counts.get(s_id, 0) + 1
 
         updates = []
@@ -781,11 +786,11 @@ class SheetsSyncEngine:
         col_status = chr(ord('A') + status_idx)
 
         for row_idx, r in enumerate(lots_rows[1:], start=2):
-            lot_id = r[lot_id_idx].strip() if len(r) > lot_id_idx else ""
+            lot_id = str(r[lot_id_idx]).strip() if (len(r) > lot_id_idx and r[lot_id_idx] is not None) else ""
             if not lot_id:
                 continue
 
-            total_articles_str = r[total_art_idx].strip() if len(r) > total_art_idx else ""
+            total_articles_str = str(r[total_art_idx]).strip() if (len(r) > total_art_idx and r[total_art_idx] is not None) else ""
             try:
                 total_articles = int(float(total_articles_str)) if total_articles_str else 0
             except ValueError:
@@ -808,9 +813,9 @@ class SheetsSyncEngine:
                 f'"Active", "Pending")))'
             )
 
-            cur_cost = r[unit_cost_idx].strip() if len(r) > unit_cost_idx else ""
-            cur_proc = r[proc_idx].strip() if len(r) > proc_idx else ""
-            cur_status = r[status_idx].strip() if len(r) > status_idx else ""
+            cur_cost = str(r[unit_cost_idx]).strip() if (len(r) > unit_cost_idx and r[unit_cost_idx] is not None) else ""
+            cur_proc = str(r[proc_idx]).strip() if (len(r) > proc_idx and r[proc_idx] is not None) else ""
+            cur_status = str(r[status_idx]).strip() if (len(r) > status_idx and r[status_idx] is not None) else ""
 
             if not cur_cost.startswith("="):
                 updates.append({"range": f"{col_unit_cost}{row_idx}", "values": [[expected_cost_formula]]})
@@ -823,7 +828,7 @@ class SheetsSyncEngine:
             ws_lots.batch_update(updates, value_input_option="USER_ENTERED")
 
         return {
-            "total_lots": len([r for r in lots_rows[1:] if len(r) > lot_id_idx and r[lot_id_idx].strip()]),
+            "total_lots": len([r for r in lots_rows[1:] if len(r) > lot_id_idx and r[lot_id_idx] is not None and str(r[lot_id_idx]).strip()]),
             "completed_lots": completed_count,
             "active_lots": active_lot_count,
             "updated_cells": len(updates),
@@ -835,7 +840,7 @@ class SheetsSyncEngine:
 
         if cached_rows:
             for r in cached_rows:
-                if len(r) > 0 and str(r[0]).strip().upper().startswith("SKU-"):
+                if len(r) > 0 and r[0] is not None and str(r[0]).strip().upper().startswith("SKU-"):
                     try:
                         num = int(str(r[0]).strip().upper().replace("SKU-", ""))
                         if num > max_sku:
@@ -851,7 +856,7 @@ class SheetsSyncEngine:
                 if len(rows) > 1:
                     sku_idx = rows[0].index("Item_SKU") if "Item_SKU" in rows[0] else 0
                     for r in rows[1:]:
-                        if len(r) > sku_idx and r[sku_idx].strip().upper().startswith("SKU-"):
+                        if len(r) > sku_idx and r[sku_idx] is not None and str(r[sku_idx]).strip().upper().startswith("SKU-"):
                             try:
                                 num = int(r[sku_idx].strip().upper().replace("SKU-", ""))
                                 if num > max_sku:
@@ -1105,13 +1110,13 @@ class SheetsSyncEngine:
                 blank_row_indices = []
                 for r_idx, row in enumerate(all_rows[1:], start=2):
                     # Check if entirely blank
-                    is_empty = not any(str(c).strip() for c in row)
-                    sku_val = str(row[sku_idx]).strip() if len(row) > sku_idx else ""
-                    title_val = str(row[title_idx]).strip() if len(row) > title_idx else ""
-                    brand_val = str(row[brand_idx]).strip() if len(row) > brand_idx else ""
-                    cat_val = str(row[cat_idx]).strip() if len(row) > cat_idx else ""
-                    lot_val = str(row[lot_idx]).strip() if len(row) > lot_idx else ""
-                    url_val = str(row[url_idx]).strip() if len(row) > url_idx else ""
+                    is_empty = not any(str(c).strip() for c in row if c is not None and str(c).strip() not in ("", "None", "nan", "null"))
+                    sku_val = str(row[sku_idx]).strip() if (len(row) > sku_idx and row[sku_idx] is not None and str(row[sku_idx]).strip() not in ("None", "nan", "null")) else ""
+                    title_val = str(row[title_idx]).strip() if (len(row) > title_idx and row[title_idx] is not None and str(row[title_idx]).strip() not in ("None", "nan", "null")) else ""
+                    brand_val = str(row[brand_idx]).strip() if (len(row) > brand_idx and row[brand_idx] is not None and str(row[brand_idx]).strip() not in ("None", "nan", "null")) else ""
+                    cat_val = str(row[cat_idx]).strip() if (len(row) > cat_idx and row[cat_idx] is not None and str(row[cat_idx]).strip() not in ("None", "nan", "null")) else ""
+                    lot_val = str(row[lot_idx]).strip() if (len(row) > lot_idx and row[lot_idx] is not None and str(row[lot_idx]).strip() not in ("None", "nan", "null")) else ""
+                    url_val = str(row[url_idx]).strip() if (len(row) > url_idx and row[url_idx] is not None and str(row[url_idx]).strip() not in ("None", "nan", "null")) else ""
 
                     # An empty row or a phantom row with NO item identity whatsoever
                     is_phantom = not title_val and not brand_val and not cat_val and not lot_val and not url_val
@@ -1651,8 +1656,8 @@ class SheetsSyncEngine:
         s_ord_idx = s_headers.index("Order_ID") if "Order_ID" in s_headers else 21
         existing_orders = set()
         for sr in sold_rows[1:]:
-            if len(sr) > s_ord_idx and sr[s_ord_idx].strip():
-                existing_orders.add(sr[s_ord_idx].strip())
+            if len(sr) > s_ord_idx and sr[s_ord_idx] is not None and str(sr[s_ord_idx]).strip():
+                existing_orders.add(str(sr[s_ord_idx]).strip())
 
         max_sku_num = self.get_max_sku_num(cached_rows=listings_rows + sold_rows)
         cur_sold_count = len(sold_rows)
@@ -1665,9 +1670,9 @@ class SheetsSyncEngine:
 
         for r_i, r in enumerate(listings_rows[1:], start=2):
             active_listings_by_row[r_i] = list(r)
-            r_id = r[id_idx].replace(",", "").strip() if len(r) > id_idx else ""
-            r_title = r[title_idx].strip().lower() if len(r) > title_idx else ""
-            r_url = r[url_idx].strip().lower() if len(r) > url_idx else ""
+            r_id = str(r[id_idx]).replace(",", "").strip() if (len(r) > id_idx and r[id_idx] is not None) else ""
+            r_title = str(r[title_idx]).strip().lower() if (len(r) > title_idx and r[title_idx] is not None) else ""
+            r_url = str(r[url_idx]).strip().lower() if (len(r) > url_idx and r[url_idx] is not None) else ""
             if r_id:
                 row_by_vinted_id[r_id] = r_i
             if r_title:
@@ -1687,7 +1692,7 @@ class SheetsSyncEngine:
 
         for event in events:
             clean_target_title = (event.item_title or "").strip().lower()
-            clean_target_id = (event.vinted_id or "").replace(",", "").strip()
+            clean_target_id = (event.vinted_id or "").replace(",", "").strip() if event.vinted_id else ""
             clean_target_url = (event.vinted_url or "").strip().lower()
 
             target_row = None
@@ -1742,7 +1747,7 @@ class SheetsSyncEngine:
             # 3. SALE
             elif event.event_type == "sale":
                 sale_date_str = event.timestamp.strftime("%Y-%m-%d")
-                clean_target_vid = clean_target_id or extract_vinted_id_from_text(event.vinted_url) or extract_vinted_id_from_text(event.item_title)
+                clean_target_vid = clean_target_id or extract_vinted_id_from_text(event.vinted_url) or extract_vinted_id_from_text(event.item_title) or ""
                 next_sold_row = cur_sold_count + len(rows_to_append_to_sold) + 1
                 col_lot = "B"
                 col_g = "G"
@@ -1757,11 +1762,11 @@ class SheetsSyncEngine:
 
                     rows_to_delete_from_listings.append(target_row)
 
-                    item_sku = t_data[sku_idx] if len(t_data) > sku_idx and t_data[sku_idx].strip() else f"SKU-{max_sku_num + 1}"
-                    lot_id = getattr(event, "lot_id", "") or (t_data[lot_idx] if len(t_data) > lot_idx and t_data[lot_idx].strip() else default_lot)
-                    item_title = event.item_title or (t_data[title_idx] if len(t_data) > title_idx else "")
-                    brand = getattr(event, "brand", "") or (t_data[brand_idx] if len(t_data) > brand_idx and t_data[brand_idx].strip() else infer_brand(item_title))
-                    category = getattr(event, "category", "") or (t_data[cat_idx] if len(t_data) > cat_idx and t_data[cat_idx].strip() else infer_clothing_category(item_title))
+                    item_sku = str(t_data[sku_idx]).strip() if (len(t_data) > sku_idx and t_data[sku_idx] is not None and str(t_data[sku_idx]).strip()) else f"SKU-{max_sku_num + 1}"
+                    lot_id = getattr(event, "lot_id", "") or (str(t_data[lot_idx]).strip() if (len(t_data) > lot_idx and t_data[lot_idx] is not None and str(t_data[lot_idx]).strip()) else default_lot)
+                    item_title = event.item_title or (str(t_data[title_idx]).strip() if (len(t_data) > title_idx and t_data[title_idx] is not None) else "")
+                    brand = getattr(event, "brand", "") or (str(t_data[brand_idx]).strip() if (len(t_data) > brand_idx and t_data[brand_idx] is not None and str(t_data[brand_idx]).strip()) else infer_brand(item_title))
+                    category = getattr(event, "category", "") or (str(t_data[cat_idx]).strip() if (len(t_data) > cat_idx and t_data[cat_idx] is not None and str(t_data[cat_idx]).strip()) else infer_clothing_category(item_title))
                     posted_p = t_data[posted_idx] if len(t_data) > posted_idx else event.sold_price
                     curr_p = t_data[curr_idx] if len(t_data) > curr_idx else event.sold_price
                     hist_p = t_data[hist_idx] if len(t_data) > hist_idx else ""
@@ -2267,16 +2272,16 @@ class SheetsSyncEngine:
 
         items: List[Dict[str, Any]] = []
         for r_i, r in enumerate(rows[1:], start=2):
-            sku_val = r[sku_idx].strip() if len(r) > sku_idx else ""
-            title_val = r[title_idx].strip() if len(r) > title_idx else ""
-            lot_val = r[lot_idx].strip() if len(r) > lot_idx else ""
-            brand_val = r[brand_idx].strip() if len(r) > brand_idx else ""
-            cat_val = r[cat_idx].strip() if len(r) > cat_idx else ""
+            sku_val = str(r[sku_idx]).strip() if (len(r) > sku_idx and r[sku_idx] is not None) else ""
+            title_val = str(r[title_idx]).strip() if (len(r) > title_idx and r[title_idx] is not None) else ""
+            lot_val = str(r[lot_idx]).strip() if (len(r) > lot_idx and r[lot_idx] is not None) else ""
+            brand_val = str(r[brand_idx]).strip() if (len(r) > brand_idx and r[brand_idx] is not None) else ""
+            cat_val = str(r[cat_idx]).strip() if (len(r) > cat_idx and r[cat_idx] is not None) else ""
             price_val = parse_price(r[price_idx]) if (price_idx != -1 and len(r) > price_idx) else 0.0
             date_val = normalize_date_str(r[date_idx]) if (date_idx != -1 and len(r) > date_idx) else ""
-            ord_val = r[order_idx].strip() if (order_idx != -1 and len(r) > order_idx) else ""
-            vid_val = r[vid_idx].strip() if (vid_idx != -1 and len(r) > vid_idx) else ""
-            url_val = r[url_idx].strip() if (url_idx != -1 and len(r) > url_idx) else ""
+            ord_val = str(r[order_idx]).strip() if (order_idx != -1 and len(r) > order_idx and r[order_idx] is not None) else ""
+            vid_val = str(r[vid_idx]).strip() if (vid_idx != -1 and len(r) > vid_idx and r[vid_idx] is not None) else ""
+            url_val = str(r[url_idx]).strip() if (url_idx != -1 and len(r) > url_idx and r[url_idx] is not None) else ""
 
             # Skip empty rows
             if not sku_val and not title_val and not ord_val and not url_val and price_val == 0.0:
@@ -2492,22 +2497,22 @@ class SheetsSyncEngine:
                         sp_i = headers.index("Sold_Price") if "Sold_Price" in headers else -1
                         date_i = headers.index("Sale_Date") if "Sale_Date" in headers else -1
 
-                        if len(d_row_data) > title_i and d_row_data[title_i].strip():
-                            inc["item_title"] = d_row_data[title_i].strip()
-                        if len(d_row_data) > brand_i and d_row_data[brand_i].strip():
-                            inc["brand"] = d_row_data[brand_i].strip()
-                        if len(d_row_data) > cat_i and d_row_data[cat_i].strip():
-                            inc["category"] = d_row_data[cat_i].strip()
-                        if len(d_row_data) > lot_i and d_row_data[lot_i].strip():
-                            inc["lot_id"] = d_row_data[lot_i].strip()
-                        if ord_i != -1 and len(d_row_data) > ord_i and d_row_data[ord_i].strip():
-                            inc["order_id"] = d_row_data[ord_i].strip()
-                        if url_i != -1 and len(d_row_data) > url_i and d_row_data[url_i].strip():
-                            inc["vinted_url"] = d_row_data[url_i].strip()
+                        if len(d_row_data) > title_i and d_row_data[title_i] is not None and str(d_row_data[title_i]).strip():
+                            inc["item_title"] = str(d_row_data[title_i]).strip()
+                        if len(d_row_data) > brand_i and d_row_data[brand_i] is not None and str(d_row_data[brand_i]).strip():
+                            inc["brand"] = str(d_row_data[brand_i]).strip()
+                        if len(d_row_data) > cat_i and d_row_data[cat_i] is not None and str(d_row_data[cat_i]).strip():
+                            inc["category"] = str(d_row_data[cat_i]).strip()
+                        if len(d_row_data) > lot_i and d_row_data[lot_i] is not None and str(d_row_data[lot_i]).strip():
+                            inc["lot_id"] = str(d_row_data[lot_i]).strip()
+                        if ord_i != -1 and len(d_row_data) > ord_i and d_row_data[ord_i] is not None and str(d_row_data[ord_i]).strip():
+                            inc["order_id"] = str(d_row_data[ord_i]).strip()
+                        if url_i != -1 and len(d_row_data) > url_i and d_row_data[url_i] is not None and str(d_row_data[url_i]).strip():
+                            inc["vinted_url"] = str(d_row_data[url_i]).strip()
                         if sp_i != -1 and len(d_row_data) > sp_i and parse_price(d_row_data[sp_i]) > 0:
                             inc["sold_price"] = parse_price(d_row_data[sp_i])
-                        if date_i != -1 and len(d_row_data) > date_i and d_row_data[date_i].strip():
-                            inc["sale_date"] = d_row_data[date_i].strip()
+                        if date_i != -1 and len(d_row_data) > date_i and d_row_data[date_i] is not None and str(d_row_data[date_i]).strip():
+                            inc["sale_date"] = str(d_row_data[date_i]).strip()
 
                         enrich_u = self.enrich_sold_row(keep_row_data, headers, keep_idx, inc)
                         if enrich_u:

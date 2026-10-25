@@ -1269,6 +1269,47 @@ def test_resolve_duplicates_keep_both(mock_sheets_env):
     assert len(ws_sold.rows) == 3  # Both rows still intact!
 
 
+def test_process_email_batch_with_none_fields_and_assigned_lot(mock_sheets_env):
+    """Test process_email_batch handles events and sheet cells containing None without raising AttributeError."""
+    from src.email_parser import ParsedEmailEvent
+    engine, sh = mock_sheets_env
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+    ws_sold.rows = [list(SOLD_ITEMS_HEADERS)]
+
+    # Existing row in sheet with None in several empty cells (common in gspread)
+    existing_row = [None] * len(SOLD_ITEMS_HEADERS)
+    existing_row[0] = "SKU-500"
+    existing_row[2] = "Old Item"
+    existing_row[11] = 30.00
+    existing_row[14] = "2026-10-20"
+    ws_sold.append_row(existing_row)
+
+    # Incoming email event with None for vinted_id, vinted_url, brand, category, but user assigned lot_id
+    event = ParsedEmailEvent(
+        event_type="sale",
+        timestamp=datetime(2026, 10, 25, 12, 0, 0),
+        vinted_id=None,
+        vinted_url=None,
+        item_title="Vintage Leather Bomber Jacket",
+        sold_price=65.00,
+        order_id="ORD-20261025-1122",
+        buyer_username="buyer123",
+        brand=None,
+        category=None,
+        lot_id="LOT-002",
+    )
+
+    results = engine.process_email_batch([event], default_lot="LOT-001")
+    assert len(results) == 1
+    assert results[0]["status"] == "appended_to_sold"
+    assert results[0]["lot"] == "LOT-002"
+    assert len(ws_sold.rows) == 3
+    added_row = ws_sold.rows[2]
+    assert added_row[1] == "LOT-002"  # Lot_ID
+    assert added_row[2] == "Vintage Leather Bomber Jacket"
+
+
+
 
 
 

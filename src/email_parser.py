@@ -15,20 +15,20 @@ from src.html_parser import infer_brand, infer_clothing_category
 
 
 class ParsedEmailEvent(BaseModel):
-    event_type: str  # "sale", "favorite", "offer", or "unknown"
-    item_title: str = ""
-    vinted_id: str = ""
-    order_id: str = ""
+    event_type: str = "unknown"  # "sale", "favorite", "offer", or "unknown"
+    item_title: Optional[str] = ""
+    vinted_id: Optional[str] = ""
+    order_id: Optional[str] = ""
     sold_price: float = 0.0
     offer_price: float = 0.0
     listed_price: float = 0.0
-    buyer_username: str = ""
-    vinted_url: str = ""
+    buyer_username: Optional[str] = ""
+    vinted_url: Optional[str] = ""
     timestamp: datetime = datetime.now()
-    raw_subject: str = ""
-    brand: str = ""
-    category: str = ""
-    lot_id: str = ""
+    raw_subject: Optional[str] = ""
+    brand: Optional[str] = ""
+    category: Optional[str] = ""
+    lot_id: Optional[str] = ""
 
 
 
