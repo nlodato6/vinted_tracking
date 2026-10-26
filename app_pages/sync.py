@@ -893,43 +893,51 @@ def render_sync_page():
                     help="All Mail scans both your active inbox and archived Vinted notifications."
                 )
             with col_m2:
-                max_emails = st.slider("Max emails to scan", min_value=10, max_value=500, value=150, step=10)
+                max_emails = st.slider(
+                    "Max emails to scan",
+                    min_value=50,
+                    max_value=1000,
+                    value=750,
+                    step=50,
+                    help="Number of recent emails to scan. Set to 750+ to cover your full sales history.",
+                )
 
             folder_param = "ALL" if scan_location.startswith("All Mail") else "INBOX"
 
             # Date Range Filter Selector
             last_scan_dt = get_last_scan_date()
-            default_scan_label = f"Since Last Scan ({last_scan_dt.strftime('%b %d, %Y')})" if last_scan_dt else "Since Last Scan (Default)"
+            default_scan_label = f"Since Last Scan ({last_scan_dt.strftime('%b %d, %Y')})" if last_scan_dt else "Since Last Scan"
 
             date_filter_choices = [
+                "All Time (Recommended for full history)",
                 default_scan_label,
-                "Past 7 Days",
                 "Past 30 Days",
-                "All Time",
-                "Custom Date Range"
+                "Past 90 Days",
+                "Custom Date Range",
             ]
 
             selected_date_filter = st.selectbox(
                 "Date Range to Scan",
                 options=date_filter_choices,
                 index=0,
-                help="Defaults to scanning emails received since your last sync, or choose a broader range."
+                help="Defaults to scanning All Time to match all shipping labels and completed sales, or choose a narrower range.",
             )
 
             since_date = None
             until_date = None
             if selected_date_filter == default_scan_label:
-                since_date = last_scan_dt or (date.today() - timedelta(days=30))
-            elif selected_date_filter == "Past 7 Days":
-                since_date = date.today() - timedelta(days=7)
+                # Use 1 day prior so Gmail's exclusive 'after:' operator includes the scan date
+                since_date = (last_scan_dt - timedelta(days=1)) if last_scan_dt else None
+            elif selected_date_filter.startswith("All Time"):
+                since_date = None
             elif selected_date_filter == "Past 30 Days":
                 since_date = date.today() - timedelta(days=30)
-            elif selected_date_filter == "All Time":
-                since_date = None
+            elif selected_date_filter == "Past 90 Days":
+                since_date = date.today() - timedelta(days=90)
             elif selected_date_filter == "Custom Date Range":
                 c_d1, c_d2 = st.columns(2)
                 with c_d1:
-                    since_date = st.date_input("From Date", value=date.today() - timedelta(days=14))
+                    since_date = st.date_input("From Date", value=date.today() - timedelta(days=30))
                 with c_d2:
                     until_date = st.date_input("To Date", value=date.today())
 

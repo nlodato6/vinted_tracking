@@ -228,7 +228,7 @@ def test_parse_bundle_sale_email():
     assert event.order_id == "01a156e8-bundle-5"
 
 
-def test_resolve_imap_folder_strips_quotes():
+def test_resolve_imap_folder_quotes_spaces():
     from unittest.mock import MagicMock
     from src.email_parser import _resolve_imap_folder
 
@@ -237,9 +237,9 @@ def test_resolve_imap_folder_strips_quotes():
     mock_mail.select.return_value = ("OK", [b"100"])
 
     resolved = _resolve_imap_folder(mock_mail, "ALL")
-    assert resolved == "[Gmail]/All Mail"
-    # Ensure quotes were stripped before calling mail.select
-    mock_mail.select.assert_called_with("[Gmail]/All Mail")
+    assert resolved == '"[Gmail]/All Mail"'
+    # Ensure mailbox names with spaces are properly quoted for IMAP compatibility
+    mock_mail.select.assert_called_with('"[Gmail]/All Mail"', readonly=True)
 
 
 def test_get_last_scan_date(monkeypatch):

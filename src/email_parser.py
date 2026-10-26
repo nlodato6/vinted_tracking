@@ -786,13 +786,13 @@ def _resolve_imap_folder(mail: imaplib.IMAP4_SSL, folder: str = "ALL") -> str:
     Selects the requested IMAP mailbox.
     If 'ALL' is specified, discovers Gmail's 'All Mail' mailbox (which includes archived emails)
     or falls back gracefully to 'INBOX'.
-    Strips surrounding quotes to prevent double-quoting errors in imaplib.
+    Properly quotes mailbox names containing spaces or special characters for IMAP commands.
     """
     if folder.upper() == "INBOX":
-        mail.select("INBOX")
+        mail.select("INBOX", readonly=True)
         return "INBOX"
 
-    candidates = ["[Gmail]/All Mail", "[Google Mail]/All Mail", "INBOX"]
+    candidates = ['"[Gmail]/All Mail"', '"[Google Mail]/All Mail"']
     try:
         status, folder_list = mail.list()
         if status == "OK" and folder_list:
@@ -801,22 +801,23 @@ def _resolve_imap_folder(mail: imaplib.IMAP4_SSL, folder: str = "ALL") -> str:
                 if r"\All" in item_str:
                     parts = item_str.split(' "/" ')
                     if len(parts) == 2:
-                        raw_name = parts[1].strip().strip('"').strip("'")
+                        raw_name = parts[1].strip()
+                        if not raw_name.startswith('"'):
+                            raw_name = f'"{raw_name}"'
                         if raw_name and raw_name not in candidates:
                             candidates.insert(0, raw_name)
     except Exception:
         pass
 
     for candidate in candidates:
-        clean_candidate = candidate.strip().strip('"').strip("'")
         try:
-            status, _ = mail.select(clean_candidate)
+            status, _ = mail.select(candidate, readonly=True)
             if status == "OK":
-                return clean_candidate
+                return candidate
         except Exception:
             continue
 
-    mail.select("INBOX")
+    mail.select("INBOX", readonly=True)
     return "INBOX"
 
 
