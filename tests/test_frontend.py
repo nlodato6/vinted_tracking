@@ -73,6 +73,21 @@ def test_sync_page_html_parser_data_editor_and_lot_options():
     assert "listing_overrides=overrides" in sync_code
 
 
+def test_sync_page_email_plan_workflow():
+    from pathlib import Path
+    sync_code = Path("app_pages/sync.py").read_text()
+
+    # Email sync is plan-based: preview and commit share the same reconciler
+    assert "build_email_plan(" in sync_code
+    assert "apply_sync_plan(" in sync_code
+    assert "EmailAuthError" in sync_code
+    assert "Bundles Detected" in sync_code
+    assert "email_bundles" in sync_code
+    assert "email_cancellations" in sync_code
+    assert "email_dated" in sync_code
+
+
+
 def test_cloud_ready_auth_and_manual_login():
     from pathlib import Path
     from src.config import settings

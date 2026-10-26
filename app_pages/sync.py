@@ -12,7 +12,8 @@ from src.config import settings
 from src.sheets import GoogleSheetsClient, SheetsSyncEngine
 from src.sheets.sync import parse_price
 from src.html_parser import infer_brand, infer_clothing_category
-from src.email_parser import fetch_vinted_emails_via_imap, get_last_scan_date
+from src.email_parser import fetch_vinted_emails_via_imap, get_last_scan_date, EmailAuthError
+from src.sheets.reconcile import build_email_plan
 from src.notifications import record_html_parse_event, record_email_parse_event, get_sync_status
 from src.telemetry import (
     log_event,
@@ -949,6 +950,7 @@ def render_sync_page():
                                 max_emails=max_emails,
                                 since_date=since_date,
                                 until_date=until_date,
+                                raise_on_auth_error=True,
                             )
                             if not events:
                                 st.session_state.email_sync_preview = None
@@ -957,9 +959,11 @@ def render_sync_page():
                                 st.session_state.email_sync_preview = events
                                 st.session_state.email_sync_user = gmail_user_input.strip()
                                 st.rerun()
+                        except EmailAuthError as e:
+                            st.error(str(e), icon=":material/lock:")
                         except Exception as e:
                             log_error(u_email, "sync.py:email_scan", e)
-                            st.error(f"IMAP Connection failed: {e}")
+                            st.error(f"IMAP Connection failed: {e}", icon=":material/error:")
 
         with e2:
             with st.container(border=True):
@@ -985,162 +989,117 @@ def render_sync_page():
         if st.session_state.get("email_sync_preview"):
             preview_events = st.session_state.email_sync_preview
             st.divider()
-            st.markdown(f"#### Email Sync Preview ({len(preview_events)} Transactions Detected)")
-            st.caption("Review the transactions detected from your Vinted emails before committing them to your Google Sheet.")
 
-            sales_count = len([e for e in preview_events if e.event_type in ("sale", "bundle_sale")])
-            offers_count = len([e for e in preview_events if e.event_type == "offer"])
-            favs_count = len([e for e in preview_events if e.event_type == "favorite"])
-            canc_count = len([e for e in preview_events if e.event_type == "cancellation"])
+            try:
+                available_lots = get_cached_lots(sheet_id, user_creds)
+            except Exception:
+                available_lots = []
 
-            prev_c1, prev_c2, prev_c3, prev_c4 = st.columns(4)
-            prev_c1.metric("Sales to Record", sales_count, border=True)
-            prev_c2.metric("Cancellations", canc_count, border=True)
-            prev_c3.metric("Offers Received", offers_count, border=True)
-            prev_c4.metric("Favorites to Increment", favs_count, border=True)
-
-            if canc_count > 0:
-                with st.expander(f"View Cancellations Detected ({canc_count} orders)", icon=":material/cancel:", expanded=False):
-                    canc_evs = [e for e in preview_events if e.event_type == "cancellation"]
-                    st.dataframe(pd.DataFrame([{
-                        "Title": ev.item_title or f"Vinted Order {ev.order_id}",
-                        "Price": f"${ev.sold_price:.2f}",
-                        "Buyer": f"@{ev.buyer_username}" if ev.buyer_username else "-",
-                        "Order ID": ev.order_id or "-",
-                        "Date": ev.timestamp.strftime("%Y-%m-%d"),
-                    } for ev in canc_evs]), width="stretch")
-
-            # Default Inventory Lot Selector for Email Sales
+            # Default Inventory Lot Selector for Moved Items
             NO_LOT_OPTION = "None / No Lot (Unassigned)"
             email_lot_options = [NO_LOT_OPTION] + [
                 f"{l['Lot_ID']} — {l.get('Source_Vendor', 'Vendor')} ({l.get('Unit_Cost', '$0.00')}/ea)"
-                for l in all_lots if l.get("Lot_ID")
+                for l in available_lots if l.get("Lot_ID")
             ]
             selected_email_lot = st.selectbox(
-                "Default Inventory Lot for Email Sales:",
+                "Default Inventory Lot for Moved Items:",
                 options=email_lot_options,
-                help="Select an inventory lot to assign to detected sales, or assign individual lots per-item in the table below.",
+                help="Assigned if any active listing is moved to Sold_Items and has no lot set.",
                 key="email_sync_lot_selectbox",
             )
             target_email_lot = selected_email_lot.split(" — ")[0].strip() if selected_email_lot != NO_LOT_OPTION else ""
 
-            # Interactive Sales Table with Lot, Title, Brand, Category editing
-            edited_sale_df = None
-            sale_indices = []
+            # Plan computation
+            state = get_cached_sheet_state(sheet_id, user_creds)
+            plan = build_email_plan(preview_events, state, default_lot=target_email_lot)
 
-            if sales_count > 0:
-                st.markdown("##### Detected Sales (Editable Preview)")
-                st.caption("You can edit the **Title**, choose an **Assigned Lot**, and verify **Brand** or **Category** before syncing to `Sold_Items`.")
+            ec = plan.email_counts
+            st.markdown(f"#### Email Sync Preview ({ec.get('orders', 0)} Orders · {ec.get('items', 0)} Items Scanned)")
+            st.caption("Review the transactions and updates detected from your Vinted emails before committing them to your Google Sheet.")
 
-                available_lot_ids = [l.get("Lot_ID", "") for l in all_lots if l.get("Lot_ID")]
-                if target_email_lot and target_email_lot not in available_lot_ids:
-                    available_lot_ids.append(target_email_lot)
+            before = plan.counts_before
+            after = plan.counts_after
+            if before != after:
+                k1, k2, k3, k4 = st.columns(4)
+                for col, key, label in ((k1, "active", "Active Listings"), (k2, "sold", "Sold Items"), (k3, "hidden", "Hidden Items"), (k4, "cancelled", "Cancelled Orders")):
+                    col.metric(label, after[key], after[key] - before[key], border=True)
 
-                sale_rows = []
-                for idx, ev in enumerate(preview_events):
-                    if ev.event_type in ("sale", "bundle_sale"):
-                        sale_indices.append(idx)
-                        cur_lot = getattr(ev, "lot_id", "") or target_email_lot
-                        cur_brand = getattr(ev, "brand", "") or (infer_brand(ev.item_title) if ev.item_title else "")
-                        cur_cat = getattr(ev, "category", "") or (infer_clothing_category(ev.item_title) if ev.item_title else "Other Apparel")
-                        sale_rows.append({
-                            "Title": ev.item_title or f"Vinted Sale {ev.order_id}",
-                            "Assigned Lot": cur_lot,
-                            "Brand": cur_brand,
-                            "Category": cur_cat,
-                            "Price": f"${ev.sold_price:.2f}",
-                            "Buyer": f"@{ev.buyer_username}" if ev.buyer_username else "-",
-                            "Order ID": ev.order_id or "-",
-                            "Date": ev.timestamp.strftime("%Y-%m-%d"),
-                        })
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Orders to Date / Fill", len(plan.email_dated), border=True)
+            c2.metric("Bundles Detected", ec.get("bundles", 0), border=True)
+            c3.metric("Cancellations", len(plan.email_cancellations), border=True)
+            c4.metric("Offers to Log", len(plan.email_offers), border=True)
 
-                for r in sale_rows:
-                    if r["Assigned Lot"] and r["Assigned Lot"] not in available_lot_ids:
-                        available_lot_ids.append(r["Assigned Lot"])
-                lot_col_options = [""] + sorted(list(set(available_lot_ids)))
+            if plan.warnings:
+                with st.expander(f"Notes & Recommendations ({len(plan.warnings)})", icon=":material/info:", expanded=True):
+                    for w in plan.warnings:
+                        st.markdown(f"- {w}")
 
-                cat_col_options = [
-                    "Tops & Shirts", "Outerwear", "Pants & Jeans", "Sweaters & Hoodies",
-                    "Dresses & Skirts", "Footwear", "Accessories", "Swimwear",
-                    "Underwear & Loungewear", "Other Apparel"
-                ]
-                for r in sale_rows:
-                    if r["Category"] and r["Category"] not in cat_col_options:
-                        cat_col_options.append(r["Category"])
+            if plan.email_bundles:
+                with st.expander(f"Bundles Detected ({len(plan.email_bundles)} orders)", icon=":material/inventory_2:", expanded=False):
+                    st.caption("Bundle items share the same Order ID (Transaction ID). In your spreadsheet, `Sale_Type` calculates as 'Bundle' and packaging cost is charged only once per bundle.")
+                    st.dataframe(pd.DataFrame(plan.email_bundles), width="stretch", hide_index=True)
 
-                sale_df = pd.DataFrame(sale_rows)
-                edited_sale_df = st.data_editor(
-                    sale_df,
-                    column_config={
-                        "Title": st.column_config.TextColumn("Title", required=True, width="large"),
-                        "Assigned Lot": st.column_config.SelectboxColumn(
-                            "Assigned Lot",
-                            options=lot_col_options,
-                            format_func=lambda x: "None (Unassigned)" if not x else x,
-                            width="medium"
-                        ) if available_lot_ids else st.column_config.TextColumn("Assigned Lot", width="medium"),
-                        "Brand": st.column_config.TextColumn("Brand", width="medium"),
-                        "Category": st.column_config.SelectboxColumn("Category", options=cat_col_options, width="medium"),
-                        "Price": st.column_config.TextColumn("Price", disabled=True, width="small"),
-                        "Buyer": st.column_config.TextColumn("Buyer", disabled=True, width="small"),
-                        "Order ID": st.column_config.TextColumn("Order ID", disabled=True, width="medium"),
-                        "Date": st.column_config.TextColumn("Date", disabled=True, width="small"),
-                    },
-                    hide_index=True,
-                    num_rows="fixed",
-                    width="stretch",
-                    key="email_sales_editor",
-                )
+            if plan.email_cancellations:
+                with st.expander(f"Cancellations ({len(plan.email_cancellations)} orders)", icon=":material/cancel:", expanded=False):
+                    st.caption("Cancellation dates and transaction details are updated. Any cancelled items still in `Sold_Items` are moved to `Cancelled_Orders`.")
+                    st.dataframe(pd.DataFrame(plan.email_cancellations), width="stretch", hide_index=True)
 
-            non_sales = [e for e in preview_events if e.event_type != "sale"]
-            if non_sales:
-                with st.expander(f"View Other Detected Events ({len(non_sales)} offers & favorites)", icon=":material/forum:", expanded=False):
-                    st.dataframe(pd.DataFrame([{
-                        "Type": ev.event_type.upper(),
-                        "Item": ev.item_title or ev.vinted_id,
-                        "Detail": f"${ev.offer_price:.2f}" if ev.event_type == "offer" else "Favorited",
-                        "User": f"@{ev.buyer_username}" if ev.buyer_username else "-",
-                        "Date": ev.timestamp.strftime("%Y-%m-%d %H:%M"),
-                    } for ev in non_sales]), width="stretch")
+            if plan.email_dated:
+                with st.expander(f"Sold Items Dated & Filled ({len(plan.email_dated)} items)", icon=":material/event_available:", expanded=False):
+                    st.caption("Matches shipping label emails to rows in `Sold_Items` by item title, populating Sale Date, Order ID, and splitting bundle prices.")
+                    df_dated = pd.DataFrame(plan.email_dated)
+                    if "Sold Price" in df_dated.columns:
+                        df_dated["Sold Price"] = df_dated["Sold Price"].map(
+                            lambda p: f"${float(p):.2f}" if (p is not None and str(p).strip() != "") else "-"
+                        )
+                    st.dataframe(df_dated, width="stretch", hide_index=True)
+
+            if plan.email_offers:
+                with st.expander(f"Buyer Offers to Log ({len(plan.email_offers)} offers)", icon=":material/local_offer:", expanded=False):
+                    st.caption("Buyer offers are appended to each item's `Price_History` column in `Item_Listings` (skipping duplicates).")
+                    st.dataframe(pd.DataFrame(plan.email_offers), width="stretch", hide_index=True)
+
+            if plan.email_unmatched:
+                with st.expander(f"Unmatched Orders ({len(plan.email_unmatched)} items)", icon=":material/help_outline:", expanded=False):
+                    st.warning("These items were found in your shipping label emails but could not be matched to an item in `Sold_Items` or `Item_Listings`. Upload your Sold closet HTML export first so all items exist in your sheet.")
+                    st.dataframe(pd.DataFrame(plan.email_unmatched), width="stretch", hide_index=True)
+
+            if not plan.has_changes:
+                st.success("Your Google Sheet is already fully up to date with these emails. No changes needed.", icon=":material/check_circle:")
 
             action_c1, action_c2 = st.columns([1.5, 1])
             with action_c1:
-                if st.button("Confirm & Sync to Google Sheets", icon=":material/cloud_upload:", type="primary", width="stretch", key="btn_confirm_email_sync"):
+                if st.button(
+                    "Confirm & Sync to Google Sheets",
+                    icon=":material/cloud_upload:",
+                    type="primary",
+                    width="stretch",
+                    key="btn_confirm_email_sync",
+                    disabled=not plan.has_changes,
+                ):
                     with st.spinner("Synchronizing email events to Google Sheets..."):
                         try:
-                            # Apply any edits from st.data_editor to preview_events
-                            if edited_sale_df is not None and not edited_sale_df.empty:
-                                for s_idx, df_idx in enumerate(sale_indices):
-                                    if s_idx < len(edited_sale_df):
-                                        row = edited_sale_df.iloc[s_idx]
-                                        ev = preview_events[df_idx]
-                                        val_title = row.get("Title")
-                                        ed_title = str(val_title).strip() if (val_title is not None and not pd.isna(val_title)) else ""
-                                        if ed_title and ed_title != "None":
-                                            ev.item_title = ed_title
-                                        raw_lot = row.get("Assigned Lot")
-                                        if pd.isna(raw_lot) or raw_lot is None:
-                                            ev.lot_id = ""
-                                        else:
-                                            s_lot = str(raw_lot).strip()
-                                            ev.lot_id = "" if s_lot in ("", "None", "None (Unassigned)") else s_lot
-                                        raw_brand = row.get("Brand")
-                                        ev.brand = str(raw_brand).strip() if (raw_brand is not None and not pd.isna(raw_brand) and str(raw_brand).strip() != "None") else ""
-                                        raw_cat = row.get("Category")
-                                        ev.category = str(raw_cat).strip() if (raw_cat is not None and not pd.isna(raw_cat) and str(raw_cat).strip() != "None") else ""
-
                             engine = get_sheets_sync_engine(client)
-                            results = engine.process_email_batch(preview_events, default_lot=target_email_lot)
-                            processed = len([r for r in results if r.get("status") not in ("ignored", "no_listings")])
+                            fresh_state = engine.read_sheet_state()
+                            final_plan = build_email_plan(preview_events, fresh_state, default_lot=target_email_lot)
+                            result = engine.apply_sync_plan(final_plan, fresh_state)
+
+                            ec = final_plan.email_counts
+                            details = f"{ec.get('orders', 0)} orders ({ec.get('bundles', 0)} bundles), {len(final_plan.email_cancellations)} cancellations, {len(final_plan.email_offers)} offers"
+                            record_email_parse_event(details=f"IMAP: {details}", client=client)
                             log_event(
                                 u_email,
                                 "email_sync",
-                                f"IMAP sync: {processed} events from {st.session_state.get('email_sync_user', gmail_user_input)}",
+                                f"IMAP sync: {details} from {st.session_state.get('email_sync_user', gmail_user_input)}",
                                 spreadsheet_id=st.session_state.get("spreadsheet_id"),
                             )
                             st.cache_data.clear()
                             st.session_state.email_sync_preview = None
-                            st.success(f"Successfully synced {processed} email transactions to your Google Sheet with full lot, brand, and category assignments!", icon=":material/check_circle:")
+                            st.success(
+                                f"Sync complete! Active {result['active']} · Sold {result['sold']} · Cancelled {result['cancelled']}",
+                                icon=":material/check_circle:",
+                            )
                             st.balloons()
                             time.sleep(1.5)
                             st.rerun()

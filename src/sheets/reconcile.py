@@ -52,14 +52,30 @@ def listing_formulas(n: int) -> Dict[int, str]:
     }
 
 
+def sale_type_formula(n: int) -> str:
+    """Rows that share an Order_ID (V) are items of one bundle order and show 'Bundle'."""
+    return (
+        f'=IF(AND(V{n}<>"", COUNTIF(V:V, V{n})>1), "Bundle", '
+        f'IF(OR(G{n}="", L{n}=""), "", IF(L{n}>=G{n}, "Original Price", IF(L{n}=H{n}, "Lowered Price", "Accepted Offer"))))'
+    )
+
+
+def packaging_formula(n: int) -> str:
+    """One package per order: only the first row of a bundle (shared Order_ID) carries the packaging cost."""
+    return (
+        f'=IF(P{n}="FB Marketplace (Local)", 0, '
+        f'IF(AND(V{n}<>"", COUNTIF(V$1:V{n}, V{n})>1), 0, Shipping_Supplies!$H$2))'
+    )
+
+
 def sold_formulas(n: int) -> Dict[int, str]:
     return {
         S["Unit_Cost"]: f"=IFERROR(VLOOKUP(B{n}, Inventory_Lots!A:F, 6, FALSE), 0)",
         S["Price_Lowered"]: f'=IF(OR(G{n}="", H{n}=""), "", IF(AND(ISNUMBER(G{n}), ISNUMBER(H{n}), H{n}<G{n}), "YES", "NO"))',
         S["Price_Drop"]: f'=IF(OR(G{n}="", H{n}=""), "", IF(AND(ISNUMBER(G{n}), ISNUMBER(H{n}), H{n}<G{n}), G{n}-H{n}, 0))',
         S["Price_Discount"]: f'=IF(OR(G{n}="", L{n}=""), "", IF(AND(ISNUMBER(G{n}), ISNUMBER(L{n}), G{n}>L{n}), G{n}-L{n}, 0))',
-        S["Sale_Type"]: f'=IF(OR(G{n}="", L{n}=""), "", IF(L{n}>=G{n}, "Original Price", IF(L{n}=H{n}, "Lowered Price", "Accepted Offer")))',
-        S["Packaging_Cost"]: f'=IF(P{n}="FB Marketplace (Local)", 0, Shipping_Supplies!$H$2)',
+        S["Sale_Type"]: sale_type_formula(n),
+        S["Packaging_Cost"]: packaging_formula(n),
         S["Net_Profit"]: f"=IF(AND(ISNUMBER(L{n}), ISNUMBER(F{n}), ISNUMBER(Q{n})), L{n}-F{n}-Q{n}, IF(ISNUMBER(L{n}), L{n}, 0))",
         S["Margin_%"]: f"=IF(AND(ISNUMBER(L{n}), L{n}>0), R{n}/L{n}, 0)",
     }
@@ -113,6 +129,14 @@ class SyncPlan:
     warnings: List[str] = field(default_factory=list)
     counts_before: Dict[str, int] = field(default_factory=dict)
     counts_after: Dict[str, int] = field(default_factory=dict)
+
+    # Email sync preview details
+    email_dated: List[Dict[str, Any]] = field(default_factory=list)
+    email_bundles: List[Dict[str, Any]] = field(default_factory=list)
+    email_cancellations: List[Dict[str, Any]] = field(default_factory=list)
+    email_offers: List[Dict[str, Any]] = field(default_factory=list)
+    email_unmatched: List[Dict[str, Any]] = field(default_factory=list)
+    email_counts: Dict[str, int] = field(default_factory=dict)
 
     @property
     def has_changes(self) -> bool:
@@ -319,7 +343,7 @@ def build_sync_plan(
         if vid:
             hidden_by_vid.setdefault(vid, i)
 
-    cancelled_vids: Set[str] = {_vid_from_url(str(r[C["Vinted_URL"]])) for r in cancelled} - {""}
+    cancelled_vids: Set[str] = {v for r in cancelled for v in _ITEM_ID_RE.findall(str(r[C["Vinted_URL"]]))}
     cancelled_order_ids: Set[str] = {str(r[C["Order_ID"]]).strip() for r in cancelled} - {""}
 
     snap_titles = Counter(_norm(i.title) for i in snap.items.values())
@@ -564,6 +588,429 @@ def build_sync_plan(
         "active": len(final_listings),
         "sold": plan.counts_before["sold"] - len(sold_delete) + len(plan.sold_appends),
         "hidden": plan.counts_before["hidden"] - len(hidden_delete) + len(plan.hidden_appends),
+        "cancelled": plan.counts_before["cancelled"] + len(plan.cancelled_appends),
+    }
+    return plan
+
+
+# ---------------------------------------------------------------------------
+# Email sync planner
+# ---------------------------------------------------------------------------
+def split_bundle_total(total: float, weights: List[float]) -> List[float]:
+    """Splits an order total across its items in proportion to their listed prices (evenly if any is unknown).
+    Shares are rounded to cents and always add up exactly to the total."""
+    n = len(weights)
+    if n == 0:
+        return []
+    if any((w or 0) <= 0 for w in weights):
+        weights = [1.0] * n
+    tot_w = float(sum(weights))
+    shares = [round(total * w / tot_w, 2) for w in weights]
+    shares[-1] = round(shares[-1] + round(total - sum(shares), 2), 2)
+    return shares
+
+
+def _event_items(ev: Any) -> List[str]:
+    items = [str(t).strip() for t in (getattr(ev, "items", None) or []) if str(t).strip()]
+    return items or ([ev.item_title] if getattr(ev, "item_title", "") else [])
+
+
+def build_email_plan(events: List[Any], state: SheetState, default_lot: str = "", now: Optional[datetime] = None) -> SyncPlan:
+    """
+    Pure planner for parsed Vinted emails (src.email_parser.ParsedEmailEvent).
+
+    - Shipping-label emails are the order record: one per order, with the Transaction ID and every
+      item title (bundles list all items). Each item is matched to a Sold_Items row by title; the row
+      gets Sale_Date (label date), Order_ID (Transaction ID) and, when a 'completed' / 'You sold' email
+      gives the price, Sold_Price (bundle totals are split across items by listed price).
+      Rows that already carry the Transaction ID are reused, so re-running is idempotent.
+    - Items of a bundle share the Order_ID; the Sale_Type formula then shows "Bundle" and only the
+      first row carries the packaging cost.
+    - Sold items still on Item_Listings are moved to Sold_Items. Nothing else creates sold rows.
+    - Cancellation emails are matched to Cancelled_Orders by Vinted conversation ID (the same ID the
+      My Orders HTML import stores), then by title. Existing records get their Cancellation_Date;
+      new cancellations move the item out of Sold_Items.
+    - Offers are appended to the listing's Price_History once (duplicates are skipped).
+    """
+    now = now or datetime.now()
+    plan = SyncPlan()
+    listings = [_pad(r, len(LISTINGS_HEADERS)) for r in state.listings]
+    sold = [_pad(r, len(SOLD_ITEMS_HEADERS)) for r in state.sold]
+    hidden = [_pad(r, len(LISTINGS_HEADERS)) for r in state.hidden]
+    cancelled = [_pad(r, len(CANCELLED_ORDERS_HEADERS)) for r in state.cancelled]
+    plan.counts_before = {
+        "active": _count(listings), "sold": _count(sold), "hidden": _count(hidden), "cancelled": _count(cancelled),
+    }
+    O = S["Order_ID"]
+
+    # ---- Normalise events -------------------------------------------------
+    seen: Set[Any] = set()
+    evs: List[Any] = []
+    for ev in sorted(events, key=lambda e: e.timestamp):
+        key = getattr(ev, "message_id", "") or (ev.event_type, ev.raw_subject, ev.timestamp.isoformat())
+        if key not in seen:
+            seen.add(key)
+            evs.append(ev)
+
+    labels: Dict[str, Any] = {}
+    for ev in evs:
+        if ev.event_type in ("sale", "bundle_sale"):
+            txn = str(getattr(ev, "transaction_id", "") or ev.order_id or "").strip()
+            if txn and txn not in labels and _event_items(ev):
+                labels[txn] = ev
+    labels_by_date = sorted(labels.items(), key=lambda kv: kv[1].timestamp)
+
+    price_by_txn: Dict[str, float] = {}
+    for ev in evs:
+        txn = str(getattr(ev, "transaction_id", "") or "").strip()
+        if ev.event_type == "completed" and txn and ev.sold_price:
+            price_by_txn[txn] = ev.sold_price
+    used_notice_txns: Set[str] = set()
+    for ev in evs:  # "You sold" notices carry the price of single-item orders but no Transaction ID
+        if ev.event_type != "sale_notice" or not ev.sold_price:
+            continue
+        t = _norm(ev.item_title)
+        for txn, lab in labels_by_date:
+            items = _event_items(lab)
+            if (
+                txn not in used_notice_txns and len(items) == 1 and _norm(items[0]) == t
+                and -1 <= (lab.timestamp - ev.timestamp).total_seconds() / 86400 <= 10
+            ):
+                price_by_txn.setdefault(txn, ev.sold_price)
+                used_notice_txns.add(txn)
+                break
+
+    cancels = [ev for ev in evs if ev.event_type == "cancellation"]
+    plan.email_counts = {
+        "orders": len(labels),
+        "bundles": sum(1 for lab in labels.values() if len(_event_items(lab)) > 1),
+        "items": sum(len(_event_items(lab)) for lab in labels.values()),
+        "cancellations": len(cancels),
+        "prices": len(price_by_txn),
+        "offers": sum(1 for ev in evs if ev.event_type == "offer"),
+        "favorites": sum(1 for ev in evs if ev.event_type == "favorite"),
+        "shipped": sum(1 for ev in evs if ev.event_type == "order_update" and ev.status == "shipped"),
+        "delivered": sum(1 for ev in evs if ev.event_type == "order_update" and ev.status == "delivered"),
+    }
+
+    # ---- Which order did each cancellation email refer to? ------------------
+    by_first_item: Dict[str, List[str]] = {}
+    for txn, lab in labels_by_date:
+        by_first_item.setdefault(_norm(_event_items(lab)[0]), []).append(txn)
+    cancel_txn: Dict[int, str] = {}
+    for ci, c in enumerate(cancels):
+        cands = [
+            t for t in by_first_item.get(_norm(c.item_title), [])
+            if labels[t].timestamp <= c.timestamp and t not in cancel_txn.values()
+        ]
+        if cands:
+            cancel_txn[ci] = cands[-1]
+    cancelled_txns = set(cancel_txn.values())
+
+    # ---- Index the sheet ------------------------------------------------------
+    def _vid_key(i: int) -> Tuple[int, int]:
+        v = _vid_from_url(str(sold[i][S["Vinted_URL"]]))
+        return (0, int(v)) if v else (1, i)
+
+    sold_by_title: Dict[str, List[int]] = {}
+    for i, r in enumerate(sold):
+        if not _blank(r):
+            sold_by_title.setdefault(_norm(r[S["Title"]]), []).append(i)
+    for rows in sold_by_title.values():
+        rows.sort(key=_vid_key)
+    claimed: Dict[int, str] = {i: str(r[O]).strip() for i, r in enumerate(sold) if str(r[O]).strip() in labels}
+    used_rows: Set[int] = set()
+    sold_delete: Set[int] = set()
+
+    listing_by_title: Dict[str, List[int]] = {}
+    listing_by_vid: Dict[str, int] = {}
+    for i, r in enumerate(listings):
+        if _blank(r):
+            continue
+        listing_by_title.setdefault(_norm(r[L["Title"]]), []).append(i)
+        vid = _listing_vid(r)
+        if vid:
+            listing_by_vid.setdefault(vid, i)
+    listing_moved: Set[int] = set()
+
+    def take_sold(title: str, txn: str) -> Optional[int]:
+        rows = sold_by_title.get(_norm(title), [])
+        for i in rows:
+            if i not in used_rows and claimed.get(i) == txn:
+                used_rows.add(i)
+                return i
+        for i in rows:
+            if i not in used_rows and i not in claimed and not str(sold[i][O]).strip():
+                claimed[i] = txn
+                used_rows.add(i)
+                return i
+        return None
+
+    def take_listing(title: str) -> Optional[int]:
+        rows = [i for i in listing_by_title.get(_norm(title), []) if i not in listing_moved]
+        return rows[0] if rows else None
+
+    def sold_update(i: int, col: str, value: Any) -> None:
+        plan.sold_cell_updates.append((i + 2, S[col], value))
+
+    # ---- Cancellation records already on the sheet --------------------------------
+    cancel_by_oid: Dict[str, int] = {}
+    for i, r in enumerate(cancelled):
+        oid = str(r[C["Order_ID"]]).strip()
+        if oid and not _blank(r):
+            cancel_by_oid.setdefault(oid, i)
+    used_cancel_rows: Set[int] = set()
+
+    def find_cancel_row(c: Any, txn: str, items: List[str]) -> Optional[int]:
+        oid = (c.order_id or "").strip()
+        if oid and oid in cancel_by_oid:
+            return cancel_by_oid[oid]
+        if txn:
+            for i, r in enumerate(cancelled):
+                if not _blank(r) and txn in str(r[C["Status_Details"]]):
+                    return i
+        t, n = _norm(items[0]), len(items)
+        for i, r in enumerate(cancelled):
+            if i in used_cancel_rows or _blank(r) or str(r[C["Cancellation_Date"]]).strip():
+                continue
+            rt = _norm(r[C["Item_Title"]])
+            mb = re.match(r"^bundle (\d+) items", rt)
+            if (n > 1 and mb and int(mb.group(1)) == n) or rt == t:
+                return i
+        return None
+
+    # How many of each cancelled order's items still sit in Sold_Items and must be moved out?
+    cancel_info: Dict[int, Dict[str, Any]] = {}
+    need_by_txn: Dict[str, int] = {}
+    for ci, c in enumerate(cancels):
+        txn = cancel_txn.get(ci, "")
+        items = _event_items(labels[txn]) if txn else _event_items(c)
+        ri = find_cancel_row(c, txn, items) if items else None
+        if ri is not None:
+            used_cancel_rows.add(ri)
+            r = cancelled[ri]
+            done = bool(txn) and txn in str(r[C["Status_Details"]])
+            need = 0 if done else max(0, len(items) - len(_ITEM_ID_RE.findall(str(r[C["Vinted_URL"]]))))
+        else:
+            need = len(items)
+        cancel_info[ci] = {"txn": txn, "items": items, "row": ri, "need": need}
+        if txn:
+            need_by_txn[txn] = need
+    cancel_claims: Dict[str, List[int]] = {}
+
+    # ---- 1. Orders -> Sold_Items ------------------------------------------------
+    for txn, lab in labels_by_date:
+        if txn in cancelled_txns:
+            # Claim the cancelled order's own rows in date order, so a later re-sale of the same
+            # items (e.g. a cancelled bundle bought again) keeps the other rows.
+            claims = cancel_claims.setdefault(txn, [])
+            for title in _event_items(lab):
+                if len(claims) >= need_by_txn.get(txn, 0):
+                    break
+                idx = take_sold(title, txn)
+                if idx is not None:
+                    claims.append(idx)
+            continue
+        items = _event_items(lab)
+        sale_date = lab.timestamp.strftime("%Y-%m-%d")
+        bundle = len(items) > 1
+        targets: List[Tuple[str, int, str]] = []  # (kind, index, title)
+        for title in items:
+            idx = take_sold(title, txn)
+            if idx is not None:
+                targets.append(("row", idx, title))
+                continue
+            li = take_listing(title)
+            if li is not None:
+                listing_moved.add(li)
+                srow = _sold_row_from_listing(listings[li], None, default_lot)
+                srow[S["Sale_Date"]] = sale_date
+                srow[S["Order_ID"]] = txn
+                plan.sold_appends.append(srow)
+                plan.listing_to_sold.append(title)
+                targets.append(("new", len(plan.sold_appends) - 1, title))
+                continue
+            plan.email_unmatched.append({
+                "Transaction": txn, "Date": sale_date, "Title": title,
+                "Reason": "No matching row in Sold_Items or Item_Listings (import your Sold closet HTML first)",
+            })
+
+        def _row(kind: str, k: int) -> List[Any]:
+            return sold[k] if kind == "row" else plan.sold_appends[k]
+
+        total = price_by_txn.get(txn, 0.0)
+        shares: List[Optional[float]] = [None] * len(targets)
+        if total and targets:
+            weights = [
+                parse_price(_row(kind, k)[S["Posted_Price"]]) or parse_price(_row(kind, k)[S["Sold_Price"]])
+                for kind, k, _ in targets
+            ]
+            shares = list(split_bundle_total(total, weights)) if len(targets) == len(items) else shares
+            if not bundle:
+                shares = [total]
+
+        for (kind, k, title), share in zip(targets, shares):
+            row = _row(kind, k)
+            if kind == "new":
+                if share is not None:
+                    row[S["Sold_Price"]] = share
+                plan.email_dated.append({
+                    "Title": title, "Sale Date": sale_date, "Transaction": txn, "Bundle": "Yes" if bundle else "",
+                    "Sold Price": share if share is not None else row[S["Sold_Price"]], "Change": "Moved from active listings",
+                })
+                continue
+            changes = []
+            if not str(row[S["Sale_Date"]]).strip():
+                sold_update(k, "Sale_Date", sale_date)
+                changes.append("sale date")
+            if str(row[O]).strip() != txn:
+                sold_update(k, "Order_ID", txn)
+                changes.append("order ID")
+                if bundle:  # (re)write the bundle-aware formulas once, when the row joins its bundle
+                    sold_update(k, "Sale_Type", sale_type_formula(k + 2))
+                    sold_update(k, "Packaging_Cost", packaging_formula(k + 2))
+            if share is not None and abs(parse_price(row[S["Sold_Price"]]) - share) > 0.004:
+                sold_update(k, "Sold_Price", share)
+                changes.append("price")
+            if changes:
+                plan.email_dated.append({
+                    "Title": title, "Sale Date": sale_date, "Transaction": txn, "Bundle": "Yes" if bundle else "",
+                    "Sold Price": share if share is not None else row[S["Sold_Price"]], "Change": ", ".join(changes),
+                })
+        if bundle:
+            plan.email_bundles.append({
+                "Transaction": txn, "Date": sale_date, "Items": len(items), "Titles": ", ".join(items),
+                "Order Total": f"${total:.2f}" if total else "Not in email (prices kept)", "Matched": f"{len(targets)}/{len(items)}",
+            })
+
+    # ---- 2. Cancellations -------------------------------------------------------
+    new_cancel_oids: Set[str] = set()
+
+    def move_out(rows: List[int]) -> List[int]:
+        for i in rows:
+            sold_delete.add(i)
+            plan.removed_for_cancellation.append(sold[i][S["Title"]])
+        return rows
+
+    for ci, c in enumerate(cancels):
+        info = cancel_info[ci]
+        txn, items, ri = info["txn"], info["items"], info["row"]
+        if not items:
+            continue
+        c_date = c.timestamp.strftime("%Y-%m-%d")
+        detail = (c.cancellation_reason or "Order canceled").strip()
+        if txn:
+            detail += f" | Transaction {txn}"
+        if len(items) > 1:
+            detail += f" | Bundle: {', '.join(items)}"
+        oid = (c.order_id or "").strip()
+        display = items[0] if len(items) == 1 else f"Bundle {len(items)} items: {', '.join(items)}"
+
+        if txn:
+            moved = move_out(cancel_claims.get(txn, []))
+        else:  # no shipping-label email: match by title among rows no order claimed
+            moved = []
+            if info["need"]:
+                for i in sold_by_title.get(_norm(items[0]), []):
+                    if i not in used_rows and i not in claimed and not str(sold[i][O]).strip():
+                        used_rows.add(i)
+                        moved = move_out([i])
+                        break
+        moved_urls = [str(sold[i][S["Vinted_URL"]]).strip() for i in moved if str(sold[i][S["Vinted_URL"]]).strip()]
+
+        if ri is not None:
+            r = cancelled[ri]
+            changes = []
+            if not str(r[C["Cancellation_Date"]]).strip():
+                plan.cancelled_cell_updates.append((ri + 2, C["Cancellation_Date"], c_date))
+                changes.append("date")
+            if txn and txn not in str(r[C["Status_Details"]]):
+                plan.cancelled_cell_updates.append((ri + 2, C["Status_Details"], detail))
+                changes.append("details")
+            if oid and not str(r[C["Order_ID"]]).strip():
+                plan.cancelled_cell_updates.append((ri + 2, C["Order_ID"], oid))
+            if moved_urls:
+                kept = [u for u in str(r[C["Vinted_URL"]]).split("\n") if _ITEM_ID_RE.search(u)]
+                plan.cancelled_cell_updates.append((ri + 2, C["Vinted_URL"], "\n".join(kept + moved_urls)))
+                if len(items) == 1 and not str(r[C["Item_SKU"]]).strip():
+                    plan.cancelled_cell_updates.append((ri + 2, C["Item_SKU"], sold[moved[0]][S["Item_SKU"]]))
+                changes.append(f"moved {len(moved)} item(s) out of Sold_Items")
+            if changes:
+                plan.email_cancellations.append({"Title": display, "Date": c_date, "Action": "Updated existing record: " + ", ".join(changes)})
+            continue
+        if oid and oid in new_cancel_oids:
+            continue
+
+        first = sold[moved[0]] if moved else None
+        crow = [""] * len(CANCELLED_ORDERS_HEADERS)
+        crow[C["Order_ID"]] = oid or txn
+        crow[C["Item_SKU"]] = first[S["Item_SKU"]] if (first and len(items) == 1) else ""
+        crow[C["Item_Title"]] = display
+        crow[C["Brand"]] = (first[S["Brand"]] if first else "") or (c.brand or "")
+        crow[C["Category"]] = (first[S["Category"]] if first else "") or (c.category or "")
+        crow[C["Lost_Revenue"]] = round(sum(parse_price(sold[i][S["Sold_Price"]]) for i in moved), 2) or c.sold_price
+        crow[C["Original_Price"]] = round(sum(parse_price(sold[i][S["Posted_Price"]]) for i in moved), 2) or ""
+        crow[C["Cancellation_Date"]] = c_date
+        crow[C["Status_Details"]] = detail
+        crow[C["Buyer_Username"]] = c.buyer_username or ""
+        crow[C["Vinted_URL"]] = "\n".join(moved_urls) or (f"https://www.vinted.com/inbox/{oid}" if oid else "")
+        crow[C["Source"]] = "Email"
+        plan.cancelled_appends.append(crow)
+        if oid:
+            new_cancel_oids.add(oid)
+        plan.email_cancellations.append({
+            "Title": display, "Date": c_date,
+            "Action": f"New cancellation: moved {len(moved)} item(s) out of Sold_Items" if moved else "New cancellation (item not in Sold_Items)",
+        })
+
+    # ---- 3. Offers -> Price_History -------------------------------------------
+    new_listings = [list(r) for r in listings]
+    for ev in evs:
+        if ev.event_type != "offer" or not ev.offer_price:
+            continue
+        li = listing_by_vid.get(str(ev.vinted_id or "")) if ev.vinted_id else None
+        if li is None:
+            rows = listing_by_title.get(_norm(ev.item_title), [])
+            li = rows[0] if len(rows) == 1 else None
+        entry = f"{ev.timestamp.strftime('%m/%d')} Offer: ${ev.offer_price:.2f}"
+        if ev.listed_price:
+            entry += f" (was ${ev.listed_price:.2f})"
+        if li is None or li in listing_moved:
+            continue
+        hist = str(new_listings[li][L["Price_History"]]).strip()
+        if entry in hist:
+            continue
+        new_listings[li][L["Price_History"]] = f"{hist}; {entry}" if hist else entry
+        plan.listings_changed = True
+        plan.email_offers.append({"Title": new_listings[li][L["Title"]], "Offer": entry})
+
+    if listing_moved:
+        plan.listings_changed = True
+    plan.final_listings = [r for i, r in enumerate(new_listings) if i not in listing_moved and not _blank(r)]
+
+    # ---- Notes --------------------------------------------------------------------
+    plan.sold_delete_rows = sorted((i + 2 for i in sold_delete), reverse=True)
+    dated_rows = {r for r, c, _ in plan.sold_cell_updates if c == S["Sale_Date"]}
+    still_undated = [
+        r[S["Title"]] for i, r in enumerate(sold)
+        if not _blank(r) and i not in sold_delete and not str(r[S["Sale_Date"]]).strip() and (i + 2) not in dated_rows
+    ]
+    if still_undated and labels:
+        first_day = labels_by_date[0][1].timestamp.strftime("%Y-%m-%d")
+        plan.warnings.append(
+            f"{len(still_undated)} sold item(s) still have no sale date: no shipping-label email found for them "
+            f"(emails scanned start {first_day}; widen the date range to include older sales)."
+        )
+    unresolved = [c.item_title for ci, c in enumerate(cancels) if ci not in cancel_txn]
+    if unresolved:
+        plan.warnings.append(
+            "Cancellation emails without a matching shipping-label email were matched by title only: " + ", ".join(unresolved)
+        )
+
+    plan.counts_after = {
+        "active": plan.counts_before["active"] - len(listing_moved),
+        "sold": plan.counts_before["sold"] - len(sold_delete) + len(plan.sold_appends),
+        "hidden": plan.counts_before["hidden"],
         "cancelled": plan.counts_before["cancelled"] + len(plan.cancelled_appends),
     }
     return plan
