@@ -79,6 +79,9 @@ def parse_sold_dataframe(rows: list) -> pd.DataFrame:
         "margin_%": "Margin_%",
         "margin_pct": "Margin_%",
         "margin": "Margin_%",
+        "lot_id": "Lot_ID",
+        "lot": "Lot_ID",
+        "lot id": "Lot_ID",
     }
     rename_dict = {}
     for col in df.columns:
@@ -87,6 +90,11 @@ def parse_sold_dataframe(rows: list) -> pd.DataFrame:
             rename_dict[col] = canonical_aliases[norm]
     if rename_dict:
         df = df.rename(columns=rename_dict)
+
+    if "Lot_ID" in df.columns:
+        df["Lot_ID"] = df["Lot_ID"].fillna("").astype(str)
+    else:
+        df["Lot_ID"] = ""
 
     # Clean numeric columns
     numeric_cols = [
@@ -176,6 +184,9 @@ def parse_active_dataframe(rows: list) -> pd.DataFrame:
         "current_price": "Current_Price",
         "favorites": "Favorites",
         "views": "Views",
+        "lot_id": "Lot_ID",
+        "lot": "Lot_ID",
+        "lot id": "Lot_ID",
     }
     rename_dict = {}
     for col in df.columns:
@@ -184,6 +195,11 @@ def parse_active_dataframe(rows: list) -> pd.DataFrame:
             rename_dict[col] = canonical_aliases[norm]
     if rename_dict:
         df = df.rename(columns=rename_dict)
+
+    if "Lot_ID" in df.columns:
+        df["Lot_ID"] = df["Lot_ID"].fillna("").astype(str)
+    else:
+        df["Lot_ID"] = ""
 
     numeric_cols = [
         ("Unit_Cost", "unit_cost_num"),
@@ -734,4 +750,269 @@ def build_cancellation_timeline_chart(df_cancelled: pd.DataFrame) -> go.Figure:
     fig.update_yaxes(title_text="Lost Revenue ($)", secondary_y=False, tickformat="$,.0f")
     fig.update_yaxes(title_text="Cancelled Units", secondary_y=True)
     return fig
+
+
+def parse_lots_dataframe(rows: list) -> pd.DataFrame:
+    """Parses raw rows from Inventory_Lots worksheet into a typed pandas DataFrame."""
+    if not rows or len(rows) < 2:
+        return pd.DataFrame()
+
+    headers = [str(h).strip() for h in rows[0]]
+    cleaned_headers = []
+    seen = {}
+    for i, h in enumerate(headers):
+        name = h if h else f"Col_{i}"
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}_{seen[name]}"
+        else:
+            seen[name] = 0
+        cleaned_headers.append(name)
+
+    data_rows = [r for r in rows[1:] if any(str(c).strip() for c in r)]
+    if not data_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(data_rows, columns=cleaned_headers)
+
+    canonical_aliases = {
+        "lot_id": "Lot_ID",
+        "lot id": "Lot_ID",
+        "lot": "Lot_ID",
+        "purchase_date": "Purchase_Date",
+        "purchasedate": "Purchase_Date",
+        "date": "Purchase_Date",
+        "source_vendor": "Source_Vendor",
+        "source": "Source_Vendor",
+        "vendor": "Source_Vendor",
+        "total_lot_cost": "Total_Cost",
+        "total_cost": "Total_Cost",
+        "total cost": "Total_Cost",
+        "cost": "Total_Cost",
+        "total_articles": "Total_Articles",
+        "total articles": "Total_Articles",
+        "articles": "Total_Articles",
+        "units": "Total_Articles",
+        "unit_cost": "Unit_Cost",
+        "unit cost": "Unit_Cost",
+        "items_processed": "Items_Processed",
+        "status": "Status",
+        "notes": "Notes",
+    }
+    rename_dict = {}
+    for col in df.columns:
+        norm = col.lower().strip()
+        if norm in canonical_aliases and canonical_aliases[norm] not in df.columns:
+            rename_dict[col] = canonical_aliases[norm]
+    if rename_dict:
+        df = df.rename(columns=rename_dict)
+
+    if "Lot_ID" not in df.columns:
+        return pd.DataFrame()
+
+    df["Lot_ID"] = df["Lot_ID"].astype(str).str.strip()
+    df = df[df["Lot_ID"] != ""]
+
+    if "Total_Cost" in df.columns:
+        df["total_cost_num"] = df["Total_Cost"].apply(clean_currency)
+    else:
+        df["total_cost_num"] = 0.0
+
+    if "Total_Articles" in df.columns:
+        df["total_articles_num"] = df["Total_Articles"].apply(lambda v: int(clean_currency(v)))
+    else:
+        df["total_articles_num"] = 0
+
+    if "Unit_Cost" in df.columns:
+        df["unit_cost_num"] = df["Unit_Cost"].apply(clean_currency)
+    else:
+        df["unit_cost_num"] = np.where(
+            df["total_articles_num"] > 0,
+            df["total_cost_num"] / df["total_articles_num"],
+            0.0,
+        )
+
+    if "Source_Vendor" not in df.columns:
+        df["Source_Vendor"] = "Unknown"
+    else:
+        df["Source_Vendor"] = df["Source_Vendor"].fillna("Unknown").replace("", "Unknown")
+
+    if "Status" not in df.columns:
+        df["Status"] = "Active"
+
+    return df
+
+
+def compute_lots_performance(
+    lot_rows: list,
+    df_sold: Optional[pd.DataFrame] = None,
+    df_active: Optional[pd.DataFrame] = None,
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Computes spent vs recouped metrics per inventory lot and in aggregate.
+    Returns:
+        (df_lots_perf, summary_dict)
+    """
+    df_lots = parse_lots_dataframe(lot_rows)
+
+    # Gather all lot IDs from Inventory_Lots plus any appearing in df_sold or df_active
+    lot_ids = []
+    if not df_lots.empty and "Lot_ID" in df_lots.columns:
+        lot_ids = [str(x).strip() for x in df_lots["Lot_ID"] if str(x).strip()]
+
+    sold_lots = []
+    if df_sold is not None and not df_sold.empty and "Lot_ID" in df_sold.columns:
+        sold_lots = [str(x).strip() for x in df_sold["Lot_ID"].dropna().unique() if str(x).strip()]
+
+    active_lots = []
+    if df_active is not None and not df_active.empty and "Lot_ID" in df_active.columns:
+        active_lots = [str(x).strip() for x in df_active["Lot_ID"].dropna().unique() if str(x).strip()]
+
+    all_lot_ids = list(dict.fromkeys(lot_ids + sold_lots + active_lots))
+
+    perf_records = []
+    for lid in all_lot_ids:
+        # Lot metadata from Inventory_Lots
+        lot_match = df_lots[df_lots["Lot_ID"].str.upper() == lid.upper()] if not df_lots.empty else pd.DataFrame()
+        if not lot_match.empty:
+            row_meta = lot_match.iloc[0]
+            spent = float(row_meta.get("total_cost_num", 0.0))
+            articles = int(row_meta.get("total_articles_num", 0))
+            vendor = str(row_meta.get("Source_Vendor", "Unknown"))
+            purchase_date = str(row_meta.get("Purchase_Date", ""))
+            status = str(row_meta.get("Status", "Active"))
+        else:
+            spent = 0.0
+            articles = 0
+            vendor = "Uncataloged"
+            purchase_date = ""
+            status = "Active"
+
+        # Sold items from this lot
+        if df_sold is not None and not df_sold.empty and "Lot_ID" in df_sold.columns:
+            sold_mask = df_sold["Lot_ID"].astype(str).str.strip().str.upper() == lid.upper()
+            sold_items_lot = df_sold[sold_mask]
+            recouped = float(sold_items_lot["sold_price_num"].sum()) if "sold_price_num" in sold_items_lot.columns else 0.0
+            items_sold_count = len(sold_items_lot)
+            net_profit_realized = float(sold_items_lot["net_profit_num"].sum()) if "net_profit_num" in sold_items_lot.columns else 0.0
+        else:
+            recouped = 0.0
+            items_sold_count = 0
+            net_profit_realized = 0.0
+
+        # Active items from this lot
+        if df_active is not None and not df_active.empty and "Lot_ID" in df_active.columns:
+            active_mask = df_active["Lot_ID"].astype(str).str.strip().str.upper() == lid.upper()
+            active_items_lot = df_active[active_mask]
+            active_count = len(active_items_lot)
+            active_value = float(active_items_lot["current_price_num"].sum()) if "current_price_num" in active_items_lot.columns else 0.0
+        else:
+            active_count = 0
+            active_value = 0.0
+
+        net_cash = recouped - spent
+        recovery_pct = ((recouped / spent) * 100.0) if spent > 0 else (100.0 if recouped > 0 else 0.0)
+        is_breakeven = (net_cash >= 0) and (spent > 0 or recouped > 0)
+        total_units = articles if articles > 0 else (items_sold_count + active_count)
+        sell_through_pct = ((items_sold_count / total_units) * 100.0) if total_units > 0 else 0.0
+
+        perf_records.append({
+            "Lot_ID": lid,
+            "Vendor": vendor,
+            "Purchase_Date": purchase_date,
+            "Total_Spent": spent,
+            "Total_Recouped": recouped,
+            "Net_Profit_Deficit": net_cash,
+            "Recovery_%": recovery_pct,
+            "Is_Breakeven": is_breakeven,
+            "Items_Sold": items_sold_count,
+            "Total_Articles": articles,
+            "Active_Items": active_count,
+            "Active_Value": active_value,
+            "Sell_Through_%": sell_through_pct,
+            "Status": status,
+        })
+
+    df_perf = pd.DataFrame(perf_records)
+    if not df_perf.empty:
+        df_perf = df_perf.sort_values(by=["Total_Spent", "Total_Recouped"], ascending=[False, False])
+
+    total_spent = float(df_perf["Total_Spent"].sum()) if not df_perf.empty else 0.0
+    total_recouped = float(df_perf["Total_Recouped"].sum()) if not df_perf.empty else 0.0
+    total_net = total_recouped - total_spent
+    overall_recovery = ((total_recouped / total_spent) * 100.0) if total_spent > 0 else (100.0 if total_recouped > 0 else 0.0)
+    profitable_count = int((df_perf["Net_Profit_Deficit"] >= 0).sum()) if not df_perf.empty else 0
+    in_progress_count = int(((df_perf["Total_Spent"] > 0) & (df_perf["Net_Profit_Deficit"] < 0)).sum()) if not df_perf.empty else 0
+
+    summary = {
+        "total_spent": total_spent,
+        "total_recouped": total_recouped,
+        "total_net": total_net,
+        "overall_recovery_pct": overall_recovery,
+        "is_positive": total_net >= 0,
+        "total_lots": len(df_perf),
+        "profitable_lots": profitable_count,
+        "in_progress_lots": in_progress_count,
+    }
+
+    return df_perf, summary
+
+
+def build_lot_spent_vs_recouped_chart(df_lots_perf: pd.DataFrame) -> go.Figure:
+    """Builds a grouped bar chart comparing amount spent vs amount recouped for each inventory lot."""
+    if df_lots_perf.empty or "Lot_ID" not in df_lots_perf.columns:
+        fig = go.Figure()
+        fig.add_annotation(text="No inventory lot data available", showarrow=False, font=dict(size=14))
+        return fig
+
+    plot_df = df_lots_perf.copy()
+    if len(plot_df) > 15:
+        plot_df = plot_df.head(15)
+
+    fig = go.Figure()
+
+    # Amount Spent Bar
+    fig.add_trace(
+        go.Bar(
+            x=plot_df["Lot_ID"],
+            y=plot_df["Total_Spent"],
+            name="Spent ($)",
+            marker_color="#ef4444",
+            opacity=0.85,
+            hovertemplate="<b>%{x}</b><br>Spent: $%{y:,.2f}<extra></extra>",
+            text=[f"${v:,.0f}" if v > 0 else "$0" for v in plot_df["Total_Spent"]],
+            textposition="auto",
+        )
+    )
+
+    # Amount Recouped Bar
+    fig.add_trace(
+        go.Bar(
+            x=plot_df["Lot_ID"],
+            y=plot_df["Total_Recouped"],
+            name="Recouped ($)",
+            marker_color="#10b981",
+            opacity=0.9,
+            hovertemplate="<b>%{x}</b><br>Recouped: $%{y:,.2f}<br>Net: %{customdata[0]}<br>Recovery: %{customdata[1]:.1f}%<extra></extra>",
+            customdata=list(zip(
+                [f"+${n:,.2f}" if n >= 0 else f"-${abs(n):,.2f}" for n in plot_df["Net_Profit_Deficit"]],
+                plot_df["Recovery_%"],
+            )),
+            text=[f"${v:,.0f}" if v > 0 else "$0" for v in plot_df["Total_Recouped"]],
+            textposition="auto",
+        )
+    )
+
+    fig.update_layout(
+        title=dict(text="Lot Capital: Spent vs. Recouped", x=0.01),
+        barmode="group",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=10, r=10, t=50, b=20),
+        height=380,
+        hovermode="x unified",
+    )
+    fig.update_yaxes(title_text="Amount ($)", showgrid=True)
+    fig.update_xaxes(title_text="Inventory Lot")
+    return fig
+
 

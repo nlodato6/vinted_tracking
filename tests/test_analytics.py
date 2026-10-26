@@ -18,6 +18,9 @@ from src.analytics import (
     build_cash_flow_waterfall,
     build_cancellation_reasons_chart,
     build_cancellation_timeline_chart,
+    parse_lots_dataframe,
+    compute_lots_performance,
+    build_lot_spent_vs_recouped_chart,
 )
 
 
@@ -238,6 +241,77 @@ def test_parse_cancelled_dataframe_and_charts():
     empty_df = pd.DataFrame()
     assert build_cancellation_reasons_chart(empty_df) is not None
     assert build_cancellation_timeline_chart(empty_df) is not None
+
+
+def test_parse_lots_dataframe_and_performance():
+    raw_lots = [
+        ["Lot_ID", "Purchase_Date", "Source_Vendor", "Total_Cost", "Total_Articles", "Unit_Cost", "Items_Processed", "Status", "Notes"],
+        ["LOT-001", "2026-10-01", "Goodwill", "$100.00", "20", "$5.00", "15", "Active", "Haul 1"],
+        ["LOT-002", "2026-10-10", "Salvation Army", "$50.00", "10", "$5.00", "10", "Active", "Haul 2"],
+    ]
+
+    raw_sold = [
+        ["Item_SKU", "Lot_ID", "Title", "Brand", "Category", "Unit_Cost", "Sold_Price", "Net_Profit", "Margin_%", "Sale_Type", "Sale_Date"],
+        ["SKU-001", "LOT-001", "Graphic Tee", "Nike", "Tops", "$5.00", "$40.00", "$34.00", "85.0%", "Original Price", "2026-10-15"],
+        ["SKU-002", "LOT-001", "Blue Jeans", "Levi's", "Pants", "$5.00", "$80.00", "$72.00", "90.0%", "Offer", "2026-10-16"],
+        ["SKU-003", "LOT-002", "Jacket", "Adidas", "Outerwear", "$5.00", "$30.00", "$24.00", "80.0%", "Original Price", "2026-10-17"],
+    ]
+
+    raw_active = [
+        ["Item_SKU", "Lot_ID", "Title", "Brand", "Category", "Unit_Cost", "Posted_Price", "Current_Price", "Favorites", "Views"],
+        ["SKU-101", "LOT-001", "Sneakers", "Nike", "Shoes", "$5.00", "$50.00", "$45.00", "5", "30"],
+        ["SKU-102", "LOT-002", "Hat", "Adidas", "Accessories", "$5.00", "$20.00", "$15.00", "2", "12"],
+    ]
+
+    df_lots = parse_lots_dataframe(raw_lots)
+    assert len(df_lots) == 2
+    assert df_lots["total_cost_num"].sum() == 150.00
+    assert df_lots["total_articles_num"].sum() == 30
+
+    df_sold = parse_sold_dataframe(raw_sold)
+    df_active = parse_active_dataframe(raw_active)
+
+    df_perf, summary = compute_lots_performance(raw_lots, df_sold, df_active)
+
+    # LOT-001: Spent $100, Recouped $40 + $80 = $120. Net profit = +$20 (Profitable! 120%)
+    lot1 = df_perf[df_perf["Lot_ID"] == "LOT-001"].iloc[0]
+    assert lot1["Total_Spent"] == 100.00
+    assert lot1["Total_Recouped"] == 120.00
+    assert lot1["Net_Profit_Deficit"] == 20.00
+    assert lot1["Recovery_%"] == 120.00
+    assert bool(lot1["Is_Breakeven"]) is True
+    assert lot1["Items_Sold"] == 2
+    assert lot1["Active_Items"] == 1
+    assert lot1["Active_Value"] == 45.00
+
+    # LOT-002: Spent $50, Recouped $30. Net deficit = -$20 (60% recouped)
+    lot2 = df_perf[df_perf["Lot_ID"] == "LOT-002"].iloc[0]
+    assert lot2["Total_Spent"] == 50.00
+    assert lot2["Total_Recouped"] == 30.00
+    assert lot2["Net_Profit_Deficit"] == -20.00
+    assert lot2["Recovery_%"] == 60.00
+    assert bool(lot2["Is_Breakeven"]) is False
+    assert lot2["Items_Sold"] == 1
+    assert lot2["Active_Items"] == 1
+
+    # Summary
+    assert summary["total_spent"] == 150.00
+    assert summary["total_recouped"] == 150.00
+    assert summary["total_net"] == 0.00
+    assert summary["overall_recovery_pct"] == 100.00
+    assert summary["is_positive"] is True
+    assert summary["total_lots"] == 2
+    assert summary["profitable_lots"] == 1
+    assert summary["in_progress_lots"] == 1
+
+    # Chart builder
+    fig = build_lot_spent_vs_recouped_chart(df_perf)
+    assert fig is not None
+    assert len(fig.data) == 2  # Spent and Recouped bars
+
+    # Empty handling
+    assert build_lot_spent_vs_recouped_chart(pd.DataFrame()) is not None
+
 
 
 
