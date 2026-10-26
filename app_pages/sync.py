@@ -1326,8 +1326,25 @@ def render_sync_page():
                     sel_cat = str(sel_item.get("Category", ""))
 
                     st.divider()
-                    st.markdown(f"#### ✏️ Edit or Move: **{sel_title}** `{sel_sku}`")
-                    st.caption(f"Location: `{current_tab_name}` (Sheet Row {sel_sheet_row})")
+                    h_col1, h_col2 = st.columns([3, 1], vertical_alignment="bottom")
+                    with h_col1:
+                        st.markdown(f"#### ✏️ Edit, Move, or Delete: **{sel_title}** `{sel_sku}`")
+                        st.caption(f"Location: `{current_tab_name}` (Sheet Row {sel_sheet_row})")
+                    with h_col2:
+                        with st.popover("🗑️ Delete Row", help="Permanently delete this entry from Google Sheets (e.g. if duplicate)"):
+                            st.error(f"Permanently delete **{sel_title}** (Row {sel_sheet_row}) from `{current_tab_name}`?")
+                            st.caption("⚠️ This removes the row from Google Sheets and cannot be undone.")
+                            if st.button("Yes, Delete Permanently", type="primary", icon=":material/delete_forever:", key=f"btn_delete_pop_{current_tab_name}_{sel_sheet_row}"):
+                                try:
+                                    with st.spinner("Deleting row from Google Sheets..."):
+                                        manual_engine.manual_delete_row(current_tab_name, sel_sheet_row)
+                                    st.success(f"Deleted row {sel_sheet_row} ('{sel_title}') from `{current_tab_name}`!", icon=":material/check_circle:")
+                                    st.cache_data.clear()
+                                    time.sleep(1.0)
+                                    st.rerun()
+                                except Exception as dex:
+                                    log_error(u_email, "sync.py:manual_delete", dex)
+                                    st.error(f"Failed to delete row: {dex}")
 
                     # Actions available
                     if current_tab_name in (TAB_ITEM_LISTINGS, TAB_HIDDEN_ITEMS):
@@ -1336,6 +1353,7 @@ def render_sync_page():
                             "Move to Hidden_Items" if current_tab_name == TAB_ITEM_LISTINGS else "Move to Active Listings",
                             "Record as Cancelled (Move to Cancelled_Orders)",
                             "Update Details in Current Sheet (No Move)",
+                            "Delete Entry from Current Sheet (Permanent)",
                         ]
                     elif current_tab_name == TAB_SOLD_ITEMS:
                         action_opts = [
@@ -1343,6 +1361,7 @@ def render_sync_page():
                             "Move to Cancelled_Orders (Refund / Cancelled)",
                             "Move to Active Listings (Relist)",
                             "Move to Hidden_Items",
+                            "Delete Entry from Current Sheet (Permanent)",
                         ]
                     else:  # Cancelled_Orders
                         action_opts = [
@@ -1350,11 +1369,15 @@ def render_sync_page():
                             "Relist to Active Listings (Preserve Cancel Record)",
                             "Move to Active Listings (Delete Cancel Record)",
                             "Move to Sold_Items",
+                            "Delete Entry from Current Sheet (Permanent)",
                         ]
 
                     chosen_action = st.selectbox("Action to Perform", options=action_opts, key="chosen_action_manual")
 
                     with st.form("manual_update_form", clear_on_submit=False):
+                        if "Delete Entry" in chosen_action:
+                            st.warning(f"⚠️ **Confirm Deletion**: Executing this action will permanently remove row {sel_sheet_row} ('{sel_title}') from `{current_tab_name}` in Google Sheets.")
+
                         p_col1, p_col2 = st.columns(2)
 
                         # Prices & Platforms
@@ -1436,83 +1459,88 @@ def render_sync_page():
                             )
 
                         btn_label = f"Execute: {chosen_action}"
-                        submitted = st.form_submit_button(btn_label, type="primary", icon=":material/check_circle:")
+                        btn_icon = ":material/delete_forever:" if "Delete Entry" in chosen_action else ":material/check_circle:"
+                        submitted = st.form_submit_button(btn_label, type="primary", icon=btn_icon)
 
                         if submitted:
                             try:
                                 with st.spinner("Updating Google Sheets..."):
-                                    # Destination tab routing
-                                    if "Sold_Items" in chosen_action:
-                                        target_tab = TAB_SOLD_ITEMS
-                                    elif "Active Listings" in chosen_action:
-                                        target_tab = TAB_ITEM_LISTINGS
-                                    elif "Hidden_Items" in chosen_action:
-                                        target_tab = TAB_HIDDEN_ITEMS
-                                    elif "Cancelled_Orders" in chosen_action:
-                                        target_tab = TAB_CANCELLED_ORDERS
+                                    if "Delete Entry" in chosen_action:
+                                        manual_engine.manual_delete_row(current_tab_name, sel_sheet_row)
+                                        st.success(f"Permanently deleted row {sel_sheet_row} ('{sel_title}') from {current_tab_name}!", icon=":material/check_circle:")
                                     else:
-                                        target_tab = current_tab_name
-
-                                    item_payload = {
-                                        "title": new_title.strip(),
-                                        "lot": new_lot,
-                                        "sold_price": new_sold_price,
-                                        "current_price": new_sold_price if is_selling else (new_asking_price if (is_relisting or current_tab_name != TAB_CANCELLED_ORDERS) else new_lost_revenue),
-                                        "posted_price": new_asking_price if is_relisting else new_sold_price,
-                                        "sale_date": new_sale_date.strftime("%Y-%m-%d"),
-                                        "platform": new_platform,
-                                        "status": new_status,
-                                        "order_id": new_order_id.strip(),
-                                        "notes": new_notes.strip(),
-                                        "vinted_url": str(sel_item.get("Vinted URL", "")),
-                                    }
-
-                                    if target_tab != current_tab_name:
-                                        delete_src = ("Delete Cancel Record" in chosen_action) or (current_tab_name != TAB_CANCELLED_ORDERS)
-                                        # Move or relist item across sheets
-                                        manual_engine.manual_move_item(
-                                            source_tab=current_tab_name,
-                                            dest_tab=target_tab,
-                                            source_sheet_row=sel_sheet_row,
-                                            item_data=item_payload,
-                                            delete_source=delete_src,
-                                        )
-                                        if not delete_src:
-                                            st.success(f"Relisted '{new_title}' to Active Listings! (Cancellation record preserved in {current_tab_name})", icon=":material/check_circle:")
+                                        # Destination tab routing
+                                        if "Sold_Items" in chosen_action:
+                                            target_tab = TAB_SOLD_ITEMS
+                                        elif "Active Listings" in chosen_action:
+                                            target_tab = TAB_ITEM_LISTINGS
+                                        elif "Hidden_Items" in chosen_action:
+                                            target_tab = TAB_HIDDEN_ITEMS
+                                        elif "Cancelled_Orders" in chosen_action:
+                                            target_tab = TAB_CANCELLED_ORDERS
                                         else:
-                                            st.success(f"Moved '{new_title}' from {current_tab_name} to {target_tab}!", icon=":material/check_circle:")
-                                    else:
-                                        # In-place update
-                                        update_dict = {}
-                                        if new_title != sel_title:
-                                            update_dict["Title" if "Title" in headers_map else "Item_Title"] = new_title
-                                        if new_lot != sel_lot and "Lot_ID" in headers_map:
-                                            update_dict["Lot_ID"] = new_lot
-                                        if is_selling:
-                                            update_dict["Sold_Price"] = new_sold_price
-                                            update_dict["Sale_Date"] = new_sale_date.strftime("%Y-%m-%d")
-                                            update_dict["Platform"] = new_platform
-                                            if new_order_id:
-                                                update_dict["Order_ID"] = new_order_id
-                                        elif current_tab_name == TAB_CANCELLED_ORDERS:
-                                            if "Lost_Revenue" in headers_map:
-                                                update_dict["Lost_Revenue"] = new_lost_revenue
-                                            if new_order_id and "Order_ID" in headers_map:
-                                                update_dict["Order_ID"] = new_order_id
-                                        else:
-                                            if "Current_Price" in headers_map:
-                                                update_dict["Current_Price"] = new_asking_price
-                                        if new_status and "Status" in headers_map:
-                                            update_dict["Status"] = new_status
-                                        if "Status_Details" in headers_map:
-                                            update_dict["Status_Details"] = new_notes
+                                            target_tab = current_tab_name
 
-                                        manual_engine.manual_update_row(
-                                            tab_name=current_tab_name,
-                                            sheet_row=sel_sheet_row,
-                                            updated_fields=update_dict,
-                                        )
-                                        st.success(f"Updated '{new_title}' in {current_tab_name}!", icon=":material/check_circle:")
+                                        item_payload = {
+                                            "title": new_title.strip(),
+                                            "lot": new_lot,
+                                            "sold_price": new_sold_price,
+                                            "current_price": new_sold_price if is_selling else (new_asking_price if (is_relisting or current_tab_name != TAB_CANCELLED_ORDERS) else new_lost_revenue),
+                                            "posted_price": new_asking_price if is_relisting else new_sold_price,
+                                            "sale_date": new_sale_date.strftime("%Y-%m-%d"),
+                                            "platform": new_platform,
+                                            "status": new_status,
+                                            "order_id": new_order_id.strip(),
+                                            "notes": new_notes.strip(),
+                                            "vinted_url": str(sel_item.get("Vinted URL", "")),
+                                        }
+
+                                        if target_tab != current_tab_name:
+                                            delete_src = ("Delete Cancel Record" in chosen_action) or (current_tab_name != TAB_CANCELLED_ORDERS)
+                                            # Move or relist item across sheets
+                                            manual_engine.manual_move_item(
+                                                source_tab=current_tab_name,
+                                                dest_tab=target_tab,
+                                                source_sheet_row=sel_sheet_row,
+                                                item_data=item_payload,
+                                                delete_source=delete_src,
+                                            )
+                                            if not delete_src:
+                                                st.success(f"Relisted '{new_title}' to Active Listings! (Cancellation record preserved in {current_tab_name})", icon=":material/check_circle:")
+                                            else:
+                                                st.success(f"Moved '{new_title}' from {current_tab_name} to {target_tab}!", icon=":material/check_circle:")
+                                        else:
+                                            # In-place update
+                                            update_dict = {}
+                                            if new_title != sel_title:
+                                                update_dict["Title" if "Title" in headers_map else "Item_Title"] = new_title
+                                            if new_lot != sel_lot and "Lot_ID" in headers_map:
+                                                update_dict["Lot_ID"] = new_lot
+                                            if is_selling:
+                                                update_dict["Sold_Price"] = new_sold_price
+                                                update_dict["Sale_Date"] = new_sale_date.strftime("%Y-%m-%d")
+                                                update_dict["Platform"] = new_platform
+                                                if new_order_id:
+                                                    update_dict["Order_ID"] = new_order_id
+                                            elif current_tab_name == TAB_CANCELLED_ORDERS:
+                                                if "Lost_Revenue" in headers_map:
+                                                    update_dict["Lost_Revenue"] = new_lost_revenue
+                                                if new_order_id and "Order_ID" in headers_map:
+                                                    update_dict["Order_ID"] = new_order_id
+                                            else:
+                                                if "Current_Price" in headers_map:
+                                                    update_dict["Current_Price"] = new_asking_price
+                                            if new_status and "Status" in headers_map:
+                                                update_dict["Status"] = new_status
+                                            if "Status_Details" in headers_map:
+                                                update_dict["Status_Details"] = new_notes
+
+                                            manual_engine.manual_update_row(
+                                                tab_name=current_tab_name,
+                                                sheet_row=sel_sheet_row,
+                                                updated_fields=update_dict,
+                                            )
+                                            st.success(f"Updated '{new_title}' in {current_tab_name}!", icon=":material/check_circle:")
 
                                     st.cache_data.clear()
                                     time.sleep(1.2)

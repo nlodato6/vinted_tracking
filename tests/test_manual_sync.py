@@ -339,3 +339,39 @@ def test_relist_cancelled_to_active_listings_preserves_cancel_record(manual_engi
     assert new_listing[L["Vinted_ID"]] == "555"
 
 
+def test_manual_delete_row(manual_engine_and_sh):
+    eng, sh = manual_engine_and_sh
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+    ws_sold = sh.worksheet(TAB_SOLD_ITEMS)
+
+    # Initial count in Item_Listings is 3 rows (header + 2 data rows)
+    assert len(ws_listings.rows) == 3
+    first_item_sku = ws_listings.rows[1][L["Item_SKU"]]
+    second_item_sku = ws_listings.rows[2][L["Item_SKU"]]
+
+    # 1. Header protection: deleting row 1 must raise ValueError
+    with pytest.raises(ValueError, match="Invalid row 1"):
+        eng.manual_delete_row(TAB_ITEM_LISTINGS, sheet_row=1)
+
+    # 2. Out-of-bounds protection: deleting row > len(rows) must raise ValueError
+    with pytest.raises(ValueError, match="Invalid row 999"):
+        eng.manual_delete_row(TAB_ITEM_LISTINGS, sheet_row=999)
+
+    # 3. Successful deletion of row 2
+    res = eng.manual_delete_row(TAB_ITEM_LISTINGS, sheet_row=2)
+    assert res is True
+    assert len(ws_listings.rows) == 2
+    # The remaining data row is what used to be row 3
+    assert ws_listings.rows[1][L["Item_SKU"]] == second_item_sku
+
+    # 4. Deletion from Sold_Items triggers sync_lots
+    # Add a data row to Sold_Items
+    ws_sold.rows.append(["CAN-SOLD-1", "SKU-SOLD", "LOT-001", "Sold Item", "Brand", "Cat", "5.00", "25.00", "Vinted"])
+    assert len(ws_sold.rows) == 2
+    eng.sync_lots = MagicMock()
+    eng.manual_delete_row(TAB_SOLD_ITEMS, sheet_row=2)
+    assert len(ws_sold.rows) == 1
+    eng.sync_lots.assert_called_once()
+
+
+

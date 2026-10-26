@@ -3781,6 +3781,30 @@ class SheetsSyncEngine:
 
         return True
 
+    def manual_delete_row(
+        self,
+        tab_name: str,
+        sheet_row: int,
+    ) -> bool:
+        """
+        Permanently deletes a row at 1-based sheet_row from tab_name in Google Sheets.
+        Prevents deleting row 1 (header row).
+        """
+        ws = self.get_worksheet(tab_name)
+        rows = ws.get_all_values()
+        if sheet_row < 2 or sheet_row > len(rows):
+            raise ValueError(f"Invalid row {sheet_row} for tab {tab_name} (total rows: {len(rows)})")
+
+        ws.delete_rows(sheet_row)
+
+        if tab_name == TAB_SOLD_ITEMS:
+            try:
+                self.sync_lots()
+            except Exception as e:
+                logger.warning(f"sync_lots failed during manual row deletion: {e}")
+
+        return True
+
 
 def reconcile_missing_sold_metadata(
     engine: SheetsSyncEngine,
