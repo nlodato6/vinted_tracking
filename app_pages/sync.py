@@ -1349,15 +1349,15 @@ def render_sync_page():
                     # Actions available
                     if current_tab_name in (TAB_ITEM_LISTINGS, TAB_HIDDEN_ITEMS):
                         action_opts = [
+                            "None (Update Details - No Move)",
                             "Record Sale (Move to Sold_Items)",
                             "Move to Hidden_Items" if current_tab_name == TAB_ITEM_LISTINGS else "Move to Active Listings",
                             "Record as Cancelled (Move to Cancelled_Orders)",
-                            "Update Details in Current Sheet (No Move)",
                             "Delete Entry from Current Sheet (Permanent)",
                         ]
                     elif current_tab_name == TAB_SOLD_ITEMS:
                         action_opts = [
-                            "Update Sale Details in Sold_Items",
+                            "None (Update Sale Details - No Move)",
                             "Move to Cancelled_Orders (Refund / Cancelled)",
                             "Move to Active Listings (Relist)",
                             "Move to Hidden_Items",
@@ -1365,7 +1365,7 @@ def render_sync_page():
                         ]
                     else:  # Cancelled_Orders
                         action_opts = [
-                            "Update Cancelled Details in Current Sheet",
+                            "None (Update Notes / Price - No Move)",
                             "Relist to Active Listings (Preserve Cancel Record)",
                             "Move to Active Listings (Delete Cancel Record)",
                             "Move to Sold_Items",
@@ -1381,7 +1381,7 @@ def render_sync_page():
                         p_col1, p_col2 = st.columns(2)
 
                         # Prices & Platforms
-                        is_selling = "Sold_Items" in chosen_action or chosen_action == "Update Sale Details in Sold_Items"
+                        is_selling = ("Sold_Items" in chosen_action and not chosen_action.startswith("None")) or chosen_action == "None (Update Sale Details - No Move)"
                         is_relisting = "Active Listings" in chosen_action
 
                         with p_col1:
@@ -1416,6 +1416,15 @@ def render_sync_page():
                                     step=1.0,
                                     format="%.2f",
                                     help="Set to $0.00 if the order was replaced by a bundle re-order or re-purchased.",
+                                )
+                                existing_orig = parse_price(sel_item.get("Original Price", 0.0))
+                                new_orig_price = st.number_input(
+                                    "Original Item Price ($)",
+                                    value=existing_orig,
+                                    min_value=0.0,
+                                    step=1.0,
+                                    format="%.2f",
+                                    help="Original listed or sold price before cancellation.",
                                 )
                                 new_sold_price = new_lost_revenue
                                 new_sale_date = datetime.today().date()
@@ -1458,8 +1467,15 @@ def render_sync_page():
                                 placeholder="e.g. Cross-listed sale, local cash pickup, buyer cancelled...",
                             )
 
-                        btn_label = f"Execute: {chosen_action}"
-                        btn_icon = ":material/delete_forever:" if "Delete Entry" in chosen_action else ":material/check_circle:"
+                        if "Delete Entry" in chosen_action:
+                            btn_label = f"Execute: {chosen_action}"
+                            btn_icon = ":material/delete_forever:"
+                        elif chosen_action.startswith("None"):
+                            btn_label = "💾 Save Updates (No Move)"
+                            btn_icon = ":material/save:"
+                        else:
+                            btn_label = f"Execute: {chosen_action}"
+                            btn_icon = ":material/check_circle:"
                         submitted = st.form_submit_button(btn_label, type="primary", icon=btn_icon)
 
                         if submitted:
@@ -1525,6 +1541,8 @@ def render_sync_page():
                                             elif current_tab_name == TAB_CANCELLED_ORDERS:
                                                 if "Lost_Revenue" in headers_map:
                                                     update_dict["Lost_Revenue"] = new_lost_revenue
+                                                if "Original_Price" in headers_map:
+                                                    update_dict["Original_Price"] = new_orig_price
                                                 if new_order_id and "Order_ID" in headers_map:
                                                     update_dict["Order_ID"] = new_order_id
                                             else:

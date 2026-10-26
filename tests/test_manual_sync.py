@@ -263,12 +263,13 @@ def test_manual_update_cancelled_in_place_preserves_row_and_sets_zero_loss(manua
         "Email",
     ])
 
-    # In-place update: adjust to $0.00 loss and add explanation note
+    # In-place update: adjust to $0.00 loss, update original price and add explanation note
     eng.manual_update_row(
         tab_name=TAB_CANCELLED_ORDERS,
         sheet_row=2,
         updated_fields={
             "Lost_Revenue": 0.0,
+            "Original_Price": 50.0,
             "Status_Details": "Customer re-ordered larger bundle, 0 loss",
             "Order_ID": "CAN-BUN-NEW",
         },
@@ -280,6 +281,7 @@ def test_manual_update_cancelled_in_place_preserves_row_and_sets_zero_loss(manua
     assert row[C["Order_ID"]] == "CAN-BUN-NEW"
     assert row[C["Item_Title"]] == "Bundle 3 items"
     assert row[C["Lost_Revenue"]] == 0.0
+    assert row[C["Original_Price"]] == 50.0
     assert row[C["Status_Details"]] == "Customer re-ordered larger bundle, 0 loss"
 
 
