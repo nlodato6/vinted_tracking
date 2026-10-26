@@ -175,3 +175,30 @@ def test_listing_overrides_apply_to_new_listings():
     plan = build_sync_plan(snap, eng.read_sheet_state(), default_lot="LOT-001", listing_overrides={vid: {"title": "Edited Title", "lot": ""}})
     row = next(r for r in plan.final_listings if r[13] == vid)
     assert row[2] == "Edited Title" and row[1] == ""
+
+
+def test_dirty_sheet_reconciliation_cleans_duplicates_and_recovers_active_items():
+    """If past buggy imports put active items in Sold_Items and added duplicate sold rows,
+    re-uploading the HTML files recovers the active items and prunes the duplicates."""
+    eng, sh = _engine()
+    # 1. Clean import
+    _upload(eng, ACTIVE, SOLD, ORDERS)
+
+    # 2. Artificially dirty the sheet: 10 active listings moved to sold, plus duplicate sold rows
+    listings = sh.worksheet(TAB_ITEM_LISTINGS).rows[1:]
+    sold_rows = sh.worksheet(TAB_SOLD_ITEMS).rows[1:]
+    hidden_rows = sh.worksheet(TAB_HIDDEN_ITEMS).rows[1:]
+    canc_rows = sh.worksheet(TAB_CANCELLED_ORDERS).rows[1:]
+
+    sh.worksheet(TAB_ITEM_LISTINGS).rows = [LISTINGS_HEADERS] + listings[10:]
+    sh.worksheet(TAB_SOLD_ITEMS).rows = [SOLD_ITEMS_HEADERS] + sold_rows + listings[:10] + sold_rows[:14]
+
+    dirty_counts = _counts(sh)
+    assert dirty_counts["active"] == 159
+    assert dirty_counts["sold"] == 201
+
+    # 3. Reconcile with the uploaded HTML files
+    plan = _upload(eng, ACTIVE, SOLD, ORDERS)
+    assert _counts(sh) == TARGET
+    assert plan.counts_after == TARGET
+

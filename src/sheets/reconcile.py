@@ -326,6 +326,7 @@ def build_sync_plan(
     }
 
     # ---- Index current sheet by Vinted ID -------------------------------
+    sold_delete: Set[int] = set()
     sold_by_vid: Dict[str, int] = {}
     sold_noid_by_title: Dict[str, List[int]] = {}
     for i, r in enumerate(sold):
@@ -333,7 +334,11 @@ def build_sync_plan(
             continue
         vid = _vid_from_url(str(r[S["Vinted_URL"]]))
         if vid:
-            sold_by_vid.setdefault(vid, i)
+            if vid in sold_by_vid and snap.has_sold_source:
+                sold_delete.add(i)
+                plan.warnings.append(f"Removed duplicate sold row for '{r[S['Title']]}'")
+            else:
+                sold_by_vid.setdefault(vid, i)
         else:
             sold_noid_by_title.setdefault(_norm(r[S["Title"]]), []).append(i)
 
@@ -350,7 +355,6 @@ def build_sync_plan(
     snap_by_title: Dict[str, ItemListing] = {_norm(i.title): i for i in snap.items.values()}
 
     # ---- 0. Cancellations -------------------------------------------------
-    sold_delete: Set[int] = set()
     valid_counts = Counter(_norm(o.item_title) for o in snap.valid_orders)
     have_orders = bool(snap.orders)
 
@@ -498,11 +502,27 @@ def build_sync_plan(
         final_listings.append(new_row)
         in_listings.add(vid)
 
+    snap_sold_vids: Set[str] = {i.vinted_id for i in snap.by_status("Sold")}
     for item in snap.by_status("Listed", "Reserved"):
         vid = item.vinted_id
         if vid in in_listings:
             continue
         if vid in sold_by_vid and vid not in cancelled_vids:
+            if snap.has_active_source and snap.has_sold_source and vid not in snap_sold_vids:
+                sidx = sold_by_vid[vid]
+                sold_delete.add(sidx)
+                srow = list(sold[sidx])
+                ov = overrides.get(vid, {})
+                lot = ov.get("lot", srow[S["Lot_ID"]] or item.lot_id or default_lot)
+                title = (ov.get("title") or item.title or srow[S["Title"]]).strip()
+                max_sku += 1
+                new_row = _new_listing_row(item, srow[S["Item_SKU"]] or f"SKU-{max_sku}", lot, title, now)
+                final_listings.append(new_row)
+                in_listings.add(vid)
+                plan.listings_changed = True
+                plan.new_listings.append({"Vinted ID": vid, "Title": title, "Brand": item.brand or "", "Price": item.current_price, "Category": item.category or "", "Assigned Lot": lot})
+                plan.warnings.append(f"'{item.title}' was recorded in Sold_Items but is actively listed on Vinted; moved to Item_Listings")
+                continue
             plan.warnings.append(f"'{item.title}' is listed on Vinted but already recorded as sold; left in Sold_Items")
             continue
         if vid in hidden_by_vid:
@@ -563,6 +583,17 @@ def build_sync_plan(
         lot = item.lot_id or default_lot
         plan.sold_appends.append(_sold_row_from_item(item, f"SKU-{max_sku}", lot))
         plan.new_sold.append({"Vinted ID": vid, "Title": item.title, "Brand": item.brand or "", "Price": item.sold_price or item.current_price, "Category": item.category or "", "Lot": lot})
+
+    if snap.has_sold_source:
+        for t, row_indices in sold_noid_by_title.items():
+            valid_snap_count = sold_titles_in_snap.get(t, 0)
+            have_vid_count = sum(1 for v in sold_by_vid if _norm(snap.items[v].title if v in snap.items else "") == t)
+            excess = (len(row_indices) + have_vid_count) - valid_snap_count
+            if excess > 0:
+                for r_idx in row_indices[:excess]:
+                    if r_idx not in sold_delete:
+                        sold_delete.add(r_idx)
+                        plan.warnings.append(f"Removed duplicate placeholder sold row for '{sold[r_idx][S['Title']]}'")
 
     # ---- 3. Hidden_Items --------------------------------------------------
     pending_hidden_vids = {_listing_vid(r) for r in plan.hidden_appends}
