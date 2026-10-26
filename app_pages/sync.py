@@ -1378,10 +1378,12 @@ def render_sync_page():
 
                         with p_col2:
                             if is_selling:
-                                platform_options = ["eBay", "Poshmark", "Mercari", "Depop", "FB Marketplace (Local)", "In Person", "Vinted", "Other"]
-                                current_plat = str(sel_item.get("Platform", "eBay"))
-                                plat_idx = platform_options.index(current_plat) if current_plat in platform_options else 0
-                                new_platform = st.selectbox("Platform / Sales Channel", options=platform_options, index=plat_idx)
+                                current_plat = str(sel_item.get("Platform", "")) or "eBay"
+                                new_platform = st.text_input(
+                                    "Platform / Sales Channel",
+                                    value=current_plat,
+                                    placeholder="e.g. eBay, Poshmark, Mercari, In Person, Vinted...",
+                                )
                                 new_status = st.selectbox("Status", options=["Sold", "Sold (External)", "Reserved"], index=0)
                                 new_order_id = st.text_input("Order ID / Transaction Ref", value=str(sel_item.get("Order ID", "")), placeholder="e.g. EBAY-10928, POSH-4412, or empty")
                             elif "Cancelled" in chosen_action:
