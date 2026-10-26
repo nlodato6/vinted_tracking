@@ -310,6 +310,7 @@ def build_sync_plan(
     state: SheetState,
     default_lot: str = "",
     listing_overrides: Optional[Dict[str, Dict[str, str]]] = None,
+    archive_unlisted: bool = False,
     now: Optional[datetime] = None,
 ) -> SyncPlan:
     now = now or datetime.now()
@@ -463,10 +464,11 @@ def build_sync_plan(
             continue
 
         if item is None:
-            if vid and snap.has_active_source:
+            if vid and (vid in sold_by_vid or vid in cancelled_vids):
                 plan.listings_changed = True
-                if vid in sold_by_vid or vid in cancelled_vids:
-                    continue  # already recorded elsewhere; drop the stale active row
+                continue  # already recorded elsewhere; drop the stale active row
+            if vid and snap.has_active_source and archive_unlisted:
+                plan.listings_changed = True
                 hrow = list(r)
                 hrow[L["Status"]] = "Hidden"
                 plan.hidden_appends.append(hrow)

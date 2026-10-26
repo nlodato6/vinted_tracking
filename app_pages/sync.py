@@ -711,10 +711,24 @@ def render_sync_page():
                 lot_preview_header = f" (Default Lot: {target_lot_id})" if target_lot_id else " (Default Lot: None)"
                 st.markdown(f"#### Reconciliation Preview{lot_preview_header}")
 
+                archive_unlisted = st.checkbox(
+                    "Full Closet Re-alignment (archive unlisted items to Hidden)",
+                    value=False,
+                    help="Leave unchecked for partial/incremental uploads (recommended). When unchecked, existing active items are preserved even if you only uploaded a few newly listed items. Check only if you scrolled to the very bottom of your Vinted closet and want items not in the file archived to Hidden_Items.",
+                    key="html_archive_unlisted",
+                )
+
                 try:
                     state = get_cached_sheet_state(sheet_id, user_creds)
-                    plan = build_sync_plan(snap, state, default_lot=target_lot_id)
+                    plan = build_sync_plan(snap, state, default_lot=target_lot_id, archive_unlisted=archive_unlisted)
                     before, after = plan.counts_before, plan.counts_after
+
+                    if not archive_unlisted and before.get("active", 0) > 0:
+                        st.info(
+                            f"**Incremental Sync Mode Active:** {before['active']} existing active listings are kept safe. "
+                            f"{len(plan.new_listings)} new item(s) will be added without deleting or hiding unlisted items.",
+                            icon=":material/shield_check:",
+                        )
 
                     st.caption("Totals in your Google Sheet after this sync (change vs. now):")
                     k1, k2, k3, k4 = st.columns(4)
@@ -814,7 +828,13 @@ def render_sync_page():
 
                                 # Re-read the sheet so the plan is applied against the latest data
                                 fresh_state = engine.read_sheet_state()
-                                final_plan = build_sync_plan(snap, fresh_state, default_lot=target_lot_id, listing_overrides=overrides)
+                                final_plan = build_sync_plan(
+                                    snap,
+                                    fresh_state,
+                                    default_lot=target_lot_id,
+                                    listing_overrides=overrides,
+                                    archive_unlisted=archive_unlisted,
+                                )
                                 result = engine.apply_sync_plan(final_plan, fresh_state)
 
                                 n_orders = len(snap.orders)

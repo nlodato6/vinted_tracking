@@ -57,10 +57,10 @@ def _engine():
     return SheetsSyncEngine(client), sh
 
 
-def _upload(engine, *files, lot="LOT-001"):
+def _upload(engine, *files, lot="LOT-001", archive_unlisted=False):
     snap = build_snapshot([(name, path.read_bytes()) for name, path in files], default_lot=lot)
     state = engine.read_sheet_state()
-    plan = build_sync_plan(snap, state, default_lot=lot)
+    plan = build_sync_plan(snap, state, default_lot=lot, archive_unlisted=archive_unlisted)
     engine.apply_sync_plan(plan, state)
     return plan
 
@@ -201,4 +201,83 @@ def test_dirty_sheet_reconciliation_cleans_duplicates_and_recovers_active_items(
     plan = _upload(eng, ACTIVE, SOLD, ORDERS)
     assert _counts(sh) == TARGET
     assert plan.counts_after == TARGET
+
+
+def test_partial_closet_upload_preserves_existing_listings():
+    """Uploading a partial active closet (e.g. 15 new listings without scrolling all the way down)
+    adds the new listings and preserves existing active items instead of moving them to Hidden."""
+    eng, sh = _engine()
+    _upload(eng, ACTIVE, SOLD, ORDERS)
+    assert _counts(sh) == TARGET  # active: 169
+
+    from src.html_parser import ImportSnapshot
+    from src.models import ItemListing
+
+    new_items = {
+        f"99990{i}": ItemListing(
+            item_sku="",
+            lot_id="LOT-002",
+            title=f"Brand New Item {i}",
+            brand="Nike",
+            category="Tops",
+            unit_cost=0.0,
+            posted_price=25.0,
+            current_price=25.0,
+            target_price=25.0,
+            vinted_id=f"99990{i}",
+            vinted_url=f"https://www.vinted.com/items/99990{i}-brand-new-item-{i}",
+            status="Listed",
+        )
+        for i in range(1, 16)
+    }
+    partial_snap = ImportSnapshot(
+        items=new_items,
+        has_active_source=True,
+        files=[{"Filename": "partial_active.html", "Type": "active_closet", "Items": 15, "Orders": 0}],
+    )
+
+    state = eng.read_sheet_state()
+    plan = build_sync_plan(partial_snap, state, default_lot="LOT-002", archive_unlisted=False)
+
+    # Incremental mode: existing 169 active listings are preserved, + 15 new items added = 184
+    assert plan.counts_after["active"] == 184
+    assert len(plan.new_listings) == 15
+    assert len(plan.listing_to_hidden) == 0
+    assert len(plan.hidden_appends) == 0
+
+    # Apply to sheet
+    eng.apply_sync_plan(plan, state)
+    counts = _counts(sh)
+    assert counts["active"] == 184
+    assert counts["sold"] == 177
+    assert counts["hidden"] == 0
+    assert counts["cancelled"] == 5
+
+
+def test_archive_unlisted_flag_moves_missing_to_hidden_when_requested():
+    """When archive_unlisted=True is explicitly enabled (e.g. user scrolled all the way down and
+    wants unlisted items archived), items missing from the file move to Hidden_Items."""
+    eng, sh = _engine()
+    _upload(eng, ACTIVE, SOLD, ORDERS)
+    assert _counts(sh)["active"] == 169
+
+    snap_full = build_snapshot([(ACTIVE[0], ACTIVE[1].read_bytes())], default_lot="LOT-001")
+    subset_vids = list(snap_full.items.keys())[:10]
+    partial_items = {vid: snap_full.items[vid] for vid in subset_vids}
+
+    from src.html_parser import ImportSnapshot
+    realign_snap = ImportSnapshot(
+        items=partial_items,
+        has_active_source=True,
+        files=[{"Filename": "realign_active.html", "Type": "active_closet", "Items": 10, "Orders": 0}],
+    )
+
+    state = eng.read_sheet_state()
+    plan = build_sync_plan(realign_snap, state, default_lot="LOT-001", archive_unlisted=True)
+
+    # With archive_unlisted=True, the 159 active listings missing from the file are archived to hidden
+    assert len(plan.listing_to_hidden) == 169 - 10
+    assert plan.counts_after["active"] == 10
+    assert plan.counts_after["hidden"] == 159
+
 
