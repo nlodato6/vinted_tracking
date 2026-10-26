@@ -519,11 +519,12 @@ def render_sync_page():
             st.caption("Start fresh with empty catalog.")
 
     # -------------------------------------------------------------------------
-    # Main Tabs: HTML Import, Email Sync, Duplicate Checker, Supplies
+    # Main Tabs: HTML Import, Email Sync, Manual Manager, Duplicate Checker, Supplies
     # -------------------------------------------------------------------------
-    tab_html, tab_email, tab_dups, tab_supplies = st.tabs([
+    tab_html, tab_email, tab_manual, tab_dups, tab_supplies = st.tabs([
         ":material/upload_file: HTML Batch Import & Reconciliation",
         ":material/mail: Direct Email Sync",
+        ":material/edit_note: Manual Listing Manager",
         ":material/difference: Duplicate Checker & Resolver",
         ":material/inventory_2: Shipping Supplies",
     ])
@@ -1141,7 +1142,344 @@ def render_sync_page():
                     st.rerun()
 
     # ---------------------------------------------------------
-    # TAB 3: DUPLICATE CHECKER & RESOLVER
+    # TAB 3: MANUAL LISTING MANAGER
+    # ---------------------------------------------------------
+    with tab_manual:
+        st.markdown("### Manual Listing Manager & Cross-Platform Sales")
+        st.caption(
+            "Search, update metadata, record sales from eBay, Poshmark, Mercari, or local pickup, "
+            "and move items across sheets while preserving spreadsheet formulas."
+        )
+
+        manual_engine = get_sheets_sync_engine(client)
+        try:
+            manual_state = get_cached_sheet_state(sheet_id, user_creds)
+            all_lots_manual = get_cached_lots(sheet_id, user_creds)
+        except Exception as e:
+            if "429" in str(e):
+                st.warning("Google Sheets rate limit reached. Please wait 30 seconds and refresh.", icon=":material/hourglass_top:")
+            else:
+                st.error(f"Error loading sheet data: {e}")
+            manual_state = None
+            all_lots_manual = []
+
+        if manual_state:
+            from src.sheets.reconcile import L, S, C
+            from src.sheets.schemas import (
+                TAB_ITEM_LISTINGS,
+                TAB_SOLD_ITEMS,
+                TAB_HIDDEN_ITEMS,
+                TAB_CANCELLED_ORDERS,
+                LISTINGS_HEADERS,
+                SOLD_ITEMS_HEADERS,
+                CANCELLED_ORDERS_HEADERS,
+            )
+
+            cnt_active = len(manual_state.listings)
+            cnt_sold = len(manual_state.sold)
+            cnt_hidden = len(manual_state.hidden)
+            cnt_canc = len(manual_state.cancelled)
+
+            view_choice = st.radio(
+                "Select View",
+                options=[
+                    f"Active Listings ({cnt_active})",
+                    f"Sold Items ({cnt_sold})",
+                    f"Hidden Items ({cnt_hidden})",
+                    f"Cancelled Orders ({cnt_canc})",
+                ],
+                horizontal=True,
+                key="manual_tab_view_choice",
+                label_visibility="collapsed",
+            )
+
+            if "Active Listings" in view_choice:
+                current_tab_name = TAB_ITEM_LISTINGS
+                raw_rows = manual_state.listings
+                headers_map = L
+            elif "Sold Items" in view_choice:
+                current_tab_name = TAB_SOLD_ITEMS
+                raw_rows = manual_state.sold
+                headers_map = S
+            elif "Hidden Items" in view_choice:
+                current_tab_name = TAB_HIDDEN_ITEMS
+                raw_rows = manual_state.hidden
+                headers_map = L
+            else:
+                current_tab_name = TAB_CANCELLED_ORDERS
+                raw_rows = manual_state.cancelled
+                headers_map = C
+
+            # Build DataFrame
+            rows_data = []
+            for i, r in enumerate(raw_rows):
+                if not any(str(c).strip() for c in r):
+                    continue
+                sheet_row = i + 2
+                if current_tab_name in (TAB_ITEM_LISTINGS, TAB_HIDDEN_ITEMS):
+                    r_pad = r + [""] * max(0, len(LISTINGS_HEADERS) - len(r))
+                    rows_data.append({
+                        "_sheet_row": sheet_row,
+                        "SKU": r_pad[L["Item_SKU"]],
+                        "Lot": r_pad[L["Lot_ID"]],
+                        "Title": r_pad[L["Title"]],
+                        "Brand": r_pad[L["Brand"]],
+                        "Category": r_pad[L["Category"]],
+                        "Asking Price": parse_price(r_pad[L["Current_Price"]]),
+                        "Posted Price": parse_price(r_pad[L["Posted_Price"]]),
+                        "Status": r_pad[L["Status"]],
+                        "Date Listed": r_pad[L["Date_Listed"]],
+                        "Vinted URL": r_pad[L["Vinted_URL"]],
+                    })
+                elif current_tab_name == TAB_SOLD_ITEMS:
+                    r_pad = r + [""] * max(0, len(SOLD_ITEMS_HEADERS) - len(r))
+                    rows_data.append({
+                        "_sheet_row": sheet_row,
+                        "SKU": r_pad[S["Item_SKU"]],
+                        "Lot": r_pad[S["Lot_ID"]],
+                        "Title": r_pad[S["Title"]],
+                        "Brand": r_pad[S["Brand"]],
+                        "Category": r_pad[S["Category"]],
+                        "Sold Price": parse_price(r_pad[S["Sold_Price"]]),
+                        "Sale Date": r_pad[S["Sale_Date"]],
+                        "Platform": r_pad[S["Platform"]],
+                        "Status": r_pad[S["Status"]],
+                        "Order ID": r_pad[S["Order_ID"]],
+                        "Vinted URL": r_pad[S["Vinted_URL"]],
+                    })
+                elif current_tab_name == TAB_CANCELLED_ORDERS:
+                    r_pad = r + [""] * max(0, len(CANCELLED_ORDERS_HEADERS) - len(r))
+                    rows_data.append({
+                        "_sheet_row": sheet_row,
+                        "Order ID": r_pad[C["Order_ID"]],
+                        "SKU": r_pad[C["Item_SKU"]],
+                        "Title": r_pad[C["Item_Title"]],
+                        "Brand": r_pad[C["Brand"]],
+                        "Category": r_pad[C["Category"]],
+                        "Lost Revenue": parse_price(r_pad[C["Lost_Revenue"]]),
+                        "Date": r_pad[C["Cancellation_Date"]],
+                        "Details": r_pad[C["Status_Details"]],
+                        "Buyer": r_pad[C["Buyer_Username"]],
+                    })
+
+            df = pd.DataFrame(rows_data)
+
+            # Search & Filter Bar
+            fc1, fc2, fc3 = st.columns([3, 1, 1])
+            search_term = fc1.text_input(
+                "Search",
+                placeholder="Search by title, SKU, brand, category, or order ID...",
+                label_visibility="collapsed",
+                key=f"search_{current_tab_name}",
+            ).strip().lower()
+
+            available_lots = ["All Lots"] + sorted({str(r["Lot"]) for r in rows_data if r.get("Lot") and str(r.get("Lot")).strip()})
+            selected_lot_filter = fc2.selectbox("Lot Filter", options=available_lots, label_visibility="collapsed", key=f"lot_{current_tab_name}")
+
+            available_categories = ["All Categories"] + sorted({str(r["Category"]) for r in rows_data if r.get("Category") and str(r.get("Category")).strip()})
+            selected_cat_filter = fc3.selectbox("Category Filter", options=available_categories, label_visibility="collapsed", key=f"cat_{current_tab_name}")
+
+            filtered_df = df
+            if not filtered_df.empty:
+                if search_term:
+                    mask = filtered_df.astype(str).apply(lambda row: row.str.lower().str.contains(search_term, regex=False).any(), axis=1)
+                    filtered_df = filtered_df[mask]
+                if selected_lot_filter != "All Lots":
+                    filtered_df = filtered_df[filtered_df["Lot"] == selected_lot_filter]
+                if selected_cat_filter != "All Categories":
+                    filtered_df = filtered_df[filtered_df["Category"] == selected_cat_filter]
+
+            st.caption(f"Showing **{len(filtered_df)}** of **{len(df)}** items. Select an item below to edit or move it:")
+
+            if filtered_df.empty:
+                st.info("No items match your search and filter criteria.", icon=":material/search_off:")
+            else:
+                table_cols = [c for c in filtered_df.columns if c != "_sheet_row"]
+                col_cfg = {
+                    "Asking Price": st.column_config.NumberColumn(format="$%.2f"),
+                    "Posted Price": st.column_config.NumberColumn(format="$%.2f"),
+                    "Sold Price": st.column_config.NumberColumn(format="$%.2f"),
+                    "Lost Revenue": st.column_config.NumberColumn(format="$%.2f"),
+                    "Vinted URL": st.column_config.LinkColumn("Link", display_text="Open"),
+                }
+
+                grid_event = st.dataframe(
+                    filtered_df[table_cols],
+                    use_container_width=True,
+                    hide_index=True,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key=f"grid_{current_tab_name}",
+                    column_config=col_cfg,
+                )
+
+                selected_rows = grid_event.selection.get("rows", [])
+                if selected_rows:
+                    sel_idx = selected_rows[0]
+                    sel_item = filtered_df.iloc[sel_idx]
+                    sel_sheet_row = int(sel_item["_sheet_row"])
+                    sel_title = str(sel_item["Title"])
+                    sel_sku = str(sel_item.get("SKU", ""))
+                    sel_lot = str(sel_item.get("Lot", ""))
+                    sel_brand = str(sel_item.get("Brand", ""))
+                    sel_cat = str(sel_item.get("Category", ""))
+
+                    st.divider()
+                    st.markdown(f"#### ✏️ Edit or Move: **{sel_title}** `{sel_sku}`")
+                    st.caption(f"Location: `{current_tab_name}` (Sheet Row {sel_sheet_row})")
+
+                    # Actions available
+                    if current_tab_name in (TAB_ITEM_LISTINGS, TAB_HIDDEN_ITEMS):
+                        action_opts = [
+                            "Record Sale (Move to Sold_Items)",
+                            "Move to Hidden_Items" if current_tab_name == TAB_ITEM_LISTINGS else "Move to Active Listings",
+                            "Record as Cancelled (Move to Cancelled_Orders)",
+                            "Update Details in Current Sheet (No Move)",
+                        ]
+                    elif current_tab_name == TAB_SOLD_ITEMS:
+                        action_opts = [
+                            "Update Sale Details in Sold_Items",
+                            "Move to Cancelled_Orders (Refund / Cancelled)",
+                            "Move to Active Listings (Relist)",
+                            "Move to Hidden_Items",
+                        ]
+                    else:  # Cancelled_Orders
+                        action_opts = [
+                            "Move to Active Listings (Relist)",
+                            "Move to Sold_Items",
+                            "Update Cancelled Details",
+                        ]
+
+                    chosen_action = st.selectbox("Action to Perform", options=action_opts, key="chosen_action_manual")
+
+                    with st.form("manual_update_form", clear_on_submit=False):
+                        p_col1, p_col2 = st.columns(2)
+
+                        # Prices & Platforms
+                        is_selling = "Sold_Items" in chosen_action or chosen_action == "Update Sale Details in Sold_Items"
+                        is_relisting = "Active Listings" in chosen_action
+
+                        with p_col1:
+                            new_title = st.text_input("Title", value=sel_title)
+                            
+                            all_lot_ids = [""] + sorted({l.get("Lot_ID") for l in all_lots_manual if l.get("Lot_ID")})
+                            lot_idx = all_lot_ids.index(sel_lot) if sel_lot in all_lot_ids else 0
+                            new_lot = st.selectbox("Assigned Lot", options=all_lot_ids, index=lot_idx)
+
+                            if is_selling:
+                                existing_price = float(sel_item.get("Sold Price", sel_item.get("Asking Price", 0.0)) or 0.0)
+                                new_sold_price = st.number_input("Sold Price ($)", value=existing_price, min_value=0.0, step=1.0, format="%.2f")
+                                new_sale_date = st.date_input("Sale Date", value=datetime.today().date())
+                            else:
+                                existing_asking = float(sel_item.get("Asking Price", sel_item.get("Posted Price", 0.0)) or 0.0)
+                                new_asking_price = st.number_input("Asking / Posted Price ($)", value=existing_asking, min_value=0.0, step=1.0, format="%.2f")
+                                new_sold_price = existing_asking
+                                new_sale_date = datetime.today().date()
+
+                        with p_col2:
+                            if is_selling:
+                                platform_options = ["eBay", "Poshmark", "Mercari", "Depop", "FB Marketplace (Local)", "In Person", "Vinted", "Other"]
+                                current_plat = str(sel_item.get("Platform", "eBay"))
+                                plat_idx = platform_options.index(current_plat) if current_plat in platform_options else 0
+                                new_platform = st.selectbox("Platform / Sales Channel", options=platform_options, index=plat_idx)
+                                new_status = st.selectbox("Status", options=["Sold", "Sold (External)", "Reserved"], index=0)
+                                new_order_id = st.text_input("Order ID / Transaction Ref", value=str(sel_item.get("Order ID", "")), placeholder="e.g. EBAY-10928, POSH-4412, or empty")
+                            elif "Cancelled" in chosen_action:
+                                new_platform = "Vinted"
+                                new_status = "Cancelled"
+                                new_order_id = st.text_input("Order ID", value=str(sel_item.get("Order ID", "")), placeholder="e.g. CAN-1001")
+                            elif "Hidden" in chosen_action:
+                                new_platform = "Vinted"
+                                new_status = "Hidden"
+                                new_order_id = ""
+                            else:
+                                new_platform = "Vinted"
+                                new_status = "Listed"
+                                new_order_id = ""
+
+                            new_notes = st.text_input(
+                                "Notes / Cancellation Details",
+                                value=str(sel_item.get("Details", "")),
+                                placeholder="e.g. Cross-listed sale, local cash pickup, buyer cancelled...",
+                            )
+
+                        btn_label = f"Execute: {chosen_action}"
+                        submitted = st.form_submit_button(btn_label, type="primary", icon=":material/check_circle:")
+
+                        if submitted:
+                            try:
+                                with st.spinner("Updating Google Sheets..."):
+                                    # Destination tab routing
+                                    if "Sold_Items" in chosen_action:
+                                        target_tab = TAB_SOLD_ITEMS
+                                    elif "Active Listings" in chosen_action:
+                                        target_tab = TAB_ITEM_LISTINGS
+                                    elif "Hidden_Items" in chosen_action:
+                                        target_tab = TAB_HIDDEN_ITEMS
+                                    elif "Cancelled_Orders" in chosen_action:
+                                        target_tab = TAB_CANCELLED_ORDERS
+                                    else:
+                                        target_tab = current_tab_name
+
+                                    item_payload = {
+                                        "title": new_title.strip(),
+                                        "lot": new_lot,
+                                        "sold_price": new_sold_price,
+                                        "current_price": new_sold_price if is_selling else new_asking_price,
+                                        "sale_date": new_sale_date.strftime("%Y-%m-%d"),
+                                        "platform": new_platform,
+                                        "status": new_status,
+                                        "order_id": new_order_id.strip(),
+                                        "notes": new_notes.strip(),
+                                    }
+
+                                    if target_tab != current_tab_name:
+                                        # Move item across sheets
+                                        manual_engine.manual_move_item(
+                                            source_tab=current_tab_name,
+                                            dest_tab=target_tab,
+                                            source_sheet_row=sel_sheet_row,
+                                            item_data=item_payload,
+                                        )
+                                        st.success(f"Moved '{new_title}' from {current_tab_name} to {target_tab}!", icon=":material/check_circle:")
+                                    else:
+                                        # In-place update
+                                        update_dict = {}
+                                        if new_title != sel_title:
+                                            update_dict["Title" if "Title" in headers_map else "Item_Title"] = new_title
+                                        if new_lot != sel_lot:
+                                            update_dict["Lot_ID"] = new_lot
+                                        if is_selling:
+                                            update_dict["Sold_Price"] = new_sold_price
+                                            update_dict["Sale_Date"] = new_sale_date.strftime("%Y-%m-%d")
+                                            update_dict["Platform"] = new_platform
+                                            if new_order_id:
+                                                update_dict["Order_ID"] = new_order_id
+                                        else:
+                                            if "Current_Price" in headers_map:
+                                                update_dict["Current_Price"] = new_asking_price
+                                        if new_status:
+                                            update_dict["Status"] = new_status
+                                        if new_notes and "Status_Details" in headers_map:
+                                            update_dict["Status_Details"] = new_notes
+
+                                        manual_engine.manual_update_row(
+                                            tab_name=current_tab_name,
+                                            sheet_row=sel_sheet_row,
+                                            updated_fields=update_dict,
+                                        )
+                                        st.success(f"Updated '{new_title}' in {current_tab_name}!", icon=":material/check_circle:")
+
+                                    st.cache_data.clear()
+                                    time.sleep(1.2)
+                                    st.rerun()
+
+                            except Exception as ex:
+                                log_error(u_email, "sync.py:manual_update", ex)
+                                st.error(f"Failed to update listing: {ex}")
+
+    # ---------------------------------------------------------
+    # TAB 4: DUPLICATE CHECKER & RESOLVER
     # ---------------------------------------------------------
     with tab_dups:
         st.markdown("### Duplicate Checker & Resolver")

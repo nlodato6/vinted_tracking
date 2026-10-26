@@ -29,6 +29,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from src.html_parser import ImportSnapshot, parse_price
 from src.models import ItemListing, SalesOrder
 from src.sheets.schemas import (
+    TAB_ITEM_LISTINGS,
+    TAB_HIDDEN_ITEMS,
+    TAB_SOLD_ITEMS,
+    TAB_CANCELLED_ORDERS,
     CANCELLED_ORDERS_HEADERS,
     LISTINGS_HEADERS,
     SOLD_ITEMS_HEADERS,
@@ -1047,3 +1051,164 @@ def build_email_plan(events: List[Any], state: SheetState, default_lot: str = ""
         "cancelled": plan.counts_before["cancelled"] + len(plan.cancelled_appends),
     }
     return plan
+
+
+def build_manual_move_row(
+    source_tab: str,
+    dest_tab: str,
+    source_row: List[Any],
+    dest_sheet_row: int,
+    item_data: Optional[Dict[str, Any]] = None,
+    now: Optional[datetime] = None,
+) -> List[Any]:
+    """Builds a formatted row for dest_tab from source_row, mapping columns and applying row formulas."""
+    now = now or datetime.now()
+    data = item_data or {}
+
+    sku = ""
+    lot = ""
+    title = ""
+    brand = ""
+    category = ""
+    posted_price = 0.0
+    current_price = 0.0
+    sold_price = 0.0
+    price_history = ""
+    sale_date = ""
+    platform = "Vinted"
+    favorites = 0
+    views = 0
+    order_id = ""
+    vinted_url = ""
+    date_listed = ""
+
+    if source_tab in (TAB_ITEM_LISTINGS, TAB_HIDDEN_ITEMS):
+        srow = _pad(source_row, len(LISTINGS_HEADERS))
+        sku = str(srow[L["Item_SKU"]])
+        lot = str(srow[L["Lot_ID"]])
+        title = str(srow[L["Title"]])
+        brand = str(srow[L["Brand"]])
+        category = str(srow[L["Category"]])
+        posted_price = parse_price(srow[L["Posted_Price"]])
+        current_price = parse_price(srow[L["Current_Price"]])
+        sold_price = current_price or posted_price
+        price_history = str(srow[L["Price_History"]])
+        favorites = int(parse_price(srow[L["Favorites"]]))
+        views = int(parse_price(srow[L["Views"]]))
+        vinted_url = str(srow[L["Vinted_URL"]])
+        date_listed = str(srow[L["Date_Listed"]])
+    elif source_tab == TAB_SOLD_ITEMS:
+        srow = _pad(source_row, len(SOLD_ITEMS_HEADERS))
+        sku = str(srow[S["Item_SKU"]])
+        lot = str(srow[S["Lot_ID"]])
+        title = str(srow[S["Title"]])
+        brand = str(srow[S["Brand"]])
+        category = str(srow[S["Category"]])
+        posted_price = parse_price(srow[S["Posted_Price"]])
+        current_price = parse_price(srow[S["Current_Price"]])
+        sold_price = parse_price(srow[S["Sold_Price"]]) or current_price or posted_price
+        price_history = str(srow[S["Price_History"]])
+        sale_date = str(srow[S["Sale_Date"]])
+        platform = str(srow[S["Platform"]]) or "Vinted"
+        favorites = int(parse_price(srow[S["Favorites"]]))
+        views = int(parse_price(srow[S["Views"]]))
+        order_id = str(srow[S["Order_ID"]])
+        vinted_url = str(srow[S["Vinted_URL"]])
+        date_listed = str(srow[S["Date_Listed"]])
+    elif source_tab == TAB_CANCELLED_ORDERS:
+        srow = _pad(source_row, len(CANCELLED_ORDERS_HEADERS))
+        order_id = str(srow[C["Order_ID"]])
+        sku = str(srow[C["Item_SKU"]])
+        title = str(srow[C["Item_Title"]])
+        brand = str(srow[C["Brand"]])
+        category = str(srow[C["Category"]])
+        sold_price = parse_price(srow[C["Lost_Revenue"]])
+        current_price = parse_price(srow[C["Original_Price"]])
+        posted_price = current_price
+        vinted_url = str(srow[C["Vinted_URL"]])
+
+    # Apply overrides
+    if "sku" in data and data["sku"]:
+        sku = str(data["sku"])
+    if "lot" in data:
+        lot = str(data["lot"])
+    if "title" in data and data["title"]:
+        title = str(data["title"])
+    if "brand" in data and data["brand"]:
+        brand = str(data["brand"])
+    if "category" in data and data["category"]:
+        category = str(data["category"])
+    if "posted_price" in data and data["posted_price"] is not None:
+        posted_price = parse_price(data["posted_price"])
+    if "current_price" in data and data["current_price"] is not None:
+        current_price = parse_price(data["current_price"])
+    if "sold_price" in data and data["sold_price"] is not None:
+        sold_price = parse_price(data["sold_price"])
+    if "sale_date" in data and data["sale_date"]:
+        sale_date = str(data["sale_date"])
+    if "platform" in data and data["platform"]:
+        platform = str(data["platform"])
+    if "order_id" in data:
+        order_id = str(data["order_id"])
+
+    # Build destination row
+    if dest_tab == TAB_SOLD_ITEMS:
+        drow = [""] * len(SOLD_ITEMS_HEADERS)
+        drow[S["Item_SKU"]] = sku
+        drow[S["Lot_ID"]] = lot
+        drow[S["Title"]] = title
+        drow[S["Brand"]] = brand
+        drow[S["Category"]] = category
+        drow[S["Posted_Price"]] = posted_price or current_price or sold_price
+        drow[S["Current_Price"]] = current_price or posted_price or sold_price
+        drow[S["Price_History"]] = price_history
+        drow[S["Sold_Price"]] = sold_price
+        drow[S["Sale_Date"]] = sale_date or now.strftime("%Y-%m-%d")
+        drow[S["Platform"]] = platform
+        drow[S["Favorites"]] = favorites
+        drow[S["Views"]] = views
+        drow[S["Order_ID"]] = order_id
+        drow[S["Vinted_URL"]] = vinted_url
+        drow[S["Status"]] = data.get("status") or "Sold"
+        drow[S["Date_Listed"]] = date_listed or now.strftime("%Y-%m-%d")
+        drow[S["Source"]] = "Manual"
+        return with_formulas(drow, dest_sheet_row, sold_formulas)
+
+    if dest_tab in (TAB_ITEM_LISTINGS, TAB_HIDDEN_ITEMS):
+        drow = [""] * len(LISTINGS_HEADERS)
+        drow[L["Item_SKU"]] = sku
+        drow[L["Lot_ID"]] = lot
+        drow[L["Title"]] = title
+        drow[L["Brand"]] = brand
+        drow[L["Category"]] = category
+        drow[L["Posted_Price"]] = posted_price or current_price or sold_price
+        drow[L["Current_Price"]] = current_price or posted_price or sold_price
+        drow[L["Price_History"]] = price_history
+        drow[L["Favorites"]] = favorites
+        drow[L["Views"]] = views
+        drow[L["Vinted_ID"]] = _vid_from_url(vinted_url)
+        drow[L["Vinted_URL"]] = vinted_url
+        drow[L["Status"]] = data.get("status") or ("Hidden" if dest_tab == TAB_HIDDEN_ITEMS else "Listed")
+        drow[L["Date_Listed"]] = date_listed or now.strftime("%Y-%m-%d")
+        drow[L["Last_Synced"]] = now.strftime("%Y-%m-%d %H:%M:%S")
+        drow[L["Source"]] = "Manual"
+        return with_formulas(drow, dest_sheet_row, listing_formulas)
+
+    if dest_tab == TAB_CANCELLED_ORDERS:
+        drow = [""] * len(CANCELLED_ORDERS_HEADERS)
+        drow[C["Order_ID"]] = order_id or (f"CAN-{sku}" if sku else f"CAN-{now.strftime('%Y%m%d%H%M')}")
+        drow[C["Item_SKU"]] = sku
+        drow[C["Item_Title"]] = title
+        drow[C["Brand"]] = brand
+        drow[C["Category"]] = category
+        drow[C["Lost_Revenue"]] = sold_price or current_price or posted_price
+        drow[C["Original_Price"]] = current_price or posted_price or sold_price
+        drow[C["Cancellation_Date"]] = data.get("cancellation_date") or sale_date or now.strftime("%Y-%m-%d")
+        drow[C["Status_Details"]] = data.get("notes") or data.get("status_details") or "Manually marked cancelled"
+        drow[C["Buyer_Username"]] = data.get("buyer_username", "")
+        drow[C["Vinted_URL"]] = vinted_url
+        drow[C["Source"]] = "Manual"
+        return drow
+
+    raise ValueError(f"Unsupported destination tab: {dest_tab}")
+

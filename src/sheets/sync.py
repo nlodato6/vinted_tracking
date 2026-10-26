@@ -3672,6 +3672,88 @@ class SheetsSyncEngine:
             "kept_both_count": kept_both_count,
         }
 
+    def manual_move_item(
+        self,
+        source_tab: str,
+        dest_tab: str,
+        source_sheet_row: int,
+        item_data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Moves an item from source_tab to dest_tab at 1-based source_sheet_row.
+        Generates proper destination schema and formulas, appends to dest_tab,
+        and deletes source_sheet_row from source_tab.
+        """
+        from src.sheets.reconcile import build_manual_move_row
+
+        ws_source = self.get_worksheet(source_tab)
+        ws_dest = self.get_worksheet(dest_tab)
+
+        source_all = ws_source.get_all_values()
+        if source_sheet_row < 2 or source_sheet_row > len(source_all):
+            raise ValueError(f"Invalid row {source_sheet_row} for tab {source_tab} (total rows: {len(source_all)})")
+
+        source_row = source_all[source_sheet_row - 1]
+        dest_all = ws_dest.get_all_values()
+        dest_sheet_row = len(dest_all) + 1
+
+        new_row = build_manual_move_row(
+            source_tab=source_tab,
+            dest_tab=dest_tab,
+            source_row=source_row,
+            dest_sheet_row=dest_sheet_row,
+            item_data=item_data,
+        )
+
+        ws_dest.append_rows([new_row], value_input_option="USER_ENTERED")
+        ws_source.delete_rows(source_sheet_row)
+
+        if source_tab == TAB_SOLD_ITEMS or dest_tab == TAB_SOLD_ITEMS:
+            try:
+                self.sync_lots()
+            except Exception as e:
+                logger.warning(f"sync_lots failed during manual move: {e}")
+
+        return {"status": "success", "dest_tab": dest_tab, "dest_row": dest_sheet_row}
+
+    def manual_update_row(
+        self,
+        tab_name: str,
+        sheet_row: int,
+        updated_fields: Dict[str, Any],
+    ) -> bool:
+        """
+        Updates specific named columns in-place on tab_name at 1-based sheet_row.
+        """
+        from src.sheets.reconcile import L, S, C
+
+        if tab_name in (TAB_ITEM_LISTINGS, TAB_HIDDEN_ITEMS):
+            h_map = L
+        elif tab_name == TAB_SOLD_ITEMS:
+            h_map = S
+        elif tab_name == TAB_CANCELLED_ORDERS:
+            h_map = C
+        else:
+            raise ValueError(f"Unsupported tab for update: {tab_name}")
+
+        ws = self.get_worksheet(tab_name)
+        updates = []
+        for field, val in updated_fields.items():
+            if field in h_map:
+                col_c = col_letter(h_map[field])
+                updates.append({"range": f"{col_c}{sheet_row}", "values": [[val]]})
+
+        if updates:
+            ws.batch_update(updates, value_input_option="USER_ENTERED")
+
+        if tab_name == TAB_SOLD_ITEMS or "Lot_ID" in updated_fields:
+            try:
+                self.sync_lots()
+            except Exception as e:
+                logger.warning(f"sync_lots failed during manual update: {e}")
+
+        return True
+
 
 def reconcile_missing_sold_metadata(
     engine: SheetsSyncEngine,
