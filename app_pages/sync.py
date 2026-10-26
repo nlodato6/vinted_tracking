@@ -727,7 +727,7 @@ def render_sync_page():
                         st.info(
                             f"**Incremental Sync Mode Active:** {before['active']} existing active listings are kept safe. "
                             f"{len(plan.new_listings)} new item(s) will be added without deleting or hiding unlisted items.",
-                            icon=":material/shield_check:",
+                            icon=":material/check_circle:",
                         )
 
                     st.caption("Totals in your Google Sheet after this sync (change vs. now):")
