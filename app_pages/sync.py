@@ -780,7 +780,7 @@ def render_sync_page():
                                 available_lot_ids.append(target_lot_id)
                             lot_editor_options = [""] + sorted(set(available_lot_ids))
                             preview_df = pd.DataFrame(plan.new_listings)
-                            preview_df["Price"] = preview_df["Price"].map(lambda p: f"${float(p or 0):.2f}")
+                            preview_df["Price"] = preview_df["Price"].map(lambda p: f"${parse_price(p):.2f}")
                             edited_listings_df = st.data_editor(
                                 preview_df,
                                 column_config={
@@ -1080,7 +1080,7 @@ def render_sync_page():
                     df_dated = pd.DataFrame(plan.email_dated)
                     if "Sold Price" in df_dated.columns:
                         df_dated["Sold Price"] = df_dated["Sold Price"].map(
-                            lambda p: f"${float(p):.2f}" if (p is not None and str(p).strip() != "") else "-"
+                            lambda p: f"${parse_price(p):.2f}" if parse_price(p) > 0 else "-"
                         )
                     st.dataframe(df_dated, width="stretch", hide_index=True)
 
@@ -1367,11 +1367,11 @@ def render_sync_page():
                             new_lot = st.selectbox("Assigned Lot", options=all_lot_ids, index=lot_idx)
 
                             if is_selling:
-                                existing_price = float(sel_item.get("Sold Price", sel_item.get("Asking Price", 0.0)) or 0.0)
+                                existing_price = parse_price(sel_item.get("Sold Price") or sel_item.get("Asking Price", 0.0))
                                 new_sold_price = st.number_input("Sold Price ($)", value=existing_price, min_value=0.0, step=1.0, format="%.2f")
                                 new_sale_date = st.date_input("Sale Date", value=datetime.today().date())
                             else:
-                                existing_asking = float(sel_item.get("Asking Price", sel_item.get("Posted Price", 0.0)) or 0.0)
+                                existing_asking = parse_price(sel_item.get("Asking Price") or sel_item.get("Posted Price", 0.0))
                                 new_asking_price = st.number_input("Asking / Posted Price ($)", value=existing_asking, min_value=0.0, step=1.0, format="%.2f")
                                 new_sold_price = existing_asking
                                 new_sale_date = datetime.today().date()
