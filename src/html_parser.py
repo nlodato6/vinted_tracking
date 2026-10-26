@@ -1,9 +1,10 @@
 """HTML Parser for locally saved Vinted pages (closet and orders)."""
 
 import re
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union, Tuple
 from bs4 import BeautifulSoup
 from src.models import ItemListing, SalesOrder
 
@@ -160,12 +161,14 @@ def parse_closet_html(
     items: List[ItemListing] = []
     seen_ids = set()
 
-    # Look for item cards via all known Vinted card selectors
-    cards = soup.select(
-        "[data-testid*='grid-item'], div[class*='feed-grid__item'], "
-        "div[class*='ItemBox_item-box'], div[class*='web_ui__ItemBox__box'], "
-        "div[data-testid*='product-item-id-']"
-    )
+    # Look for item cards. Prefer the outer grid-item wrapper (one per item); nested
+    # product-item-id elements repeat ~6x per item and make parsing much slower.
+    cards = soup.select("[data-testid*='grid-item']")
+    if not cards:
+        cards = soup.select(
+            "div[class*='feed-grid__item'], div[class*='ItemBox_item-box'], "
+            "div[class*='web_ui__ItemBox__box'], div[data-testid*='product-item-id-']"
+        )
     if not cards:
         cards = soup.select("a[href*='/items/']")
 
@@ -402,3 +405,86 @@ def parse_orders_and_cancellations(
     valid_sales = [o for o in all_orders if o.vinted_status != "Cancelled"]
     cancelled = [o for o in all_orders if o.vinted_status == "Cancelled"]
     return valid_sales, cancelled
+
+
+# Higher rank wins when the same Vinted ID appears in several uploaded files
+# (e.g. an item that sold between the active-closet export and the sold-closet export).
+STATUS_RANK = {"Sold": 4, "Hidden": 3, "Reserved": 2, "Listed": 1}
+
+
+@dataclass
+class ImportSnapshot:
+    """All uploaded Vinted exports merged into one view, keyed by Vinted item ID."""
+
+    items: Dict[str, ItemListing] = field(default_factory=dict)
+    orders: List[SalesOrder] = field(default_factory=list)
+    has_active_source: bool = False  # an active/all closet export was uploaded (full list of live items)
+    has_sold_source: bool = False  # a sold/all closet export was uploaded
+    files: List[Dict[str, object]] = field(default_factory=list)
+    status_conflicts: List[Tuple[str, str, str]] = field(default_factory=list)  # (title, lower status, winning status)
+
+    def by_status(self, *statuses: str) -> List[ItemListing]:
+        return [i for i in self.items.values() if i.status in statuses]
+
+    @property
+    def cancelled_orders(self) -> List[SalesOrder]:
+        return [o for o in self.orders if o.vinted_status == "Cancelled"]
+
+    @property
+    def valid_orders(self) -> List[SalesOrder]:
+        return [o for o in self.orders if o.vinted_status != "Cancelled"]
+
+
+def build_snapshot(files: List[Tuple[str, bytes]], default_lot: str = "") -> ImportSnapshot:
+    """
+    Parses every uploaded file and merges closet items by Vinted ID.
+    - Item status comes from each card's own badge, so active, sold and "all" exports
+      can be mixed freely in one upload.
+    - In a sold-closet export, an item without a badge is treated as Sold.
+    - When the same ID appears with different statuses, Sold > Hidden > Reserved > Listed.
+    """
+    snap = ImportSnapshot()
+    for name, content in files:
+        kind = detect_html_type(content, filename=name)
+        if kind == "orders":
+            orders = parse_orders_html(content)
+            snap.orders.extend(orders)
+            n_canc = sum(1 for o in orders if o.vinted_status == "Cancelled")
+            snap.files.append({"Filename": name, "Detected Type": f"My Orders ({len(orders) - n_canc} sales, {n_canc} cancelled)", "Items Found": len(orders)})
+            continue
+        if kind not in ("active_closet", "sold_closet"):
+            snap.files.append({"Filename": name, "Detected Type": "Unknown", "Items Found": 0})
+            continue
+
+        items = parse_closet_html(content, default_lot=default_lot, filter_sold_only=False, filename=name)
+        if kind == "sold_closet":
+            snap.has_sold_source = True
+            for it in items:
+                if it.status in ("Listed", "Reserved"):
+                    it.status = "Sold"
+        else:
+            snap.has_active_source = True
+            if any(it.status == "Sold" for it in items):
+                snap.has_sold_source = True
+
+        counts: Dict[str, int] = {}
+        for it in items:
+            counts[it.status] = counts.get(it.status, 0) + 1
+            if it.status == "Sold":
+                it.sold_price = it.sold_price or it.current_price
+            prev = snap.items.get(it.vinted_id)
+            if prev is None:
+                snap.items[it.vinted_id] = it
+                continue
+            winner, loser = (it, prev) if STATUS_RANK.get(it.status, 0) > STATUS_RANK.get(prev.status, 0) else (prev, it)
+            if winner.status != loser.status:
+                snap.status_conflicts.append((winner.title, loser.status, winner.status))
+            winner.favorites = max(winner.favorites, loser.favorites)
+            winner.views = max(winner.views, loser.views)
+            winner.brand = winner.brand or loser.brand
+            snap.items[it.vinted_id] = winner
+
+        label = {"active_closet": "Closet", "sold_closet": "Sold Closet"}[kind]
+        detail = ", ".join(f"{n} {s.lower()}" for s, n in sorted(counts.items()))
+        snap.files.append({"Filename": name, "Detected Type": f"{label} ({detail})" if detail else label, "Items Found": len(items)})
+    return snap

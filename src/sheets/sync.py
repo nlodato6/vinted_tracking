@@ -1709,6 +1709,86 @@ class SheetsSyncEngine:
             "moved_to_hidden": hidden_appended,
         }
 
+    # ------------------------------------------------------------------
+    # Plan-based HTML import (see src/sheets/reconcile.py)
+    # ------------------------------------------------------------------
+    def read_sheet_state(self) -> "SheetState":
+        """Reads Item_Listings, Sold_Items, Hidden_Items and Cancelled_Orders in a single batch request."""
+        from src.sheets.reconcile import SheetState
+
+        tabs = [TAB_ITEM_LISTINGS, TAB_SOLD_ITEMS, TAB_HIDDEN_ITEMS, TAB_CANCELLED_ORDERS]
+        rows_by_tab: Dict[str, List[List[str]]] = {}
+        sh = self.client.get_spreadsheet()
+        try:
+            res = sh.values_batch_get([f"'{t}'!A:Z" for t in tabs])
+            for t, vr in zip(tabs, res.get("valueRanges", [])):
+                rows_by_tab[t] = vr.get("values", [])
+        except Exception:
+            for t in tabs:
+                rows_by_tab[t] = self.get_worksheet(t).get_all_values()
+        return SheetState(
+            listings=rows_by_tab.get(TAB_ITEM_LISTINGS, [])[1:],
+            sold=rows_by_tab.get(TAB_SOLD_ITEMS, [])[1:],
+            hidden=rows_by_tab.get(TAB_HIDDEN_ITEMS, [])[1:],
+            cancelled=rows_by_tab.get(TAB_CANCELLED_ORDERS, [])[1:],
+        )
+
+    def apply_sync_plan(self, plan: "SyncPlan", state: "SheetState") -> Dict[str, int]:
+        """Writes a SyncPlan using batched operations (about one write per changed tab)."""
+        from src.sheets.reconcile import listing_formulas, sold_formulas, with_formulas
+
+        ws_listings = self.get_worksheet(TAB_ITEM_LISTINGS)
+        ws_sold = self.get_worksheet(TAB_SOLD_ITEMS)
+        ws_hidden = self.get_worksheet(TAB_HIDDEN_ITEMS)
+        ws_cancelled = self.get_worksheet(TAB_CANCELLED_ORDERS)
+
+        # 1. Item_Listings: full rewrite (rows move out frequently, formulas are row-relative)
+        if plan.listings_changed:
+            body = [with_formulas(r, i, listing_formulas) for i, r in enumerate(plan.final_listings, start=2)]
+            ws_listings.clear()
+            ws_listings.update(range_name="A1", values=[LISTINGS_HEADERS] + body, value_input_option="USER_ENTERED")
+
+        # 2. Sold_Items: enrich cells, delete cancelled rows (bottom-up), append new rows
+        if plan.sold_cell_updates:
+            ws_sold.batch_update(
+                [{"range": f"{col_letter(c)}{r}", "values": [[v]]} for r, c, v in plan.sold_cell_updates],
+                value_input_option="USER_ENTERED",
+            )
+        for r in plan.sold_delete_rows:
+            ws_sold.delete_rows(r)
+        if plan.sold_appends:
+            start = len(state.sold) + 2 - len(plan.sold_delete_rows)
+            ws_sold.append_rows(
+                [with_formulas(r, start + k, sold_formulas) for k, r in enumerate(plan.sold_appends)],
+                value_input_option="USER_ENTERED",
+            )
+
+        # 3. Hidden_Items
+        for r in plan.hidden_delete_rows:
+            ws_hidden.delete_rows(r)
+        if plan.hidden_appends:
+            start = len(state.hidden) + 2 - len(plan.hidden_delete_rows)
+            ws_hidden.append_rows(
+                [with_formulas(r, start + k, listing_formulas) for k, r in enumerate(plan.hidden_appends)],
+                value_input_option="USER_ENTERED",
+            )
+
+        # 4. Cancelled_Orders
+        if plan.cancelled_cell_updates:
+            ws_cancelled.batch_update(
+                [{"range": f"{col_letter(c)}{r}", "values": [[v]]} for r, c, v in plan.cancelled_cell_updates],
+                value_input_option="USER_ENTERED",
+            )
+        if plan.cancelled_appends:
+            ws_cancelled.append_rows(plan.cancelled_appends, value_input_option="USER_ENTERED")
+
+        if plan.has_changes:
+            try:
+                self.sync_lots()
+            except Exception as e:
+                logger.warning(f"sync_lots after HTML import failed: {e}")
+        return dict(plan.counts_after)
+
     def reconcile_sold_closet(
         self,
         sold_items: List[ItemListing],

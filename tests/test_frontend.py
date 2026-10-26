@@ -65,8 +65,12 @@ def test_sync_page_html_parser_data_editor_and_lot_options():
     # Verify interactive st.data_editor replaces static dataframe
     assert "st.data_editor(" in sync_code
     assert "html_new_listings_editor" in sync_code
-    assert "Assigned Lot (Editable)" in sync_code or '"Assigned Lot": lot_column_config' in sync_code
-    assert "auto_assign_lot=False" in sync_code
+    assert '"Assigned Lot": st.column_config.SelectboxColumn(' in sync_code
+    assert '"Vinted ID": st.column_config.TextColumn(' in sync_code
+    # HTML import is plan-based: preview and commit share the same reconciler
+    assert "build_sync_plan(" in sync_code
+    assert "apply_sync_plan(" in sync_code
+    assert "listing_overrides=overrides" in sync_code
 
 
 def test_cloud_ready_auth_and_manual_login():
@@ -156,11 +160,12 @@ def test_cancellation_ui_and_bookmarklet_integration():
     assert "build_cancellation_reasons_chart" in metrics_code
     assert "build_cancellation_timeline_chart" in metrics_code
 
-    # Verify sync.py has bookmarklet, date range filter, and reconcile_active_closet_snapshot
+    # Verify sync.py has bookmarklet, date range filter, and snapshot-based reconciliation
     sync_code = Path("app_pages/sync.py").read_text()
     assert "1-Click Auto-Scroll Bookmarklet" in sync_code
-    assert "reconcile_active_closet_snapshot" in sync_code
-    assert "parse_orders_and_cancellations" in sync_code
+    assert "build_snapshot" in sync_code
+    assert "build_sync_plan" in sync_code
+    assert "reconcile_active_closet_snapshot" not in sync_code
     assert "get_last_scan_date" in sync_code
     assert "Date Range to Scan" in sync_code
     assert "Since Last Scan" in sync_code

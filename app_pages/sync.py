@@ -11,7 +11,7 @@ import pandas as pd
 from src.config import settings
 from src.sheets import GoogleSheetsClient, SheetsSyncEngine
 from src.sheets.sync import parse_price
-from src.html_parser import parse_closet_html, parse_orders_html, parse_orders_and_cancellations, detect_html_type, infer_brand, infer_clothing_category
+from src.html_parser import infer_brand, infer_clothing_category
 from src.email_parser import fetch_vinted_emails_via_imap, get_last_scan_date
 from src.notifications import record_html_parse_event, record_email_parse_event, get_sync_status
 from src.telemetry import (
@@ -44,6 +44,7 @@ def get_sheets_sync_engine(client: GoogleSheetsClient) -> SheetsSyncEngine:
         not hasattr(EngineClass, "reconcile_missing_sold_metadata")
         or not hasattr(EngineClass, "clean_blank_rows")
         or not hasattr(EngineClass, "find_duplicate_groups")
+        or not hasattr(EngineClass, "apply_sync_plan")
     ):
         try:
             importlib.reload(src.sheets.sync)
@@ -92,23 +93,18 @@ def get_cached_supplies(sheet_id: str, _creds):
     return engine.get_all_supplies()
 
 
-@st.cache_data(ttl=60)
-def get_cached_titles(sheet_id: str, _creds):
-    """Batch-fetches Title column from Item_Listings and Sold_Items in 1 single call."""
+@st.cache_data(max_entries=4, show_spinner="Parsing uploaded Vinted files...")
+def get_cached_snapshot(file_payload: tuple, default_lot: str):
+    """Parses and merges uploaded HTML files once per unique upload (keyed by file content)."""
+    from src.html_parser import build_snapshot
+    return build_snapshot(list(file_payload), default_lot=default_lot)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_cached_sheet_state(sheet_id: str, _creds):
+    """Reads Item_Listings, Sold_Items, Hidden_Items and Cancelled_Orders in 1 batch call (60-second cache)."""
     client = GoogleSheetsClient(sheet_id=sheet_id, credentials=_creds)
-    sh = client.get_spreadsheet()
-    try:
-        res = sh.values_batch_get(["Item_Listings!C:C", "Sold_Items!C:C"])
-        val_ranges = res.get("valueRanges", [])
-        active_titles = {str(r[0]).strip().lower() for r in val_ranges[0].get("values", [])[1:] if r and len(r) > 0} if len(val_ranges) > 0 else set()
-        sold_titles = {str(r[0]).strip().lower() for r in val_ranges[1].get("values", [])[1:] if r and len(r) > 0} if len(val_ranges) > 1 else set()
-        return active_titles, sold_titles
-    except Exception:
-        ws_list = sh.worksheet("Item_Listings")
-        ws_sold = sh.worksheet("Sold_Items")
-        active_titles = {str(r[2]).strip().lower() for r in ws_list.get_all_values()[1:] if len(r) > 2}
-        sold_titles = {str(r[2]).strip().lower() for r in ws_sold.get_all_values()[1:] if len(r) > 2}
-        return active_titles, sold_titles
+    return get_sheets_sync_engine(client).read_sheet_state()
 
 
 def format_sync_timestamp(raw_ts: Optional[str]) -> Tuple[str, str]:
@@ -698,221 +694,104 @@ def render_sync_page():
         )
 
         if uploaded_files:
+            from src.sheets.reconcile import build_sync_plan
+
+            file_payload = tuple((f.name, f.getvalue()) for f in uploaded_files)
+            snap = get_cached_snapshot(file_payload, target_lot_id)
+
             st.markdown("#### Detected Files & Content Analysis")
-            files_info = []
-            parsed_orders = []
-            parsed_active_closet = []
-            parsed_sold_closet = []
-
-            for f in uploaded_files:
-                file_bytes = f.getvalue()
-                detected = detect_html_type(file_bytes, filename=f.name)
-                
-                if detected == "orders":
-                    completed_orders, cancelled_orders = parse_orders_and_cancellations(file_bytes)
-                    parsed_orders.extend(completed_orders + cancelled_orders)
-                    type_label = f"My Orders ({len(completed_orders)} sales, {len(cancelled_orders)} cancelled)"
-                    files_info.append({"Filename": f.name, "Detected Type": type_label, "Items Found": len(completed_orders) + len(cancelled_orders)})
-                elif detected == "active_closet":
-                    items = parse_closet_html(file_bytes, default_lot=target_lot_id, filename=f.name)
-                    active_items = [it for it in items if it.status != "Sold"]
-                    parsed_active_closet.extend(active_items)
-                    files_info.append({"Filename": f.name, "Detected Type": "Active Listings", "Items Found": len(active_items)})
-                elif detected == "sold_closet":
-                    items = parse_closet_html(file_bytes, default_lot=target_lot_id, filter_sold_only=True, filename=f.name)
-                    sold_items = [it for it in items if it.status == "Sold"]
-                    parsed_sold_closet.extend(sold_items)
-                    files_info.append({"Filename": f.name, "Detected Type": "Sold Closet", "Items Found": len(sold_items)})
-                else:
-                    files_info.append({"Filename": f.name, "Detected Type": "Unknown", "Items Found": 0})
-
-            st.dataframe(pd.DataFrame(files_info), width="stretch")
+            st.dataframe(pd.DataFrame(snap.files), width="stretch", hide_index=True)
 
             # -------------------------------------------------------------
-            # 3. Reconciliation Preview (Zero-Duplication & Interactive Editing)
+            # 3. Reconciliation Preview: the exact plan that Commit will write
             # -------------------------------------------------------------
-            if parsed_orders or parsed_active_closet or parsed_sold_closet:
+            if snap.items or snap.orders:
                 st.divider()
                 lot_preview_header = f" (Default Lot: {target_lot_id})" if target_lot_id else " (Default Lot: None)"
                 st.markdown(f"#### Reconciliation Preview{lot_preview_header}")
-                
+
                 try:
-                    curr_active_titles, curr_sold_titles = get_cached_titles(sheet_id, user_creds)
+                    state = get_cached_sheet_state(sheet_id, user_creds)
+                    plan = build_sync_plan(snap, state, default_lot=target_lot_id)
+                    before, after = plan.counts_before, plan.counts_after
 
-                    canc_orders = [o for o in parsed_orders if getattr(o, "vinted_status", "") == "Cancelled"]
-                    valid_orders = [o for o in parsed_orders if getattr(o, "vinted_status", "") != "Cancelled"]
+                    st.caption("Totals in your Google Sheet after this sync (change vs. now):")
+                    k1, k2, k3, k4 = st.columns(4)
+                    for col, key, label in ((k1, "active", "Active Listings"), (k2, "sold", "Sold Items"), (k3, "hidden", "Hidden Items"), (k4, "cancelled", "Cancelled Orders")):
+                        col.metric(label, after[key], after[key] - before[key], border=True)
 
-                    new_listings = [
-                        it for it in parsed_active_closet
-                        if it.status != "Sold"
-                        and it.title.strip().lower() not in curr_active_titles
-                        and it.title.strip().lower() not in curr_sold_titles
-                    ]
-                    sold_order_transitions = [it for it in valid_orders if it.item_title.strip().lower() in curr_active_titles]
-                    sold_closet_transitions = [it for it in parsed_sold_closet if it.title.strip().lower() in curr_active_titles]
-                    total_sold_transitions = len(sold_order_transitions) + len(sold_closet_transitions)
+                    c1, c2, c3, c4, c5 = st.columns(5)
+                    c1.metric("New Active", len(plan.new_listings), border=True)
+                    c2.metric("New Sold", len(plan.new_sold), border=True)
+                    c3.metric("Active → Sold", len(plan.listing_to_sold) + len(plan.hidden_to_sold), border=True)
+                    c4.metric("→ Hidden", len(plan.listing_to_hidden) + len(plan.new_hidden), border=True)
+                    c5.metric("Updated / Enriched", plan.updated_listings + plan.enriched_sold, border=True)
 
-                    # Deduplicated new sold items to append directly to Sold_Items
-                    seen_sold_titles_in_preview = set()
-                    new_sold_to_add = []
-                    already_sold_items = []
+                    if plan.warnings:
+                        with st.expander(f"Notes ({len(plan.warnings)})", icon=":material/info:", expanded=False):
+                            for w in plan.warnings:
+                                st.markdown(f"- {w}")
 
-                    for o in valid_orders:
-                        t = o.item_title.strip().lower()
-                        if t not in curr_active_titles:
-                            if t not in curr_sold_titles and t not in seen_sold_titles_in_preview:
-                                new_sold_to_add.append({
-                                    "Title": o.item_title,
-                                    "Price": f"${o.sold_price:.2f}",
-                                    "Brand": o.brand or "",
-                                    "Category": o.category or "",
-                                    "Source": "Orders HTML",
-                                })
-                                seen_sold_titles_in_preview.add(t)
-                            else:
-                                already_sold_items.append(o)
+                    if plan.new_cancelled:
+                        with st.expander(f"Cancelled Orders to Record ({len(plan.new_cancelled)})", icon=":material/cancel:", expanded=False):
+                            st.caption("Cancelled items are moved to **Cancelled_Orders** and kept out of Sold_Items. Bundle contents and cancellation dates are filled in by email sync.")
+                            st.dataframe(pd.DataFrame(plan.new_cancelled), width="stretch", hide_index=True)
+                    if plan.removed_for_cancellation:
+                        st.caption(f"Removing {len(plan.removed_for_cancellation)} cancelled item(s) from Sold_Items: {', '.join(plan.removed_for_cancellation)}")
 
-                    for it in parsed_sold_closet:
-                        t = it.title.strip().lower()
-                        if t not in curr_active_titles:
-                            if t not in curr_sold_titles and t not in seen_sold_titles_in_preview:
-                                new_sold_to_add.append({
-                                    "Title": it.title,
-                                    "Price": f"${it.current_price:.2f}" if it.current_price else "$0.00",
-                                    "Brand": it.brand or "",
-                                    "Category": it.category or "",
-                                    "Source": "Sold Closet",
-                                })
-                                seen_sold_titles_in_preview.add(t)
-                            else:
-                                already_sold_items.append(it)
+                    if plan.listing_to_sold or plan.hidden_to_sold:
+                        with st.expander(f"Active → Sold ({len(plan.listing_to_sold) + len(plan.hidden_to_sold)})", icon=":material/sell:", expanded=False):
+                            st.dataframe(pd.DataFrame({"Title": plan.listing_to_sold + plan.hidden_to_sold}), width="stretch", hide_index=True)
 
-                    # Assign target lot ID to new items in preview if not already populated
-                    for it in new_listings:
-                        if not it.lot_id and target_lot_id:
-                            it.lot_id = target_lot_id
+                    if plan.new_sold:
+                        with st.expander(f"New Sold Items to Add ({len(plan.new_sold)})", icon=":material/shopping_bag:", expanded=False):
+                            st.caption("Sale dates are left blank; email sync fills them in.")
+                            st.dataframe(pd.DataFrame(plan.new_sold), width="stretch", hide_index=True)
 
-                    p1, p2, p3, p4, p5 = st.columns(5)
-                    p1.metric("New Active to Add", len(new_listings), f"Lot: {target_lot_id or 'None'}", border=True)
-                    p2.metric("New Sold to Add", len(new_sold_to_add), f"Lot: {target_lot_id or 'None'}", border=True)
-                    p3.metric("Active Moving to Sold", total_sold_transitions, border=True)
-                    p4.metric("Cancelled Orders", len(canc_orders), border=True)
-                    p5.metric("Already Sold / Enriched", len(already_sold_items), border=True)
-
-                    if canc_orders:
-                        with st.expander(f"View Cancelled Orders Detected ({len(canc_orders)} orders)", expanded=False):
-                            st.dataframe(pd.DataFrame([{
-                                "Order ID": o.order_id,
-                                "Title": o.item_title,
-                                "Price": f"${o.sold_price:.2f}",
-                                "Reason": getattr(o, "cancellation_reason", ""),
-                                "Buyer": getattr(o, "buyer_username", ""),
-                            } for o in canc_orders]), width="stretch")
-
-                    if sold_order_transitions or sold_closet_transitions:
-                        with st.expander(f"View Items Moving to Sold ({total_sold_transitions} items)", expanded=False):
-                            trans_rows = [{"Title": o.item_title, "Price": f"${o.sold_price:.2f}", "Order ID": o.order_id, "Source": "Orders HTML"} for o in sold_order_transitions]
-                            trans_rows.extend([{"Title": it.title, "Price": f"${it.current_price:.2f}", "Order ID": "-", "Source": "Sold Closet"} for it in sold_closet_transitions])
-                            st.dataframe(pd.DataFrame(trans_rows), width="stretch")
-
-                    if new_sold_to_add:
-                        with st.expander(f"View New Sold Items to Add ({len(new_sold_to_add)} items)", expanded=(len(new_listings) == 0)):
-                            st.caption("These items were detected as sold from your Sold Closet or Orders export and will be added directly into **Sold_Items**.")
-                            st.dataframe(pd.DataFrame(new_sold_to_add), width="stretch")
-
-                    if parsed_sold_closet:
-                        with st.expander(f"View All Sold Closet Items Detected ({len(parsed_sold_closet)} items)", expanded=False):
-                            st.caption("These items were detected from your Vinted Sold Closet export. They will be reconciled into Sold_Items and will never be added to active listings.")
-                            st.dataframe(pd.DataFrame([{
-                                "Title": it.title,
-                                "Brand": it.brand or "",
-                                "Price": f"${it.current_price:.2f}" if it.current_price else "$0.00",
-                                "Category": it.category or "",
-                                "Vinted ID": it.vinted_id or "",
-                            } for it in parsed_sold_closet]), width="stretch")
+                    hidden_moves = plan.listing_to_hidden + plan.new_hidden
+                    if hidden_moves or plan.hidden_to_listing:
+                        with st.expander(f"Hidden Changes ({len(hidden_moves) + len(plan.hidden_to_listing)})", icon=":material/visibility_off:", expanded=False):
+                            rows = [{"Title": t, "Change": "→ Hidden"} for t in hidden_moves]
+                            rows += [{"Title": t, "Change": "Hidden → Active"} for t in plan.hidden_to_listing]
+                            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
                     edited_listings_df = None
-                    if new_listings:
-                        with st.expander(f"View New Listings to Add ({len(new_listings)} items — Editable)", expanded=True):
-                            st.caption("You can edit any item's **Title** or **Assigned Lot** directly in the table below before committing to Google Sheets.")
-                            
-                            # Prepare lot options for the editor dropdown
+                    if plan.new_listings:
+                        with st.expander(f"New Listings to Add ({len(plan.new_listings)} items — Editable)", icon=":material/edit_note:", expanded=True):
+                            st.caption("Edit any item's **Title** or **Assigned Lot** before committing.")
                             available_lot_ids = [l.get("Lot_ID", "") for l in all_lots if l.get("Lot_ID")]
                             if target_lot_id and target_lot_id not in available_lot_ids:
                                 available_lot_ids.append(target_lot_id)
-                            
-                            preview_rows = []
-                            for i in new_listings:
-                                preview_rows.append({
-                                    "Title": i.title, 
-                                    "Brand": i.brand or "", 
-                                    "Price": f"${i.posted_price:.2f}" if i.posted_price else "$0.00", 
-                                    "Category": i.category or "",
-                                    "Assigned Lot": i.lot_id or "",
-                                })
-                            preview_df = pd.DataFrame(preview_rows)
-
-                            for r in preview_rows:
-                                if r["Assigned Lot"] and r["Assigned Lot"] not in available_lot_ids:
-                                    available_lot_ids.append(r["Assigned Lot"])
-                            lot_editor_options = [""] + sorted(list(set(available_lot_ids)))
-                            if available_lot_ids:
-                                lot_column_config = st.column_config.SelectboxColumn(
-                                    "Assigned Lot",
-                                    help="Select an inventory lot or choose None to leave unassigned.",
-                                    options=lot_editor_options,
-                                    format_func=lambda x: "None (Unassigned)" if not x else x,
-                                    required=False,
-                                    width="medium",
-                                )
-                            else:
-                                lot_column_config = st.column_config.TextColumn(
-                                    "Assigned Lot",
-                                    help="Enter a Lot ID (e.g. LOT-001) or leave blank for none.",
-                                    required=False,
-                                    width="medium",
-                                )
-
+                            lot_editor_options = [""] + sorted(set(available_lot_ids))
+                            preview_df = pd.DataFrame(plan.new_listings)
+                            preview_df["Price"] = preview_df["Price"].map(lambda p: f"${float(p or 0):.2f}")
                             edited_listings_df = st.data_editor(
                                 preview_df,
                                 column_config={
-                                    "Title": st.column_config.TextColumn(
-                                        "Title",
-                                        help="Double-click to edit the title if there was an extraction error or typo.",
-                                        required=True,
-                                        width="large",
-                                    ),
-                                    "Brand": st.column_config.TextColumn(
-                                        "Brand",
-                                        disabled=True,
-                                        width="small",
-                                    ),
-                                    "Price": st.column_config.TextColumn(
-                                        "Price",
-                                        disabled=True,
-                                        width="small",
-                                    ),
-                                    "Category": st.column_config.TextColumn(
-                                        "Category",
-                                        disabled=True,
+                                    "Vinted ID": st.column_config.TextColumn("Vinted ID", disabled=True, width="small"),
+                                    "Title": st.column_config.TextColumn("Title", required=True, width="large"),
+                                    "Assigned Lot": st.column_config.SelectboxColumn(
+                                        "Assigned Lot",
+                                        options=lot_editor_options,
+                                        format_func=lambda x: "None (Unassigned)" if not x else x,
+                                        required=False,
                                         width="medium",
                                     ),
-                                    "Assigned Lot": lot_column_config,
                                 },
-                                disabled=["Brand", "Price", "Category"],
+                                disabled=["Vinted ID", "Brand", "Price", "Category"],
                                 hide_index=True,
                                 num_rows="fixed",
                                 width="stretch",
                                 key="html_new_listings_editor",
                             )
 
-                    if st.button("Commit & Synchronize to Google Sheets", icon=":material/cloud_upload:", type="primary", width="stretch"):
+                    if not plan.has_changes:
+                        st.success("Your sheet already matches these files. Nothing to sync.", icon=":material/check_circle:")
+
+                    if st.button("Commit & Synchronize to Google Sheets", icon=":material/cloud_upload:", type="primary", width="stretch", disabled=not plan.has_changes and not is_new_lot):
                         try:
                             with st.spinner("Synchronizing to Google Sheets..."):
-                                # Ensure all required worksheets (including Cancelled_Orders & Hidden_Items) exist
                                 engine.ensure_required_tabs()
-
-                                # 1. If new lot, create it in Inventory_Lots if not already created
                                 if is_new_lot and target_lot_id:
                                     engine.add_inventory_lot(
                                         lot_id=target_lot_id,
@@ -923,63 +802,30 @@ def render_sync_page():
                                         status=new_status,
                                         notes=new_notes,
                                     )
-                                
                                 st.session_state.selected_lot = target_lot_id
 
-                                # 2. Apply user edits from st.data_editor to new_listings and parsed_active_closet
+                                overrides = {}
                                 if edited_listings_df is not None and not edited_listings_df.empty:
-                                    for idx, row in edited_listings_df.iterrows():
-                                        if idx < len(new_listings):
-                                            edited_title = str(row.get("Title", "")).strip()
-                                            raw_lot = row.get("Assigned Lot")
-                                            edited_lot = "" if (pd.isna(raw_lot) or str(raw_lot).strip() in ("", "None", "None (Unassigned)", "nan")) else str(raw_lot).strip()
-                                            if edited_title:
-                                                new_listings[idx].title = edited_title
-                                            new_listings[idx].lot_id = edited_lot
+                                    for _, row in edited_listings_df.iterrows():
+                                        raw_lot = row.get("Assigned Lot")
+                                        lot_val = "" if (pd.isna(raw_lot) or str(raw_lot).strip() in ("", "None", "None (Unassigned)", "nan")) else str(raw_lot).strip()
+                                        overrides[str(row["Vinted ID"])] = {"title": str(row.get("Title", "")).strip(), "lot": lot_val}
 
-                                # 3. For any other items in parsed_active_closet, set target_lot_id only if unassigned and target_lot_id is non-empty
-                                for it in parsed_active_closet:
-                                    if it not in new_listings:
-                                        if not it.lot_id and target_lot_id:
-                                            it.lot_id = target_lot_id
+                                # Re-read the sheet so the plan is applied against the latest data
+                                fresh_state = engine.read_sheet_state()
+                                final_plan = build_sync_plan(snap, fresh_state, default_lot=target_lot_id, listing_overrides=overrides)
+                                result = engine.apply_sync_plan(final_plan, fresh_state)
 
-                                # 4. Synchronize orders, active listings, and sold closet
-                                res_orders = engine.sync_orders(parsed_orders, default_lot=target_lot_id, auto_assign_lot=False) if parsed_orders else {"synced_orders": 0, "cancelled_orders": 0}
-                                
-                                res_closet = {"final_active_count": 0, "new_active_added": 0, "moved_to_sold": 0, "moved_to_hidden": 0, "updated_active": 0}
-                                if parsed_active_closet:
-                                    res_closet = engine.reconcile_active_closet_snapshot(parsed_active_closet, default_lot=target_lot_id, auto_assign_lot=False)
-
-                                res_sold_closet = {"moved_to_sold": 0, "new_sold_added": 0, "enriched": 0}
-                                if parsed_sold_closet:
-                                    res_sold_closet = engine.reconcile_sold_closet(parsed_sold_closet, default_lot=target_lot_id)
-
-                                # 5. Record event and clear cache
-                                record_html_parse_event(details=f"Web: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_active_closet)} active, {len(parsed_sold_closet)} sold closet, Lot: {target_lot_id or 'None'})", client=client)
-                                log_event(u_email, "html_import", f"HTML import: {len(uploaded_files)} files ({len(parsed_orders)} orders, {len(parsed_active_closet)} active, {len(parsed_sold_closet)} sold closet, Lot: {target_lot_id or 'None'})", spreadsheet_id=st.session_state.get("spreadsheet_id"))
+                                n_orders = len(snap.orders)
+                                details = f"{len(uploaded_files)} files ({len(snap.items)} closet items, {n_orders} orders, Lot: {target_lot_id or 'None'})"
+                                record_html_parse_event(details=f"Web: {details}", client=client)
+                                log_event(u_email, "html_import", f"HTML import: {details}", spreadsheet_id=st.session_state.get("spreadsheet_id"))
                                 st.cache_data.clear()
 
-                            summary_parts = []
-                            if parsed_active_closet:
-                                summary_parts.append(f"{res_closet.get('final_active_count', 0)} active listings in closet ({res_closet.get('new_active_added', 0)} added, {res_closet.get('moved_to_sold', 0)} moved to sold, {res_closet.get('moved_to_hidden', 0)} hidden)")
-                            if parsed_orders:
-                                summary_parts.append(f"{res_orders.get('synced_orders', 0)} sales orders synced, {res_orders.get('cancelled_orders', 0)} cancellations recorded")
-                            if parsed_sold_closet:
-                                sc_added = res_sold_closet.get("new_sold_added", 0)
-                                sc_moved = res_sold_closet.get("moved_to_sold", 0)
-                                sc_enr = res_sold_closet.get("enriched", 0)
-                                sc_parts = []
-                                if sc_added > 0:
-                                    sc_parts.append(f"{sc_added} new sold added")
-                                if sc_moved > 0:
-                                    sc_parts.append(f"{sc_moved} moved from active")
-                                if sc_enr > 0:
-                                    sc_parts.append(f"{sc_enr} enriched")
-                                if sc_parts:
-                                    summary_parts.append(f"Sold Closet: {', '.join(sc_parts)}")
-                            
-                            sync_summary_msg = " • ".join(summary_parts) if summary_parts else "Sync completed successfully."
-                            st.success(f"Sync Complete! {sync_summary_msg}", icon=":material/check_circle:")
+                            st.success(
+                                f"Sync complete! Active {result['active']} · Sold {result['sold']} · Hidden {result['hidden']} · Cancelled {result['cancelled']}",
+                                icon=":material/check_circle:",
+                            )
                             st.balloons()
                             time.sleep(1.5)
                             st.rerun()
@@ -992,7 +838,10 @@ def render_sync_page():
 
                 except Exception as e:
                     log_error(u_email, "sync.py:html_import", e)
-                    st.error(f"Error during reconciliation preview: {e}")
+                    if "429" in str(e):
+                        st.warning("Google Sheets rate limit reached. Wait 30 seconds and click **Refresh Live**.", icon=":material/hourglass_top:")
+                    else:
+                        st.error(f"Error during reconciliation preview: {e}")
 
     # ---------------------------------------------------------
     # TAB 2: EMAIL SYNC
