@@ -1256,9 +1256,11 @@ def render_sync_page():
                         "Brand": r_pad[C["Brand"]],
                         "Category": r_pad[C["Category"]],
                         "Lost Revenue": parse_price(r_pad[C["Lost_Revenue"]]),
+                        "Original Price": parse_price(r_pad[C["Original_Price"]]),
                         "Date": r_pad[C["Cancellation_Date"]],
                         "Details": r_pad[C["Status_Details"]],
                         "Buyer": r_pad[C["Buyer_Username"]],
+                        "Vinted URL": r_pad[C["Vinted_URL"]],
                     })
 
             df = pd.DataFrame(rows_data)
@@ -1345,7 +1347,8 @@ def render_sync_page():
                     else:  # Cancelled_Orders
                         action_opts = [
                             "Update Cancelled Details in Current Sheet",
-                            "Move to Active Listings (Relist)",
+                            "Relist to Active Listings (Preserve Cancel Record)",
+                            "Move to Active Listings (Delete Cancel Record)",
                             "Move to Sold_Items",
                         ]
 
@@ -1369,6 +1372,18 @@ def render_sync_page():
                                 existing_price = parse_price(sel_item.get("Sold Price") or sel_item.get("Asking Price", 0.0))
                                 new_sold_price = st.number_input("Sold Price ($)", value=existing_price, min_value=0.0, step=1.0, format="%.2f")
                                 new_sale_date = st.date_input("Sale Date", value=datetime.today().date())
+                            elif is_relisting:
+                                existing_relist = parse_price(sel_item.get("Original Price") or sel_item.get("Lost Revenue") or sel_item.get("Asking Price", 0.0))
+                                new_asking_price = st.number_input(
+                                    "Relist Asking Price ($)",
+                                    value=existing_relist,
+                                    min_value=0.0,
+                                    step=1.0,
+                                    format="%.2f",
+                                    help="The asking price for the relisted item in Item_Listings.",
+                                )
+                                new_sold_price = new_asking_price
+                                new_sale_date = datetime.today().date()
                             elif current_tab_name == TAB_CANCELLED_ORDERS:
                                 existing_loss = parse_price(sel_item.get("Lost Revenue", 0.0))
                                 new_lost_revenue = st.number_input(
@@ -1397,6 +1412,10 @@ def render_sync_page():
                                 )
                                 new_status = st.selectbox("Status", options=["Sold", "Sold (External)", "Reserved"], index=0)
                                 new_order_id = st.text_input("Order ID / Transaction Ref", value=str(sel_item.get("Order ID", "")), placeholder="e.g. EBAY-10928, POSH-4412, or empty")
+                            elif is_relisting:
+                                new_platform = "Vinted"
+                                new_status = "Listed"
+                                new_order_id = ""
                             elif current_tab_name == TAB_CANCELLED_ORDERS or "Cancelled" in chosen_action:
                                 new_platform = "Vinted"
                                 new_status = "Cancelled"
@@ -1438,23 +1457,30 @@ def render_sync_page():
                                         "title": new_title.strip(),
                                         "lot": new_lot,
                                         "sold_price": new_sold_price,
-                                        "current_price": new_sold_price if is_selling else (new_lost_revenue if current_tab_name == TAB_CANCELLED_ORDERS else new_asking_price),
+                                        "current_price": new_sold_price if is_selling else (new_asking_price if (is_relisting or current_tab_name != TAB_CANCELLED_ORDERS) else new_lost_revenue),
+                                        "posted_price": new_asking_price if is_relisting else new_sold_price,
                                         "sale_date": new_sale_date.strftime("%Y-%m-%d"),
                                         "platform": new_platform,
                                         "status": new_status,
                                         "order_id": new_order_id.strip(),
                                         "notes": new_notes.strip(),
+                                        "vinted_url": str(sel_item.get("Vinted URL", "")),
                                     }
 
                                     if target_tab != current_tab_name:
-                                        # Move item across sheets
+                                        delete_src = ("Delete Cancel Record" in chosen_action) or (current_tab_name != TAB_CANCELLED_ORDERS)
+                                        # Move or relist item across sheets
                                         manual_engine.manual_move_item(
                                             source_tab=current_tab_name,
                                             dest_tab=target_tab,
                                             source_sheet_row=sel_sheet_row,
                                             item_data=item_payload,
+                                            delete_source=delete_src,
                                         )
-                                        st.success(f"Moved '{new_title}' from {current_tab_name} to {target_tab}!", icon=":material/check_circle:")
+                                        if not delete_src:
+                                            st.success(f"Relisted '{new_title}' to Active Listings! (Cancellation record preserved in {current_tab_name})", icon=":material/check_circle:")
+                                        else:
+                                            st.success(f"Moved '{new_title}' from {current_tab_name} to {target_tab}!", icon=":material/check_circle:")
                                     else:
                                         # In-place update
                                         update_dict = {}

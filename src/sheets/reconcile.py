@@ -468,9 +468,9 @@ def build_sync_plan(
             continue
 
         if item is None:
-            if vid and (vid in sold_by_vid or vid in cancelled_vids):
+            if vid and vid in sold_by_vid:
                 plan.listings_changed = True
-                continue  # already recorded elsewhere; drop the stale active row
+                continue  # already recorded in Sold_Items; drop the stale active row
             if vid and snap.has_active_source and archive_unlisted:
                 plan.listings_changed = True
                 hrow = list(r)

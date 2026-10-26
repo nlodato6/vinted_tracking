@@ -282,3 +282,60 @@ def test_manual_update_cancelled_in_place_preserves_row_and_sets_zero_loss(manua
     assert row[C["Lost_Revenue"]] == 0.0
     assert row[C["Status_Details"]] == "Customer re-ordered larger bundle, 0 loss"
 
+
+def test_relist_cancelled_to_active_listings_preserves_cancel_record(manual_engine_and_sh):
+    eng, sh = manual_engine_and_sh
+    ws_cancelled = sh.worksheet(TAB_CANCELLED_ORDERS)
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+
+    # Seed a cancelled order row
+    ws_cancelled.rows.append([
+        "CAN-1002",
+        "SKU-3001",
+        "Carhartt Jacket",
+        "Carhartt",
+        "Outerwear",
+        "60.00",
+        "60.00",
+        "2026-10-21",
+        "Buyer changed mind",
+        "buyer_bob",
+        "https://www.vinted.com/items/555-jacket",
+        "Email",
+    ])
+
+    initial_listings_count = len(ws_listings.rows)
+
+    # Relist into Active Listings with delete_source=False
+    eng.manual_move_item(
+        source_tab=TAB_CANCELLED_ORDERS,
+        dest_tab=TAB_ITEM_LISTINGS,
+        source_sheet_row=2,
+        item_data={
+            "title": "Carhartt Jacket",
+            "lot": "LOT-001",
+            "current_price": 55.00,
+            "posted_price": 55.00,
+            "status": "Listed",
+            "vinted_url": "https://www.vinted.com/items/555-jacket",
+        },
+        delete_source=False,
+    )
+
+    # Cancellation record must be preserved for audit & email idempotency
+    assert len(ws_cancelled.rows) == 2
+    canc_row = ws_cancelled.rows[1]
+    assert "Relisted to Active Listings" in canc_row[C["Status_Details"]]
+    assert canc_row[C["Order_ID"]] == "CAN-1002"
+
+    # Active listings must have the new relisted row
+    assert len(ws_listings.rows) == initial_listings_count + 1
+    new_listing = ws_listings.rows[-1]
+    assert new_listing[L["Title"]] == "Carhartt Jacket"
+    assert new_listing[L["Item_SKU"]] == "SKU-3001"
+    assert new_listing[L["Lot_ID"]] == "LOT-001"
+    assert new_listing[L["Current_Price"]] == 55.00
+    assert new_listing[L["Status"]] == "Listed"
+    assert new_listing[L["Vinted_ID"]] == "555"
+
+

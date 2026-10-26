@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.html_parser import build_snapshot
-from src.sheets.reconcile import S, build_sync_plan
+from src.sheets.reconcile import L, S, C, build_sync_plan
 from src.sheets.schemas import (
     CANCELLED_ORDERS_HEADERS,
     HIDDEN_ITEMS_HEADERS,
@@ -279,5 +279,71 @@ def test_archive_unlisted_flag_moves_missing_to_hidden_when_requested():
     assert len(plan.listing_to_hidden) == 169 - 10
     assert plan.counts_after["active"] == 10
     assert plan.counts_after["hidden"] == 159
+
+
+def test_html_import_does_not_drop_relisted_active_item_present_in_cancelled_orders():
+    """An active item that was previously cancelled and relisted must NOT be dropped from
+    Item_Listings during HTML sync, even if not present in the current partial upload."""
+    eng, sh = _engine()
+    ws_cancelled = sh.worksheet(TAB_CANCELLED_ORDERS)
+    ws_listings = sh.worksheet(TAB_ITEM_LISTINGS)
+
+    # Seed Cancelled_Orders with a cancelled order for Vinted ID 999888
+    ws_cancelled.rows.append([
+        "CAN-5001",
+        "SKU-8001",
+        "Vintage Leather Belt",
+        "Fossil",
+        "Accessories",
+        "25.00",
+        "25.00",
+        "2026-10-18",
+        "Cancelled",
+        "buyer_x",
+        "https://www.vinted.com/items/999888-vintage-leather-belt",
+        "Email",
+    ])
+
+    # Seed Item_Listings with this relisted active item
+    ws_listings.rows.append([
+        "SKU-8001",
+        "LOT-001",
+        "Vintage Leather Belt",
+        "Fossil",
+        "Accessories",
+        "=IFERROR(VLOOKUP(B2, Inventory_Lots!A:F, 6, FALSE), 0)",
+        "25.00",
+        "25.00",
+        "NO",
+        "0.00",
+        "",
+        "0",
+        "0",
+        "999888",
+        "https://www.vinted.com/items/999888-vintage-leather-belt",
+        "Listed",
+        "2026-10-22",
+        "2026-10-22 12:00:00",
+        "Manual",
+    ])
+
+    # Now simulate an incremental HTML upload of 5 other unrelated items (so item 999888 is None in snap)
+    from src.html_parser import ImportSnapshot, ItemListing
+    snap = ImportSnapshot(
+        items={
+            "111111": ItemListing(item_sku="SKU-9999", vinted_id="111111", title="Brand New Socks", current_price=10.0, status="Listed"),
+        },
+        has_active_source=True,
+    )
+
+    state = eng.read_sheet_state()
+    plan = build_sync_plan(snap, state, default_lot="LOT-001", archive_unlisted=False)
+
+    # The relisted active item 999888 MUST be preserved in final_listings
+    relisted_in_final = any(r[L["Vinted_ID"]] == "999888" for r in plan.final_listings)
+    assert relisted_in_final is True
+    # The new item is also added
+    assert any(r[L["Vinted_ID"]] == "111111" for r in plan.final_listings)
+
 
 

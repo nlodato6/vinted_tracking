@@ -3678,13 +3678,16 @@ class SheetsSyncEngine:
         dest_tab: str,
         source_sheet_row: int,
         item_data: Optional[Dict[str, Any]] = None,
+        delete_source: bool = True,
     ) -> Dict[str, Any]:
         """
-        Moves an item from source_tab to dest_tab at 1-based source_sheet_row.
-        Generates proper destination schema and formulas, appends to dest_tab,
-        and deletes source_sheet_row from source_tab.
+        Moves or relists an item from source_tab to dest_tab at 1-based source_sheet_row.
+        Generates proper destination schema and formulas, appends to dest_tab.
+        If delete_source is True, deletes source_sheet_row from source_tab.
+        If delete_source is False (e.g. relisting a cancelled order), preserves the source row
+        and marks it as relisted in Status_Details.
         """
-        from src.sheets.reconcile import build_manual_move_row
+        from src.sheets.reconcile import build_manual_move_row, C
 
         ws_source = self.get_worksheet(source_tab)
         ws_dest = self.get_worksheet(dest_tab)
@@ -3697,6 +3700,20 @@ class SheetsSyncEngine:
         dest_all = ws_dest.get_all_values()
         dest_sheet_row = len(dest_all) + 1
 
+        if not item_data:
+            item_data = {}
+
+        # If moving/relisting to Item_Listings and no SKU exists, assign the next sequential SKU
+        if dest_tab == TAB_ITEM_LISTINGS and not item_data.get("sku"):
+            s_sku = ""
+            if source_tab == TAB_CANCELLED_ORDERS and len(source_row) > C["Item_SKU"]:
+                s_sku = str(source_row[C["Item_SKU"]]).strip()
+            if s_sku:
+                item_data["sku"] = s_sku
+            else:
+                next_sku_num = self.get_max_sku_num() + 1
+                item_data["sku"] = f"SKU-{next_sku_num}"
+
         new_row = build_manual_move_row(
             source_tab=source_tab,
             dest_tab=dest_tab,
@@ -3706,7 +3723,17 @@ class SheetsSyncEngine:
         )
 
         ws_dest.append_rows([new_row], value_input_option="USER_ENTERED")
-        ws_source.delete_rows(source_sheet_row)
+
+        if delete_source:
+            ws_source.delete_rows(source_sheet_row)
+        else:
+            # Annotate source row without deleting (e.g. preserves cancelled orders audit trail)
+            if source_tab == TAB_CANCELLED_ORDERS and len(source_row) > C["Status_Details"]:
+                cur_det = str(source_row[C["Status_Details"]]).strip()
+                if "Relisted" not in cur_det:
+                    new_det = f"{cur_det} | Relisted to Active Listings" if cur_det else "Relisted to Active Listings"
+                    col_c = col_letter(C["Status_Details"])
+                    ws_source.batch_update([{"range": f"{col_c}{source_sheet_row}", "values": [[new_det]]}])
 
         if source_tab == TAB_SOLD_ITEMS or dest_tab == TAB_SOLD_ITEMS:
             try:
