@@ -215,3 +215,44 @@ def test_completed_email_price_is_split_across_bundle_items():
     prices = [float(r[S["Sold_Price"]]) for r in rows]
     assert sum(prices) == pytest.approx(10.0)
     assert len(prices) == 2
+
+
+def test_email_sync_does_not_duplicate_or_overwrite_custom_cancelled_loss(synced):
+    eng, sh, _ = synced
+    ws_cancelled = sh.worksheet("Cancelled_Orders")
+
+    # Locate the 5-tee cancelled bundle row
+    canc_rows = ws_cancelled.rows[1:]
+    bundle_row_idx = None
+    for idx, r in enumerate(canc_rows, start=2):
+        if str(r[C["Item_Title"]]).startswith("Bundle 5 items"):
+            bundle_row_idx = idx
+            break
+    assert bundle_row_idx is not None
+
+    # User manually edits this cancelled bundle to $0.00 loss with custom explanation
+    eng.manual_update_row(
+        tab_name="Cancelled_Orders",
+        sheet_row=bundle_row_idx,
+        updated_fields={
+            "Lost_Revenue": 0.0,
+            "Status_Details": "Customer cancelled to add items; re-ordered larger bundle ($0 loss)",
+        },
+    )
+
+    # Re-run email sync over all events
+    plan = build_email_plan(EVENTS, eng.read_sheet_state())
+
+    # Must NOT create duplicate appends in Cancelled_Orders
+    assert len(plan.cancelled_appends) == 0
+
+    # Apply the plan (if any non-conflicting updates)
+    eng.apply_sync_plan(plan, eng.read_sheet_state())
+
+    # Verify $0.00 loss and custom note are completely intact
+    updated_bundle = ws_cancelled.rows[bundle_row_idx - 1]
+    assert float(updated_bundle[C["Lost_Revenue"]]) == 0.0
+    assert "Customer cancelled to add items; re-ordered larger bundle ($0 loss)" in updated_bundle[C["Status_Details"]]
+    # Still 6 cancellations total, none duplicated
+    assert len(ws_cancelled.rows) - 1 == 6
+

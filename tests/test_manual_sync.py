@@ -241,3 +241,44 @@ def test_manual_in_place_update(manual_engine_and_sh):
     assert row[L["Title"]] == "Custom Updated Title"
     assert row[L["Current_Price"]] == 39.99
     assert row[L["Lot_ID"]] == "LOT-999"
+
+
+def test_manual_update_cancelled_in_place_preserves_row_and_sets_zero_loss(manual_engine_and_sh):
+    eng, sh = manual_engine_and_sh
+    ws_cancelled = sh.worksheet(TAB_CANCELLED_ORDERS)
+
+    # Seed a cancelled order row
+    ws_cancelled.rows.append([
+        "CAN-1001",
+        "SKU-2001",
+        "Bundle 3 items",
+        "Nike",
+        "Bundle",
+        "45.00",
+        "45.00",
+        "2026-10-20",
+        "Order cancelled by buyer",
+        "buyer_alice",
+        "https://www.vinted.com/items/bundle-1",
+        "Email",
+    ])
+
+    # In-place update: adjust to $0.00 loss and add explanation note
+    eng.manual_update_row(
+        tab_name=TAB_CANCELLED_ORDERS,
+        sheet_row=2,
+        updated_fields={
+            "Lost_Revenue": 0.0,
+            "Status_Details": "Customer re-ordered larger bundle, 0 loss",
+            "Order_ID": "CAN-BUN-NEW",
+        },
+    )
+
+    # Verify row was updated in-place and not duplicated or removed
+    assert len(ws_cancelled.rows) == 2
+    row = ws_cancelled.rows[1]
+    assert row[C["Order_ID"]] == "CAN-BUN-NEW"
+    assert row[C["Item_Title"]] == "Bundle 3 items"
+    assert row[C["Lost_Revenue"]] == 0.0
+    assert row[C["Status_Details"]] == "Customer re-ordered larger bundle, 0 loss"
+

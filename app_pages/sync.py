@@ -947,8 +947,7 @@ def render_sync_page():
             since_date = None
             until_date = None
             if selected_date_filter == default_scan_label:
-                # Use 1 day prior so Gmail's exclusive 'after:' operator includes the scan date
-                since_date = (last_scan_dt - timedelta(days=1)) if last_scan_dt else None
+                since_date = last_scan_dt if last_scan_dt else None
             elif selected_date_filter.startswith("All Time"):
                 since_date = None
             elif selected_date_filter == "Past 30 Days":
@@ -1345,9 +1344,9 @@ def render_sync_page():
                         ]
                     else:  # Cancelled_Orders
                         action_opts = [
+                            "Update Cancelled Details in Current Sheet",
                             "Move to Active Listings (Relist)",
                             "Move to Sold_Items",
-                            "Update Cancelled Details",
                         ]
 
                     chosen_action = st.selectbox("Action to Perform", options=action_opts, key="chosen_action_manual")
@@ -1370,6 +1369,18 @@ def render_sync_page():
                                 existing_price = parse_price(sel_item.get("Sold Price") or sel_item.get("Asking Price", 0.0))
                                 new_sold_price = st.number_input("Sold Price ($)", value=existing_price, min_value=0.0, step=1.0, format="%.2f")
                                 new_sale_date = st.date_input("Sale Date", value=datetime.today().date())
+                            elif current_tab_name == TAB_CANCELLED_ORDERS:
+                                existing_loss = parse_price(sel_item.get("Lost Revenue", 0.0))
+                                new_lost_revenue = st.number_input(
+                                    "Lost Revenue ($)",
+                                    value=existing_loss,
+                                    min_value=0.0,
+                                    step=1.0,
+                                    format="%.2f",
+                                    help="Set to $0.00 if the order was replaced by a bundle re-order or re-purchased.",
+                                )
+                                new_sold_price = new_lost_revenue
+                                new_sale_date = datetime.today().date()
                             else:
                                 existing_asking = parse_price(sel_item.get("Asking Price") or sel_item.get("Posted Price", 0.0))
                                 new_asking_price = st.number_input("Asking / Posted Price ($)", value=existing_asking, min_value=0.0, step=1.0, format="%.2f")
@@ -1386,7 +1397,7 @@ def render_sync_page():
                                 )
                                 new_status = st.selectbox("Status", options=["Sold", "Sold (External)", "Reserved"], index=0)
                                 new_order_id = st.text_input("Order ID / Transaction Ref", value=str(sel_item.get("Order ID", "")), placeholder="e.g. EBAY-10928, POSH-4412, or empty")
-                            elif "Cancelled" in chosen_action:
+                            elif current_tab_name == TAB_CANCELLED_ORDERS or "Cancelled" in chosen_action:
                                 new_platform = "Vinted"
                                 new_status = "Cancelled"
                                 new_order_id = st.text_input("Order ID", value=str(sel_item.get("Order ID", "")), placeholder="e.g. CAN-1001")
@@ -1427,7 +1438,7 @@ def render_sync_page():
                                         "title": new_title.strip(),
                                         "lot": new_lot,
                                         "sold_price": new_sold_price,
-                                        "current_price": new_sold_price if is_selling else new_asking_price,
+                                        "current_price": new_sold_price if is_selling else (new_lost_revenue if current_tab_name == TAB_CANCELLED_ORDERS else new_asking_price),
                                         "sale_date": new_sale_date.strftime("%Y-%m-%d"),
                                         "platform": new_platform,
                                         "status": new_status,
@@ -1449,7 +1460,7 @@ def render_sync_page():
                                         update_dict = {}
                                         if new_title != sel_title:
                                             update_dict["Title" if "Title" in headers_map else "Item_Title"] = new_title
-                                        if new_lot != sel_lot:
+                                        if new_lot != sel_lot and "Lot_ID" in headers_map:
                                             update_dict["Lot_ID"] = new_lot
                                         if is_selling:
                                             update_dict["Sold_Price"] = new_sold_price
@@ -1457,12 +1468,17 @@ def render_sync_page():
                                             update_dict["Platform"] = new_platform
                                             if new_order_id:
                                                 update_dict["Order_ID"] = new_order_id
+                                        elif current_tab_name == TAB_CANCELLED_ORDERS:
+                                            if "Lost_Revenue" in headers_map:
+                                                update_dict["Lost_Revenue"] = new_lost_revenue
+                                            if new_order_id and "Order_ID" in headers_map:
+                                                update_dict["Order_ID"] = new_order_id
                                         else:
                                             if "Current_Price" in headers_map:
                                                 update_dict["Current_Price"] = new_asking_price
-                                        if new_status:
+                                        if new_status and "Status" in headers_map:
                                             update_dict["Status"] = new_status
-                                        if new_notes and "Status_Details" in headers_map:
+                                        if "Status_Details" in headers_map:
                                             update_dict["Status_Details"] = new_notes
 
                                         manual_engine.manual_update_row(

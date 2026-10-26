@@ -804,11 +804,20 @@ def build_email_plan(events: List[Any], state: SheetState, default_lot: str = ""
             return cancel_by_oid[oid]
         if txn:
             for i, r in enumerate(cancelled):
-                if not _blank(r) and txn in str(r[C["Status_Details"]]):
+                if not _blank(r) and (txn in str(r[C["Status_Details"]]) or txn == str(r[C["Order_ID"]]).strip()):
                     return i
         t, n = _norm(items[0]), len(items)
+        # Priority 1: match un-dated row
         for i, r in enumerate(cancelled):
             if i in used_cancel_rows or _blank(r) or str(r[C["Cancellation_Date"]]).strip():
+                continue
+            rt = _norm(r[C["Item_Title"]])
+            mb = re.match(r"^bundle (\d+) items", rt)
+            if (n > 1 and mb and int(mb.group(1)) == n) or rt == t:
+                return i
+        # Priority 2: match already-dated row (for idempotent re-scan)
+        for i, r in enumerate(cancelled):
+            if i in used_cancel_rows or _blank(r):
                 continue
             rt = _norm(r[C["Item_Title"]])
             mb = re.match(r"^bundle (\d+) items", rt)
@@ -826,7 +835,7 @@ def build_email_plan(events: List[Any], state: SheetState, default_lot: str = ""
         if ri is not None:
             used_cancel_rows.add(ri)
             r = cancelled[ri]
-            done = bool(txn) and txn in str(r[C["Status_Details"]])
+            done = (bool(txn) and txn in str(r[C["Status_Details"]])) or bool(str(r[C["Cancellation_Date"]]).strip())
             need = 0 if done else max(0, len(items) - len(_ITEM_ID_RE.findall(str(r[C["Vinted_URL"]]))))
         else:
             need = len(items)
@@ -961,8 +970,10 @@ def build_email_plan(events: List[Any], state: SheetState, default_lot: str = ""
             if not str(r[C["Cancellation_Date"]]).strip():
                 plan.cancelled_cell_updates.append((ri + 2, C["Cancellation_Date"], c_date))
                 changes.append("date")
-            if txn and txn not in str(r[C["Status_Details"]]):
-                plan.cancelled_cell_updates.append((ri + 2, C["Status_Details"], detail))
+            cur_details = str(r[C["Status_Details"]]).strip()
+            if txn and txn not in cur_details:
+                new_det = f"{cur_details} | Txn {txn}" if cur_details else detail
+                plan.cancelled_cell_updates.append((ri + 2, C["Status_Details"], new_det))
                 changes.append("details")
             if oid and not str(r[C["Order_ID"]]).strip():
                 plan.cancelled_cell_updates.append((ri + 2, C["Order_ID"], oid))
